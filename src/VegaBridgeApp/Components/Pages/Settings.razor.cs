@@ -22,7 +22,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private string? _selectedUuid;
 
     private string? StatusMessage { get; set; }
-    protected string? LastReceivedFrame { get; set; }
     private List<string> ReceivedFrames { get; } = [];
     private IBleDevicePlugin? ActivePlugin => BleManager.ActivePlugin;
     protected IBleDevicePlugin? ManualPlugin { get; set; }
@@ -56,8 +55,21 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         if (hasAccess)
         {
             // Load already-paired devices (primary flow on iOS)
-            // The user already paired the motorcycle in Settings > Bluetooth
-            await BleManager.LoadPairedPeripheralsAsync();
+            BleManager.LoadPairedPeripherals();
+
+            // iOS specific: Start scanning to find bonded devices 
+            // as they often don't appear in LoadPairedPeripherals
+            BleManager.StartScanning();
+
+            // Auto-stop scanning after 15 seconds to save battery
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(15000);
+                if (ConnectionState != BleConnectionState.Connected)
+                {
+                    await InvokeAsync(() => BleManager.StopScanning());
+                }
+            });
         }
     }
     

@@ -173,4 +173,5 @@
   <data name="PluginOverride" xml:space="preserve"><value>Manual override for device-to-plugin mapping.</value></data>
   <data name="RegisteredPlugins" xml:space="preserve"><value>Registered Hardware Plugins:</value></data>
   <data name="IncomingFrames" xml:space="preserve"><value>Incoming Frames</value></data>
+  <data name="BLEScanning" xml:space="preserve"><value>Scanning for devices…</value></data>
 </root>
