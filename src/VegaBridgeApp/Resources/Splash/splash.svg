@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Bold navigation chevron (Vega "V") -->
+  <path d="M 290 250 L 512 620 L 734 250"
+        fill="none" stroke="#FFFFFF" stroke-width="100"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Route line below the chevron -->
+  <line x1="402" y1="780" x2="622" y2="780"
+        stroke="#FFFFFF" stroke-width="32" stroke-linecap="round"
+        stroke-dasharray="50 50" opacity="0.85"/>
+
+  <!-- Endpoints -->
+  <circle cx="402" cy="780" r="22" fill="#FFFFFF" opacity="0.95"/>
+  <circle cx="622" cy="780" r="22" fill="#FFFFFF" opacity="0.95"/>
+</svg>

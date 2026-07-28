@@ -1,0 +1,42 @@
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">GPX importieren</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-4">
+            Die GPX-Datei enthält sowohl einen Track als auch eine Route.
+            Was möchtest du importieren?
+        </MudText>
+
+        <MudRadioGroup T="string" @bind-Value="_choice">
+            <MudStack Spacing="2">
+                <MudPaper Class="pa-3" Style="@(_choice == "track" ? "border: 2px solid var(--mud-palette-primary);" : "")" Elevation="1">
+                    <MudRadio Value="@("track")" Color="Color.Primary">
+                        <MudStack Spacing="0">
+                            <MudText Typo="Typo.subtitle2">Track (@ParseResult.TrackPointCount Punkte)</MudText>
+                            <MudText Typo="Typo.caption">@ParseResult.TrackName</MudText>
+                        </MudStack>
+                    </MudRadio>
+                </MudPaper>
+
+                <MudPaper Class="pa-3" Style="@(_choice == "route" ? "border: 2px solid var(--mud-palette-primary);" : "")" Elevation="1">
+                    <MudRadio Value="@("route")" Color="Color.Primary">
+                        <MudStack Spacing="0">
+                            <MudText Typo="Typo.subtitle2">Route (@ParseResult.RoutePointCount Punkte)</MudText>
+                            <MudText Typo="Typo.caption">@ParseResult.RouteName</MudText>
+                        </MudStack>
+                    </MudRadio>
+                </MudPaper>
+            </MudStack>
+        </MudRadioGroup>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel">Abbrechen</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit"
+                   Disabled="@(string.IsNullOrEmpty(_choice))">
+            Importieren
+        </MudButton>
+    </DialogActions>
+</MudDialog>

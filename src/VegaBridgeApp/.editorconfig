@@ -1,0 +1,2 @@
+[*.cs]
+dotnet_diagnostic.BL0005.severity = none

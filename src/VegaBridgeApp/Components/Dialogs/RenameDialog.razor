@@ -1,0 +1,21 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Title</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body1" Class="mb-4">@ContentText</MudText>
+        <MudTextField @bind-Value="_newName"
+                      Label="@L["Name"]"
+                      Variant="Variant.Outlined"
+                      FullWidth="true"
+                      Immediate="true"
+                      Autofocus="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel">@L["Cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="@Color" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_newName))">
+            @ButtonText
+        </MudButton>
+    </DialogActions>
+</MudDialog>

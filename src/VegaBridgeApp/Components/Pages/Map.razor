@@ -1,0 +1,323 @@
+@page "/map"
+@page "/map/{routeId}"
+@using VegaBridgeApp.Models.Utils
+@using VegaBridgeApp.Services.Routes
+@using VegaBridgeApp.Services.Navigation
+@inject IGeocodingService GeocodingService
+@inject IValhallaClient ValhallaClient
+@inject IRouteStorageService RouteStorage
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject GpsService Gps
+@inject NavigationService NavService
+
+
+<MudContainer Class="px-0 mx-0 pb-0 mb-0" Style="max-width: none; width: 100%;">
+    <div style="position: relative; min-height: 100vh; width: 100%;">
+        
+        <!-- Layer 0: Map (Background) -->
+        <div style="position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%;">
+            <OpenStreetMap @ref="_map"
+                           Zoom="12" InteractionsEnabled="@(!_isLoading)"
+                           ZoomControl="false" OnRenderComplete="SetMapLoaded">
+            </OpenStreetMap>
+        </div>
+
+        <!-- Layer 1: UI Overlays -->
+        <div style="position: absolute; inset: 0; z-index: 10; pointer-events: none;">
+            
+            @if (NavService.IsNavigating)
+            {
+                <!-- Navigation Top Bar -->
+                <MudPaper Elevation="0"
+                          Square="true"
+                          Class="pa-4">
+                    <MudStack Row="true" Justify="Justify.FlexStart" AlignItems="AlignItems.Center">
+                        @if (_navManeuver != null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="mr-2">
+                                @string.Format(L["NavManeuver"], _navManeuver.Index + 1, _navManeuver.Total)
+                            </MudChip>
+                        }
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                            @string.Format(L["Accuracy"], Gps.CurrentAccuracy)
+                        </MudChip>
+                    </MudStack>
+                    <MudDivider Class="mb-8 mt-4"/>
+                    
+                    @if (_navManeuver != null)
+                    {
+                        <MudStack Spacing="0">
+                            <!-- Icon + Label row -->
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.Center" Spacing="1">
+                                <MudIcon Size="Size.Small" Icon="@GetTurnIcon(_navManeuver.BLEIcon)" Color="Color.Inherit"/>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@GetTurnLabel(_navManeuver.BLEIcon)</MudChip>
+                                @if (_navManeuver.RoundaboutExitCount is > 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">
+                                        @if (_navManeuver.RoundaboutExit.HasValue)
+                                        {
+                                            @($"{_navManeuver.RoundaboutExit}/{_navManeuver.RoundaboutExitCount}")
+                                        }
+                                        else
+                                        {
+                                            @($"{_navManeuver.RoundaboutExitCount}")
+                                        }
+                                    </MudChip>
+                                }
+                            </MudStack>
+
+                            <!-- Instruction -->
+                            <MudText Typo="Typo.subtitle1" Align="Align.Center" Class="mud-text-primary">
+                                @_navManeuver.Instruction
+                            </MudText>
+
+                            <!-- Distance -->
+                            @if (_navStatus != null)
+                            {
+                                <MudText Typo="Typo.h5" Align="Align.Center" Color="Color.Info">
+                                    @string.Format(L["Meter"], _navStatus.DistanceToNextTurnM)
+                                </MudText>
+                            }
+                        </MudStack>
+                    }
+                </MudPaper>
+
+                <!-- Speed overlay -->
+                <div Style="position: absolute; top: 250px; right: 16px; z-index: 150; pointer-events: auto; text-align: right; text-shadow: 0 2px 8px rgba(0,0,0,0.7);">
+                    <MudText Typo="Typo.h2" Style="font-size: 3rem; font-weight: 700; line-height: 1; letter-spacing: -2px;">
+                        @Gps.CurrentSpeedKmh.ToString("F0")
+                    </MudText>
+                    <MudText Typo="Typo.h6" Class="mud-text-secondary">@L["NavKph"]</MudText>
+                </div>
+                
+                <!-- Progress bar -->
+                @if (_navProgress > 0)
+                {
+                    <div Style="position: absolute; bottom: 80px; left: 0; right: 0; z-index: 150; pointer-events: auto;" Class="px-3">
+                        <MudStack Spacing="0">
+                            <MudProgressLinear Value="@((int)_navProgress)" Color="Color.Primary" Size="Size.Small"/>
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" Style="margin-top: -2px;">
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    @string.Format(L["Km"], _navStatus?.RemainingDistanceKm)
+                                </MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    @FormatTime(_navStatus?.RemainingTimeMin)
+                                </MudText>
+                            </MudStack>
+                        </MudStack>
+                    </div>
+                }
+                
+                <!-- Skip Waypoint button -->
+                <MudFab
+                    Color="Color.Primary"
+                    StartIcon="@Icons.Material.Filled.SkipNext"
+                    Size="Size.Small"
+                    Style="position: absolute; bottom: 300px; right: 16px; z-index: 200; pointer-events: auto;"
+                    OnClick="@SkipWaypoint"/>
+
+                <!-- Stop Navigation button -->
+                <MudFab
+                    Color="Color.Primary"
+                    StartIcon="@Icons.Material.Filled.Stop"
+                    Size="Size.Small"
+                    Style="position: absolute; bottom: 250px; right: 16px; z-index: 200; pointer-events: auto;"
+                    OnClick="@ExitNavigation"/>
+            }
+            
+            @if (!NavService.IsNavigating)
+            {
+                <!-- Route Planning Panel -->
+                <MudPaper Elevation="0"
+                          Square="true"
+                          Class="pa-4"
+                          Style="position: absolute; top: 0; left: 0; right: 0; z-index: 150; pointer-events: auto; max-width: 500px; margin: 0 auto;">
+
+                    @if (Gps.IsTracking)
+                    {
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="mr-2">
+                                <MudText Typo="Typo.caption">GPS @FormatCoordinate(Gps.LastReading?.Position.Latitude, Gps.LastReading?.Position.Longitude)</MudText>
+                            </MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                                <MudText Typo="Typo.caption">@string.Format(L["Kmh"], Gps.CurrentSpeedKmh)</MudText>
+                            </MudChip>
+                            <MudText Typo="Typo.caption" Class="text-medium-emphasis ml-auto">@string.Format(L["Accuracy"], Gps.CurrentAccuracy)</MudText>
+                        </MudStack>
+                    }
+
+                    <div style="overflow-y: auto; max-height: 180px;" class="pr-2">
+
+                        <MudAutocomplete T="GeoResult"
+                                         Label="@L["Start"]"
+                                         Variant="Variant.Outlined"
+                                         Margin="Margin.Dense"
+                                         Adornment="Adornment.Start"
+                                         AdornmentIcon="@Icons.Material.Filled.Home"
+                                         AdornmentColor="Color.Secondary"
+                                         Class="mb-3"
+                                         @bind-Value="_startLocation"
+                                         SearchFunc="@SearchAsync"
+                                         OpenOnFocus="true"
+                                         Strict="true"
+                                         DebounceInterval="300"
+                                         Clearable="true"
+                                         ItemDisabledFunc="@(loc => loc?.Type == "separator")">
+                            <ItemTemplate>
+                                @if (context?.Type == "separator")
+                                {
+                                    <MudDivider Class="my-1"/>
+                                }
+                                else
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                        @if (context?.Type is "current" or "home")
+                                        {
+                                            <MudIcon Size="Size.Small"
+                                                     Icon="@(context?.Type == "current" ? Icons.Material.Filled.MyLocation : Icons.Material.Filled.Home)"
+                                                     Color="Color.Primary"/>
+                                        }
+                                        <MudText Typo="@(context?.Type is "current" or "home" ? Typo.subtitle2 : Typo.body2)"
+                                                 Color="@(context?.Type is "current" or "home" ? Color.Primary : Color.Inherit)"
+                                                 Style="@(context?.Type is "current" or "home" ? "font-weight: 600;" : "")">
+                                            @context?.Label
+                                        </MudText>
+                                    </MudStack>
+                                }
+                            </ItemTemplate>
+                        </MudAutocomplete>
+
+
+                        @foreach ((WaypointViewModel waypoint, int index) in _waypoints.Select((wp, i) => (wp, i)))
+                        {
+                            <MudStack Row="true">
+
+                                <MudAutocomplete @key="waypoint.Id" T="GeoResult"
+                                                 Label="@L["Waypoint"]"
+                                                 Variant="Variant.Outlined"
+                                                 Adornment="Adornment.Start"
+                                                 AdornmentIcon="@Icons.Material.Filled.WrongLocation"
+                                                 AdornmentColor="Color.Error"
+                                                 OnAdornmentClick="@(() => RemoveWaypoint(index))"
+                                                 Class="mb-3"
+                                                 Value="waypoint.Location"
+                                                 ValueChanged="@(val => waypoint.Location = val)"
+                                                 SearchFunc="@SearchAsync"
+                                                 DebounceInterval="300"
+                                                 MinCharacters="3"
+                                                 Clearable="true"/>
+
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                               Size="Size.Small"
+                                               OnClick="() => MoveWaypoint(waypoint, -1)"
+                                               Disabled="@(index == 0)"/>
+
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                                               Size="Size.Small"
+                                               OnClick="() => MoveWaypoint(waypoint, 1)"
+                                               Disabled="@(index == _waypoints.Count - 1)"/>
+
+                            </MudStack>
+                        }
+
+                        <MudPaper Class="border-dashed border-2 pa-2 mb-4" Elevation="0">
+                            <MudStack Row="true" AlignItems="AlignItems.Center">
+                                <MudIconButton Class="ml-1" Size="Size.Small" Icon="@Icons.Material.Outlined.AddLocation" OnClick="@AddWaypoint"></MudIconButton>
+                                <MudText Typo="Typo.body1" Class="mud-text-disabled">@L["AddWaypoint"]</MudText>
+                            </MudStack>
+                        </MudPaper>
+
+                        <MudAutocomplete T="GeoResult"
+                                         Label="@L["Destination"]"
+                                         Variant="Variant.Outlined"
+                                         Margin="Margin.Dense"
+                                         Adornment="Adornment.Start"
+                                         AdornmentIcon="@Icons.Material.Filled.Place"
+                                         AdornmentColor="Color.Secondary"
+                                         Class="mb-3"
+                                         @bind-Value="_destinationLocation"
+                                         SearchFunc="@SearchAsync"
+                                         OpenOnFocus="true"
+                                         Strict="true"
+                                         DebounceInterval="300"
+                                         Clearable="true"
+                                         ItemDisabledFunc="@((GeoResult loc) => loc?.Type == "separator")">
+                            <ItemTemplate>
+                                @if (context?.Type == "separator")
+                                {
+                                    <MudDivider Class="my-1"/>
+                                }
+                                else
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                        @if (context?.Type is "current" or "home")
+                                        {
+                                            <MudIcon Size="Size.Small"
+                                                     Icon="@(context?.Type == "current" ? Icons.Material.Filled.MyLocation : Icons.Material.Filled.Home)"
+                                                     Color="Color.Primary"/>
+                                        }
+                                        <MudText Typo="@(context?.Type is "current" or "home" ? Typo.subtitle2 : Typo.body2)"
+                                                 Color="@(context?.Type is "current" or "home" ? Color.Primary : Color.Inherit)"
+                                                 Style="@(context?.Type is "current" or "home" ? "font-weight: 600;" : "")">
+                                            @context?.Label
+                                        </MudText>
+                                    </MudStack>
+                                }
+                            </ItemTemplate>
+                        </MudAutocomplete>
+
+                    </div>
+
+                    <MudLoadingButton FullWidth="true"
+                                      Class="mt-2"
+                                      Variant="Variant.Filled"
+                                      Color="Color.Primary"
+                                      StartIcon="@Icons.Material.Filled.Start"
+                                      Disabled="@(_startLocation is null || _destinationLocation is null || _waypoints!.Any(x => x.Location is null))"
+                                      bind-Loading="@_isLoading"
+                                      OnClick="@CalculateRoute">
+                        @L["CalculateRoute"]
+                    </MudLoadingButton>
+
+                    @if (_currentRouteResponse != null)
+                    {
+                        <MudButton FullWidth="true"
+                                   Class="mt-2"
+                                   Variant="Variant.Filled"
+                                   Color="Color.Success"
+                                   StartIcon="@Icons.Material.Filled.Navigation"
+                                   OnClick="@StartNavigation">
+                            @L["StartNavigation"]
+                        </MudButton>
+
+                        <MudLoadingButton FullWidth="true"
+                                          Class="mt-2"
+                                          Variant="Variant.Outlined"
+                                          Color="Color.Secondary"
+                                          StartIcon="@Icons.Material.Filled.Save"
+                                          bind-Loading="@_isSaving"
+                                          OnClick="@SaveCurrentRoute">
+                            @L["SaveRoute"]
+                        </MudLoadingButton>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_errorMessage))
+                    {
+                        <MudAlert Severity="Severity.Error" Class="mt-2" Dense="true">
+                            @_errorMessage
+                        </MudAlert>
+                    }
+
+                </MudPaper>
+            }
+            
+            <!-- My Location FAB (always visible) -->
+            <MudFab Color="@(Gps.IsTracking ? Color.Primary : Color.Surface)"
+                    StartIcon="@(Gps.IsTracking ? Icons.Material.Filled.MyLocation : Icons.Material.Outlined.MyLocation)"
+                    Size="Size.Small"
+                    Style="position: absolute; bottom: 150px; right: 16px; z-index: 200; pointer-events: auto;"
+                    OnClick="@OnFabClicked"/>
+        </div>
+    </div>
+</MudContainer>

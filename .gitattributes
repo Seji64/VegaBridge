@@ -1,0 +1,9 @@
+## Auto-detect text files, normalize line endings
+* text=auto
+
+## Binary files
+*.pklg binary
+*.png binary
+*.jpg binary
+*.svg binary
+*.ico binary

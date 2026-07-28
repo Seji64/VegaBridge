@@ -1,0 +1,50 @@
+﻿@inherits LayoutComponentBase
+@using VegaBridgeApp.Themes
+
+
+<MudThemeProvider @ref="_mudThemeProvider" Theme="@_theme" @bind-IsDarkMode="_isDarkMode"/>
+<MudPopoverProvider/>
+<MudDialogProvider
+    FullWidth="true"
+    MaxWidth="MaxWidth.Medium"
+    BackdropClick="false"
+    Position="DialogPosition.Center"/>
+<MudSnackbarProvider/>
+
+<MudLayout>
+    <MudMainContent>
+        @Body
+    </MudMainContent>
+    <MudAppBar Color="Color.Primary" Bottom="true" Fixed="true" Class="pb-2">
+        <div class="d-flex justify-space-around align-center flex-grow-1">
+            <div class="d-flex flex-column align-center">
+                <MudIconButton Icon="@Icons.Material.Filled.Route" Color="Color.Inherit" Size="Size.Medium" Href="/"/>
+                <MudText Class="mt-n2" Typo="Typo.caption" Color="Color.Inherit">@L["Routes"]</MudText>
+            </div>
+            <div class="d-flex flex-column align-center">
+                <MudIconButton Icon="@Icons.Material.Filled.Map" Color="Color.Inherit" Size="Size.Medium" Href="/map"/>
+                <MudText Class="mt-n2" Typo="Typo.caption" Color="Color.Inherit">@L["Map"]</MudText>
+            </div>
+            <div class="d-flex flex-column align-center">
+                <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Size="Size.Medium" Href="/settings"/>
+                <MudText Class="mt-n2" Typo="Typo.caption" Color="Color.Inherit">@L["Settings"]</MudText>
+            </div>
+        </div>
+    </MudAppBar>
+</MudLayout>
+
+@code {
+    private readonly MudTheme _theme = VegaTheme.Create();
+    private bool _isDarkMode;
+    private MudThemeProvider? _mudThemeProvider;
+    
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (_mudThemeProvider != null) _isDarkMode = await _mudThemeProvider.GetSystemDarkModeAsync();
+            StateHasChanged();
+        }
+    }
+    
+}

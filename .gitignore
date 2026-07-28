@@ -1,0 +1,55 @@
+## .NET / MAUI
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.binlog
+*.ipa
+*.apk
+*.app
+*.dSYM
+
+## Rider / VS / VS Code
+.idea/
+.vs/
+.vscode/
+*.sln.DotSettings.user
+*.DotSettings.user
+
+## Rider / VS / VS Code
+.idea/
+.vs/
+.vscode/
+*.sln.DotSettings.user
+*.DotSettings.user
+
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+## Xcode / iOS
+*.xcarchive
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.mobileprovision
+*.entitlements
+
+## NuGet
+*.nupkg
+**/packages/*
+
+## Test results
+TestResults/
+*.trx
+*.coverage
+
+## Misc
+*.log
+*.orig
+
+## Reverse engineering artifacts (decompiled third-party code)
+ReverseEngineering/MVRide/jadx_output/
