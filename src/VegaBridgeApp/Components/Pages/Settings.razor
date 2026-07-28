@@ -59,7 +59,16 @@
         <MudCard Elevation="2" Style="border-radius: 12px;">
             <MudCardHeader>
                 <CardHeaderContent>
+                <MudStack Row="true" AlignItems="AlignItems.Center">
                     <MudText Typo="Typo.h6">@L["DiscoveredDevices"]</MudText>
+                    @if (IsScanning)
+                    {
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="ml-2" Style="display: inline-flex;">
+                            <MudProgressCircular Color="Color.Info" Size="Size.Small" Indeterminate="true" />
+                            <MudText Typo="Typo.caption" Color="Color.Info" Class="ml-1">@L["BLEScanning"]</MudText>
+                        </MudStack>
+                    }
+                </MudStack>
                 </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
@@ -76,11 +85,12 @@
                 {
                     @foreach (BleDeviceInfo device in Devices)
                     {
-                        <MudPaper Elevation="@(SelectedDevice?.Uuid == device.Uuid ? 3 : 0)"
-                                  Class="pa-2 mb-2"
-                                  Style="border-radius: 8px; cursor: pointer;"
-                                  OnClick="@(() => SelectedDevice = device)">
-                            <MudStack Spacing="0">
+                        <MudButton Variant="@(SelectedDevice?.Uuid == device.Uuid ? Variant.Filled : Variant.Outlined)" 
+                                   Color="@(SelectedDevice?.Uuid == device.Uuid ? Color.Primary : Color.Default)"
+                                   OnClick="@(() => SelectedDevice = device)" 
+                                   Class="pa-4 mb-2"
+                                   Style="text-align: left; width: 100%; justify-content: flex-start;">
+                            <MudStack Spacing="0" Style="width: 100%;">
                                 <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
                                     <MudText Typo="Typo.body2" Style="font-weight: 600;">@device.Name</MudText>
                                     <MudChip T="string" Size="Size.Small"
@@ -113,7 +123,7 @@
                                     }
                                 </MudStack>
                             </MudStack>
-                        </MudPaper>
+                        </MudButton>
                     }
                 }
             </MudCardContent>
@@ -218,7 +228,7 @@
                                  @bind-Value="_offRouteThreshold"
                                  @bind-Value:after="SaveOffRouteThreshold"
                                  Min="5" Max="200"
-                                 HelpText="@L["OffRouteHelp"]"
+                                 HelperText="@L["OffRouteHelp"]"
                                  Class="mb-4" />
 
                 <MudText Typo="Typo.subtitle2" Class="mb-2">@L["HomeSection"]</MudText>

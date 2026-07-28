@@ -13,6 +13,8 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     private List<BleDeviceInfo> Devices { get; set; } = [];
     private BleConnectionState ConnectionState { get; set; } = BleConnectionState.Unknown;
+    private bool _isScanning;
+    public bool IsScanning => _isScanning;
 
     private BleDeviceInfo? SelectedDevice
     {
@@ -59,6 +61,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
             // iOS specific: Start scanning to find bonded devices 
             // as they often don't appear in LoadPairedPeripherals
+            _isScanning = true;
             BleManager.StartScanning();
 
             // Auto-stop scanning after 15 seconds to save battery
@@ -67,7 +70,11 @@ public partial class Settings : ComponentBase, IAsyncDisposable
                 await Task.Delay(15000);
                 if (ConnectionState != BleConnectionState.Connected)
                 {
-                    await InvokeAsync(() => BleManager.StopScanning());
+                    await InvokeAsync(() => 
+                    {
+                        _isScanning = false;
+                        BleManager.StopScanning();
+                    });
                 }
             });
         }
@@ -110,6 +117,13 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         _ = InvokeAsync(() =>
         {
             ConnectionState = state;
+
+            if (state == BleConnectionState.Connected)
+            {
+                _isScanning = false;
+                BleManager.StopScanning();
+            }
+
             StatusMessage = state switch
             {
                 BleConnectionState.Connected => L["BLEConnected"],
@@ -145,7 +159,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             ReceivedFrames.Add(frame);
             if (ReceivedFrames.Count > 100)
                 ReceivedFrames.RemoveAt(0);
-            LastReceivedFrame = frame;
             StateHasChanged();
         });
     }

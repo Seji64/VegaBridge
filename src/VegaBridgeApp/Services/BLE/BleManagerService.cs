@@ -395,11 +395,11 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
             {
                 _dataWriteCharInfo = info;
             }
-            // 3. Heuristic Fallback: If no data channel yet, any characteristic that supports Write-without-Response
-            else if (_dataWriteCharInfo == null && info.CanWrite() && !info.Properties.HasFlag(BleCharacteristicProperties.Write))
+            // 3. Heuristic Fallback: If no data channel yet, any characteristic that supports writing
+            else if (_dataWriteCharInfo == null && info.CanWrite())
             {
-                // Note: Shiny's properties can be tricky. Usually 'WriteWithoutResponse' is a separate flag.
-                // If the property is WriteWithoutResponse and not WriteWithResponse, it's our data channel.
+                // Heuristic: if we can't find the specific data channel UUID, 
+                // we use the first writable characteristic we find.
                 _dataWriteCharInfo = info;
             }
             // 4. Read Channel
