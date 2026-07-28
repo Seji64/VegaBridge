@@ -22,9 +22,17 @@ public interface IBleDevicePlugin
     string ServiceUuid { get; }
 
     /// <summary>
-    /// GATT characteristic UUID for writing data.
+    /// GATT characteristic UUID for writing control data (e.g. Auth, Keepalive).
+    /// Usually supports Write-with-Response.
     /// </summary>
-    string WriteCharacteristicUuid { get; }
+    string ControlWriteCharacteristicUuid { get; }
+
+    /// <summary>
+    /// GATT characteristic UUID for writing high-frequency data (e.g. Navigation).
+    /// Usually supports Write-without-Response (Command).
+    /// If null, the system will attempt to find any writable characteristic that supports commands.
+    /// </summary>
+    string? DataWriteCharacteristicUuid { get; }
 
     /// <summary>
     /// GATT characteristic UUID for reading / subscribing to notifications.

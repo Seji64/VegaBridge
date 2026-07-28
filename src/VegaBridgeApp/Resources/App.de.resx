@@ -173,4 +173,5 @@
   <data name="PluginOverride" xml:space="preserve"><value>Manuelle Überschreibung der Gerät-zu-Plugin-Zuordnung.</value></data>
   <data name="RegisteredPlugins" xml:space="preserve"><value>Registrierte Hardware-Plugins:</value></data>
   <data name="IncomingFrames" xml:space="preserve"><value>Eingehende Frames</value></data>
+  <data name="BLEScanning" xml:space="preserve"><value>Suche nach Geräten…</value></data>
 </root>

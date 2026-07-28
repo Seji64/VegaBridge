@@ -18,12 +18,14 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
     ];
 
     private IPeripheral? _connectedPeripheral;
-    private BleCharacteristicInfo? _writeCharInfo;
+    private BleCharacteristicInfo? _controlWriteCharInfo;
+    private BleCharacteristicInfo? _dataWriteCharInfo;
     private BleCharacteristicInfo? _readCharInfo;
     private IBleDevicePlugin? _activePlugin;
 
     private IDisposable? _scanSub;
     private IDisposable? _notifySub;
+    private System.Timers.Timer? _keepaliveTimer;
 
     private readonly ConcurrentDictionary<string, (IPeripheral Peripheral, int Rssi)> _discoveredPeripherals = new();
 
@@ -142,13 +144,13 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
     /// On iOS, system-bonded devices may not appear in scans, so we must retrieve them directly.
     /// This is the primary way to find a motorcycle on iOS — call this first, scan is optional.
     /// </summary>
-    public async Task LoadPairedPeripheralsAsync()
+    public void LoadPairedPeripherals()
     {
         try
         {
             if (!bleManager.CanViewPairedPeripherals())
                 return;
-
+            
             IReadOnlyList<IPeripheral> paired = bleManager.TryGetPairedPeripherals();
             foreach (IPeripheral peripheral in paired)
             {
@@ -171,6 +173,7 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
             // Non-fatal: scanning will still find new devices
             System.Diagnostics.Debug.WriteLine($"LoadPairedPeripheralsAsync failed: {ex.Message}");
         }
+        
     }
 
     public async Task<bool> ConnectAsync(string peripheralUuid, IBleDevicePlugin? plugin = null)
@@ -208,6 +211,10 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
             ConnectionState = BleConnectionState.Connected;
             OnConnectionStateChanged?.Invoke(ConnectionState);
 
+            // ── Protocol Handshake ──────────────────────────────────────
+            await SendHelloAsync();
+            StartKeepaliveTimer();
+
             return true;
         }
         catch (BleOperationException ex)
@@ -230,6 +237,10 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
 
         try
         {
+            _keepaliveTimer?.Stop();
+            _keepaliveTimer?.Dispose();
+            _keepaliveTimer = null;
+
             _notifySub?.Dispose();
             _notifySub = null;
 
@@ -245,7 +256,8 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
         finally
         {
             _connectedPeripheral = null;
-            _writeCharInfo = null;
+            _controlWriteCharInfo = null;
+            _dataWriteCharInfo = null;
             _readCharInfo = null;
             _activePlugin = null;
             ConnectionState = BleConnectionState.Disconnected;
@@ -253,11 +265,18 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
         }
     }
 
-    public async Task SendFrameAsync(byte[] frame)
+    public async Task SendFrameAsync(byte[] frame, bool useDataChannel = false)
     {
-        if (_connectedPeripheral == null || _writeCharInfo == null)
+        if (_connectedPeripheral == null)
         {
             OnError?.Invoke("Not connected – cannot send");
+            return;
+        }
+
+        BleCharacteristicInfo? targetChar = useDataChannel ? _dataWriteCharInfo : _controlWriteCharInfo;
+        if (targetChar == null)
+        {
+            OnError?.Invoke($"{(useDataChannel ? "Data" : "Control")} characteristic not found");
             return;
         }
 
@@ -269,14 +288,10 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
                 return;
             }
 
-            if (!_writeCharInfo.CanWrite())
-            {
-                OnError?.Invoke("Characteristic is not writable");
-                return;
-            }
-
-            bool withResponse = _activePlugin.RequiresWriteWithResponse;
-            await _connectedPeripheral.WriteCharacteristic(_writeCharInfo, frame, withResponse);
+            // If using control channel, we usually want response.
+            // If using data channel, we usually want Write Command (no response).
+            bool withResponse = !useDataChannel && _activePlugin.RequiresWriteWithResponse;
+            await _connectedPeripheral.WriteCharacteristic(targetChar, frame, withResponse);
         }
         catch (BleOperationException ex)
         {
@@ -290,6 +305,9 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
 
     public void Dispose()
     {
+        _keepaliveTimer?.Stop();
+        _keepaliveTimer?.Dispose();
+
         _scanSub?.Dispose();
         _notifySub?.Dispose();
         if (_connectedPeripheral != null)
@@ -299,6 +317,52 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
     }
 
     // ── Private helpers ───────────────────────────────────────────────────
+
+    private async Task SendHelloAsync()
+    {
+        if (_activePlugin == null) return;
+
+        // Handshake: \rHELLO\x1EA\x1E<manufacturer>\x1E<mac>\r
+        // Use the MvAgusta plugin's Hello method if available
+        if (_activePlugin is MvAgustaBlePlugin mvPlugin)
+        {
+            string manufacturer = "Apple"; // Standard for iOS
+            string mac = _connectedPeripheral?.Uuid ?? "00:00:00:00:00:00";
+            byte[] frame = mvPlugin.Hello(manufacturer, mac);
+            await SendFrameAsync(frame, useDataChannel: true);
+        }
+        else
+        {
+            OnError?.Invoke("No Hello handshake implementation for this plugin");
+        }
+    }
+
+    private void StartKeepaliveTimer()
+    {
+        _keepaliveTimer?.Stop();
+        _keepaliveTimer?.Dispose();
+
+        _keepaliveTimer = new System.Timers.Timer(3000); // Every 3 seconds
+        _keepaliveTimer.Elapsed += async (s, e) => await HandleKeepaliveTick();
+        _keepaliveTimer.AutoReset = true;
+        _keepaliveTimer.Enabled = true;
+    }
+
+    private async Task HandleKeepaliveTick()
+    {
+        if (_activePlugin == null || _connectedPeripheral == null) return;
+
+        if (_activePlugin is MvAgustaBlePlugin mvPlugin)
+        {
+            // Alternating GUIDs: BA04 and C404 (from spec)
+            string guid = (DateTime.Now.Second % 2 == 0) 
+                ? "250000BA04000000" 
+                : "250000C404000000";
+            
+            byte[] frame = mvPlugin.Gui1(guid);
+            await SendFrameAsync(frame, useDataChannel: false); // Control channel
+        }
+    }
 
     private IBleDevicePlugin? DetectPlugin(IPeripheral peripheral)
     {
@@ -321,10 +385,24 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
 
         foreach (BleCharacteristicInfo info in characteristics)
         {
-            if (info.Uuid == _activePlugin.WriteCharacteristicUuid)
+            // 1. Match Control Channel (Exact UUID match)
+            if (info.Uuid == _activePlugin.ControlWriteCharacteristicUuid)
             {
-                _writeCharInfo = info;
+                _controlWriteCharInfo = info;
             }
+            // 2. Match Data Channel (Exact UUID match OR heuristic fallback)
+            else if (_activePlugin.DataWriteCharacteristicUuid != null && info.Uuid == _activePlugin.DataWriteCharacteristicUuid)
+            {
+                _dataWriteCharInfo = info;
+            }
+            // 3. Heuristic Fallback: If no data channel yet, any characteristic that supports Write-without-Response
+            else if (_dataWriteCharInfo == null && info.CanWrite() && !info.Properties.HasFlag(BleCharacteristicProperties.Write))
+            {
+                // Note: Shiny's properties can be tricky. Usually 'WriteWithoutResponse' is a separate flag.
+                // If the property is WriteWithoutResponse and not WriteWithResponse, it's our data channel.
+                _dataWriteCharInfo = info;
+            }
+            // 4. Read Channel
             else if (info.Uuid == _activePlugin.ReadCharacteristicUuid)
             {
                 _readCharInfo = info;
@@ -339,8 +417,11 @@ public class BleManagerService(IBleManager bleManager) : IDisposable
             }
         }
 
-        if (_writeCharInfo == null)
-            OnError?.Invoke($"Write characteristic ({_activePlugin.WriteCharacteristicUuid}) not found");
+        if (_controlWriteCharInfo == null)
+            OnError?.Invoke($"Control characteristic ({_activePlugin.ControlWriteCharacteristicUuid}) not found");
+        
+        if (_dataWriteCharInfo == null)
+            OnError?.Invoke($"Data characteristic not found (fallback failed)");
     }
 
     private void SubscribeToNotifications(IPeripheral peripheral, BleCharacteristicInfo info)

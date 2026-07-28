@@ -19,7 +19,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     public string ManufacturerId => "MVAGUSTA";
     public string DisplayName => "MV Agusta";
     public string ServiceUuid => "00003719-0000-1000-8000-00805f9b34fb";
-    public string WriteCharacteristicUuid => "00002345-0000-1000-8000-00805f9b34fb";
+    public string ControlWriteCharacteristicUuid => "00002345-0000-1000-8000-00805f9b34fb";
+    public string? DataWriteCharacteristicUuid => null;
     public string ReadCharacteristicUuid => "00001234-0000-1000-8000-00805f9b34fb";
     public bool RequiresWriteWithResponse => true;
 

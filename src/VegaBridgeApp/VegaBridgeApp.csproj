@@ -33,10 +33,10 @@
 
         <!-- App Identifier -->
         <ApplicationId>com.seji.vegabridge</ApplicationId>
-
+git
         <!-- Versions -->
         <ApplicationDisplayVersion>1.0.1</ApplicationDisplayVersion>
-        <ApplicationVersion>2</ApplicationVersion>
+        <ApplicationVersion>3</ApplicationVersion>
 
         <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
         <WindowsPackageType>None</WindowsPackageType>
