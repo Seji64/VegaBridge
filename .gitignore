@@ -17,13 +17,6 @@ obj/
 *.sln.DotSettings.user
 *.DotSettings.user
 
-## Rider / VS / VS Code
-.idea/
-.vs/
-.vscode/
-*.sln.DotSettings.user
-*.DotSettings.user
-
 ## macOS
 .DS_Store
 .AppleDouble
@@ -52,4 +45,8 @@ TestResults/
 *.orig
 
 ## Reverse engineering artifacts (decompiled third-party code)
-ReverseEngineering/MVRide/jadx_output/
+jadx_output/
+
+## Build artifacts
+publish/
+*.ipa
