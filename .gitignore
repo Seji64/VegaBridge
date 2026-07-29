@@ -46,6 +46,7 @@ TestResults/
 
 ## Reverse engineering artifacts (decompiled third-party code)
 jadx_output/
+temp/
 
 ## Build artifacts
 publish/
