@@ -4,8 +4,7 @@ using Bluetooth.Abstractions.Scanning;
 using Bluetooth.Abstractions.Scanning.EventArgs;
 using Bluetooth.Abstractions.Scanning.Options;
 using Serilog;
-using VegaBridgeApp.Models.Ble;
-using VegaBridgeApp.Services.BLE;
+using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Services.BLE.Plugins;
 
 namespace VegaBridgeApp.Services.BLE;
@@ -83,8 +82,8 @@ public class BleManagerService(IBluetoothScanner bleScanner) : IDisposable
         {
             ScanMode = BluetoothScanMode.LowLatency,
             IgnoreNamelessAdvertisements = true,
-            IgnoreDuplicateAdvertisements = true,
-            ServiceUuids = serviceUuids.Length > 0 ? serviceUuids : null
+            IgnoreDuplicateAdvertisements = true
+            //ServiceUuids = serviceUuids.Length > 0 ? serviceUuids : null
         };
 
         // Attach event handlers

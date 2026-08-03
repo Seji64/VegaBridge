@@ -1,4 +1,4 @@
-namespace VegaBridgeApp.Models.Ble;
+namespace VegaBridgeApp.Models.BLE;
 
 /// <summary>
 /// Holds information about a discovered BLE peripheral.

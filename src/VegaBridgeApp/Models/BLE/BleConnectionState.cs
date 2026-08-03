@@ -1,4 +1,4 @@
-namespace VegaBridgeApp.Models.Ble;
+namespace VegaBridgeApp.Models.BLE;
 
 /// <summary>
 /// Represents the BLE connection state for the UI.
