@@ -2,7 +2,7 @@ using Bluetooth.Abstractions.Scanning;
 using Microsoft.AspNetCore.Components;
 using MudBlazor;
 using Serilog;
-using VegaBridgeApp.Models.Ble;
+using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Services.BLE;
 
