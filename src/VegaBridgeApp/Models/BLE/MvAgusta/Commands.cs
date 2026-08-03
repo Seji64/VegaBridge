@@ -1,10 +1,10 @@
 // ReSharper disable InconsistentNaming
-namespace VegaBridgeApp.Models.Ble;
+namespace VegaBridgeApp.Models.BLE.MvAgusta;
 
 /// <summary>
 /// MV Agusta BLE command constants (from the decompiled Command.java enum).
 /// </summary>
-public static class MvAgustaCommands
+public static class Commands
 {
     public const string HELLO = "HELLO";
     public const string GUI1 = "GUI1";

@@ -1,6 +1,7 @@
+using Bluetooth.Abstractions.Scanning;
 using Microsoft.AspNetCore.Components;
-using Microsoft.Maui.Storage;
 using MudBlazor;
+using Serilog;
 using VegaBridgeApp.Models.Ble;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Services.BLE;
@@ -13,8 +14,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     private List<BleDeviceInfo> Devices { get; set; } = [];
     private BleConnectionState ConnectionState { get; set; } = BleConnectionState.Unknown;
-    private bool _isScanning;
-    public bool IsScanning => _isScanning;
 
     private BleDeviceInfo? SelectedDevice
     {
@@ -26,12 +25,13 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private string? StatusMessage { get; set; }
     private List<string> ReceivedFrames { get; } = [];
     private IBleDevicePlugin? ActivePlugin => BleManager.ActivePlugin;
-    protected IBleDevicePlugin? ManualPlugin { get; set; }
-    protected bool IsConnected => ConnectionState == BleConnectionState.Connected;
+    private IBleDevicePlugin? ManualPlugin { get; set; }
+    private bool IsConnected => ConnectionState == BleConnectionState.Connected;
+    public bool IsScanning => ConnectionState == BleConnectionState.Scanning;
 
     private double _offRouteThreshold = 10;
     private GeoResult? _homeLocation;
-
+    
     protected override async Task OnInitializedAsync()
     {
         _offRouteThreshold = Preferences.Get("off_route_threshold", 10.0);
@@ -44,42 +44,39 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         {
             _homeLocation = new GeoResult(homeLabel, homeLat, homeLon, "home");
         }
-
-        // Subscribe to BLE manager events
-        BleManager.OnDeviceDiscovered += OnDeviceDiscovered;
-        BleManager.OnConnectionStateChanged += OnConnectionChanged;
-        BleManager.OnError += OnError;
-        BleManager.OnFrameReceived += OnFrameReceived;
-
+        
+        
         // Request BLE access (triggers permission dialog)
         bool hasAccess = await BleManager.RequestAccessAsync();
-
-        if (hasAccess)
+        
+        if (!hasAccess)
         {
-            // Load already-paired devices (primary flow on iOS)
-            BleManager.LoadPairedPeripherals();
-
-            // iOS specific: Start scanning to find bonded devices 
-            // as they often don't appear in LoadPairedPeripherals
-            _isScanning = true;
-            BleManager.StartScanning();
-
-            // Auto-stop scanning after 15 seconds to save battery
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(15000);
-                if (ConnectionState != BleConnectionState.Connected)
-                {
-                    await InvokeAsync(() => 
-                    {
-                        _isScanning = false;
-                        BleManager.StopScanning();
-                    });
-                }
-            });
+            Snackbar.Add("No BLE Permission Detected", Severity.Error);
+            return;
         }
+        
+        // Subscribe to BLE manager events
+        BleManager.OnDeviceDiscovered += OnDeviceDiscovered;
+        BleManager.OnDeviceDisappeared += OnDeviceDisappeared;
+        BleManager.OnConnectionStateChanged += OnConnectionStateChanged;
+        BleManager.OnError += OnError;
+        BleManager.OnFrameReceived += OnFrameReceived;
+        
+        await StartBleScanAsync();
     }
-    
+
+    private async Task StartBleScanAsync()
+    {
+        await BleManager.StartScanningAsync();
+    }
+
+    private void OnConnectionStateChanged(BleConnectionState obj)
+    {
+        Log.Debug("New connection state: {state}", obj);
+        ConnectionState = obj;
+        StateHasChanged();
+    }
+
     private MudBlazor.Color GetStatusSeverity()
     {
         return ConnectionState switch
@@ -93,56 +90,36 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     // ── Event handlers (called from BLE manager thread) ────────────────────
 
+    private void OnDeviceDisappeared(BleDeviceInfo device)
+    {
+        BleDeviceInfo? existing = Devices.FirstOrDefault(d => d.Uuid == device.Uuid);
+        if (existing != null)
+        {
+            Devices.Remove(existing);
+        }
+        
+        StateHasChanged();
+    }
+
+    private void UpdateDevices()
+    {
+        IReadOnlyList<IBluetoothRemoteDevice> devices =  BleManager.GetDevices();
+
+        Devices = devices.Select(x => new BleDeviceInfo()
+        {
+            Name = x.Name ?? "Unknown",
+            Uuid = x.Id,
+            Rssi = x.SignalStrengthDbm
+        }).ToList();
+
+        StateHasChanged();
+    }
+    
     private void OnDeviceDiscovered(BleDeviceInfo device)
     {
-        _ = InvokeAsync(() =>
-        {
-            BleDeviceInfo? existing = Devices.FirstOrDefault(d => d.Uuid == device.Uuid);
-            if (existing != null)
-            {
-                existing.Rssi = device.Rssi;
-                existing.IsConnected = device.IsConnected;
-            }
-            else
-            {
-                Devices.Add(device);
-            }
-
-            StateHasChanged();
-        });
+       UpdateDevices();
     }
-
-    private void OnConnectionChanged(BleConnectionState state)
-    {
-        _ = InvokeAsync(() =>
-        {
-            ConnectionState = state;
-
-            if (state == BleConnectionState.Connected)
-            {
-                _isScanning = false;
-                BleManager.StopScanning();
-            }
-
-            StatusMessage = state switch
-            {
-                BleConnectionState.Connected => L["BLEConnected"],
-                BleConnectionState.Connecting => L["BLEConnecting"],
-                BleConnectionState.Disconnecting => L["BLEDisconnecting"],
-                BleConnectionState.Disconnected => L["BLEDisconnected"],
-                BleConnectionState.Error => L["BLEError"],
-                _ => StatusMessage
-            };
-
-            // Sync IsConnected state in the device list
-            BleDeviceInfo? device = Devices.FirstOrDefault(d => d.Uuid == _selectedUuid);
-            if (device != null)
-                device.IsConnected = state == BleConnectionState.Connected;
-
-            StateHasChanged();
-        });
-    }
-
+    
     private void OnError(string message)
     {
         _ = InvokeAsync(() =>
@@ -179,30 +156,35 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         if (success)
         {
             StatusMessage = string.Format(L["BLEConnectedTo"], device.Name);
+            // Start listening for incoming frames from the bike
+            await BleManager.StartNotificationsAsync();
         }
         else if (string.IsNullOrEmpty(StatusMessage) || !StatusMessage.Contains(L["BLEError"]))
         {
             StatusMessage = L["BLEConnectFailed"];
         }
+
+        StateHasChanged();
     }
 
     private async Task Disconnect()
     {
+        await BleManager.StopNotificationsAsync();
         await BleManager.DisconnectAsync();
+        StatusMessage = L["BLEDisconnected"];
+        StateHasChanged();
     }
 
     private async Task SendTestFrame()
     {
-        IBleDevicePlugin? plugin = BleManager.ActivePlugin;
-        if (plugin == null)
+        if (ActivePlugin == null) return;
+        byte[] testFrame = ActivePlugin.CreateTestFrame();
+        bool success = await BleManager.SendControlDataAsync(testFrame);
+        if (success)
         {
-            Snackbar.Add(L["BLENoPlugin"], Severity.Warning);
-            return;
+            StatusMessage = L["BLETestSent"];
+            StateHasChanged();
         }
-
-        byte[] frame = plugin.CreateTestFrame();
-        await BleManager.SendFrameAsync(frame);
-        Snackbar.Add(L["BLETestSent"], Severity.Success);
     }
 
     private void OnManualPluginChanged(string? manufacturerId)
@@ -245,10 +227,11 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         BleManager.OnDeviceDiscovered -= OnDeviceDiscovered;
-        BleManager.OnConnectionStateChanged -= OnConnectionChanged;
+        BleManager.OnDeviceDisappeared -= OnDeviceDisappeared;
+        BleManager.OnConnectionStateChanged -= OnConnectionStateChanged;
         BleManager.OnError -= OnError;
         BleManager.OnFrameReceived -= OnFrameReceived;
-
+        await BleManager.StopNotificationsAsync();
         await BleManager.DisconnectAsync();
     }
 }
