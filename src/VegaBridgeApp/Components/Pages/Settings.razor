@@ -2,7 +2,6 @@
 @inject BleManagerService BleManager
 @inject IGeocodingService GeocodingService
 @inject ISnackbar Snackbar
-
 <MudContainer MaxWidth="MaxWidth.Medium" Class="px-3 pt-2 pb-6">
 
     <MudStack Spacing="3">
@@ -45,10 +44,10 @@
                         Variant="Variant.Text"
                         Color="Color.Info"
                         Size="Size.Small"
-                        OnClick="@SendTestFrame"
                         Disabled="!IsConnected"
                         StartIcon="@Icons.Material.Filled.Send"
-                        FullWidth="true">
+                        FullWidth="true"
+                        OnClick="@SendTestFrame">
                         @L["BLETest"]
                     </MudButton>
                 </MudStack>
@@ -68,13 +67,17 @@
                             <MudText Typo="Typo.caption" Color="Color.Info" Class="ml-1">@L["BLEScanning"]</MudText>
                         </MudStack>
                     }
+                    else
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="@StartBleScanAsync"/>
+                    }
                 </MudStack>
                 </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
                 @if (!Devices.Any(d => d.IsPaired))
                 {
-                    <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Style="border-radius: 8px;">
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Style="border-radius: 8px;">
                         <MudStack>
                             <MudText Typo="Typo.body2" Style="font-weight: 600;">@L["PairingInfoTitle"]</MudText>
                             <MudText Typo="Typo.caption">@L["PairingInfoBody"]</MudText>

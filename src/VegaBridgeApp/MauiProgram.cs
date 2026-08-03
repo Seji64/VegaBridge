@@ -1,4 +1,5 @@
 using System.Globalization;
+using Bluetooth.Maui;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Logging;
 using MudBlazor;
@@ -9,6 +10,7 @@ using Polly;
 using Serilog;
 using Serilog.Events;
 using VegaBridgeApp.Services.BLE;
+using VegaBridgeApp.Services.BLE.Plugins;
 using VegaBridgeApp.Services.Geocoding;
 using VegaBridgeApp.Services.Location;
 using VegaBridgeApp.Services.Navigation;
@@ -34,7 +36,7 @@ public static class MauiProgram
         builder
             .UseMauiApp<App>()
             .UseMauiCommunityToolkit()
-            .ConfigureFonts(fonts => { fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular"); });
+            .ConfigureFonts(fonts => { fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular"); fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold"); });
 
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddMudServices(config =>
@@ -53,11 +55,13 @@ public static class MauiProgram
         CultureInfo.DefaultThreadCurrentUICulture = new CultureInfo(culture);
 
         // ── BLE (Shiny.BluetoothLE) ────────────────────────────────────────
-        builder.Services.AddBluetoothLE();
+        builder.Services.AddBluetoothServices();
+        
         builder.Services.AddSingleton<BleManagerService>();
         builder.Services.AddTransient<MvAgustaBlePlugin>();
 
         // ── GPS / Location (Shiny.Locations) ───────────────────────────────
+        builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddShinyStores();
         builder.Services.AddGps<GpsDelegate>();
         builder.Services.AddSingleton<GpsService>();

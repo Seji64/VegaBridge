@@ -1,9 +1,9 @@
-namespace VegaBridgeApp.Models.Ble;
+namespace VegaBridgeApp.Models.BLE.MvAgusta;
 
 /// <summary>
 /// MV Agusta turn-by-turn icon types (from the decompiled TurnByTurnIndication.java).
 /// </summary>
-public static class MvAgustaTurnTypes
+public static class TurnTypes
 {
     public const string TurnLeft = "turn-left";
     public const string TurnRight = "turn-right";

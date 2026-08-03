@@ -1,3 +1,6 @@
+using Bluetooth.Abstractions;
+using Bluetooth.Abstractions.Scanning;
+
 namespace VegaBridgeApp.Services.BLE;
 
 /// <summary>
@@ -19,20 +22,13 @@ public interface IBleDevicePlugin
     /// <summary>
     /// GATT Service UUID as a string.
     /// </summary>
-    string ServiceUuid { get; }
+    Guid ServiceUuid { get; }
 
     /// <summary>
     /// GATT characteristic UUID for writing control data (e.g. Auth, Keepalive).
     /// Usually supports Write-with-Response.
     /// </summary>
     string ControlWriteCharacteristicUuid { get; }
-
-    /// <summary>
-    /// GATT characteristic UUID for writing high-frequency data (e.g. Navigation).
-    /// Usually supports Write-without-Response (Command).
-    /// If null, the system will attempt to find any writable characteristic that supports commands.
-    /// </summary>
-    string? DataWriteCharacteristicUuid { get; }
 
     /// <summary>
     /// GATT characteristic UUID for reading / subscribing to notifications.
@@ -50,6 +46,19 @@ public interface IBleDevicePlugin
     /// Frame format follows the manufacturer's protocol (e.g. \rCMD\x1Efields\r).
     /// </summary>
     byte[] BuildFrame(string command, params string[] fields);
+
+    /// <summary>
+    /// Sends data to the device using the manufacturer-specific logic.
+    /// </summary>
+    /// <param name="device">The connected BLE device.</param>
+    /// <param name="data">The raw bytes to send.</param>
+    /// <param name="isControlFrame">True if this is a control frame (e.g. Auth), false for data frames.</param>
+    Task<bool> SendAsync(IBluetoothRemoteDevice device, byte[] data, bool isControlFrame);
+
+    /// <summary>
+    /// Checks if a received data buffer is a valid frame for this plugin.
+    /// </summary>
+    bool IsValidFrame(byte[] data);
 
     /// <summary>
     /// Attempts to parse a received data buffer into a command and field array.
