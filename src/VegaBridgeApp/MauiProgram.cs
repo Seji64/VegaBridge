@@ -1,5 +1,4 @@
 using System.Globalization;
-using Bluetooth.Maui;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Logging;
 using MudBlazor;
@@ -35,6 +34,7 @@ public static class MauiProgram
         MauiAppBuilder builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
+            .UseShiny()
             .UseMauiCommunityToolkit()
             .ConfigureFonts(fonts => { fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular"); fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold"); });
 
@@ -55,7 +55,8 @@ public static class MauiProgram
         CultureInfo.DefaultThreadCurrentUICulture = new CultureInfo(culture);
 
         // ── BLE (Shiny.BluetoothLE) ────────────────────────────────────────
-        builder.Services.AddBluetoothServices();
+        builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddBluetoothLE();
         
         builder.Services.AddSingleton<BleManagerService>();
         builder.Services.AddTransient<MvAgustaBlePlugin>();

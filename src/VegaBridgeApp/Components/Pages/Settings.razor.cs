@@ -1,10 +1,8 @@
-using Bluetooth.Abstractions.Scanning;
 using Microsoft.AspNetCore.Components;
 using MudBlazor;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
-using VegaBridgeApp.Services.BLE;
 
 namespace VegaBridgeApp.Components.Pages;
 
@@ -13,25 +11,26 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     // ── UI-bound state ────────────────────────────────────────────────────
 
     private List<BleDeviceInfo> Devices { get; set; } = [];
-    private BleConnectionState ConnectionState { get; set; } = BleConnectionState.Unknown;
+    private BleConnectionState ConnectionState { get; set; } = BleConnectionState.Idle;
 
     private BleDeviceInfo? SelectedDevice
     {
         get => Devices.FirstOrDefault(d => d.Uuid == _selectedUuid);
         set => _selectedUuid = value?.Uuid;
     }
-    private string? _selectedUuid;
+    private Guid? _selectedUuid;
 
     private string? StatusMessage { get; set; }
-    private List<string> ReceivedFrames { get; } = [];
-    private IBleDevicePlugin? ActivePlugin => BleManager.ActivePlugin;
-    private IBleDevicePlugin? ManualPlugin { get; set; }
-    private bool IsConnected => ConnectionState == BleConnectionState.Connected;
-    public bool IsScanning => ConnectionState == BleConnectionState.Scanning;
+    private bool IsConnected => BleManager.IsAnyDeviceConnected;
+    private bool IsScanning => ConnectionState == BleConnectionState.Scanning;
 
     private double _offRouteThreshold = 10;
     private GeoResult? _homeLocation;
     
+    private IDisposable? _stateSubscription;
+    private IDisposable? _devicesSubscription;
+    private IDisposable? _errorSubscription;
+
     protected override async Task OnInitializedAsync()
     {
         _offRouteThreshold = Preferences.Get("off_route_threshold", 10.0);
@@ -45,7 +44,11 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             _homeLocation = new GeoResult(homeLabel, homeLat, homeLon, "home");
         }
         
-        
+        // Subscribe to BLE manager reactive streams
+        _stateSubscription = BleManager.State.Subscribe(OnConnectionStateChanged);
+        _devicesSubscription = BleManager.Devices.Subscribe(UpdateDevices);
+        _errorSubscription = BleManager.ErrorMessages.Subscribe(OnError);
+
         // Request BLE access (triggers permission dialog)
         bool hasAccess = await BleManager.RequestAccessAsync();
         
@@ -55,13 +58,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             return;
         }
         
-        // Subscribe to BLE manager events
-        BleManager.OnDeviceDiscovered += OnDeviceDiscovered;
-        BleManager.OnDeviceDisappeared += OnDeviceDisappeared;
-        BleManager.OnConnectionStateChanged += OnConnectionStateChanged;
-        BleManager.OnError += OnError;
-        BleManager.OnFrameReceived += OnFrameReceived;
-        
         await StartBleScanAsync();
     }
 
@@ -70,11 +66,16 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         await BleManager.StartScanningAsync();
     }
 
+    private void StopBleScanAsync()
+    {
+        BleManager.StopScanning();
+    }
+
     private void OnConnectionStateChanged(BleConnectionState obj)
     {
         Log.Debug("New connection state: {state}", obj);
         ConnectionState = obj;
-        StateHasChanged();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private MudBlazor.Color GetStatusSeverity()
@@ -88,54 +89,46 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         };
     }
 
-    // ── Event handlers (called from BLE manager thread) ────────────────────
-
-    private void OnDeviceDisappeared(BleDeviceInfo device)
+    private string? GetDeviceStatusText(BleDeviceInfo device)
     {
-        BleDeviceInfo? existing = Devices.FirstOrDefault(d => d.Uuid == device.Uuid);
-        if (existing != null)
+        if (device.IsConnected) return L["Connected"];
+        if (SelectedDevice?.Uuid == device.Uuid)
         {
-            Devices.Remove(existing);
+            return ConnectionState switch
+            {
+                BleConnectionState.Connecting => "Connecting...",
+                BleConnectionState.Error => L["BLEError"],
+                _ => null
+            };
         }
-        
-        StateHasChanged();
+        return null;
     }
 
-    private void UpdateDevices()
+    private MudBlazor.Color GetDeviceStatusColor(BleDeviceInfo device)
     {
-        IReadOnlyList<IBluetoothRemoteDevice> devices =  BleManager.GetDevices();
-
-        Devices = devices.Select(x => new BleDeviceInfo()
+        if (device.IsConnected) return MudBlazor.Color.Success;
+        if (SelectedDevice?.Uuid == device.Uuid)
         {
-            Name = x.Name ?? "Unknown",
-            Uuid = x.Id,
-            Rssi = x.SignalStrengthDbm
-        }).ToList();
-
-        StateHasChanged();
+            return GetStatusSeverity();
+        }
+        return MudBlazor.Color.Default;
     }
-    
-    private void OnDeviceDiscovered(BleDeviceInfo device)
+
+    private void UpdateDevices(IReadOnlyList<BleDeviceInfo> devices)
     {
-       UpdateDevices();
+        Devices = [.. devices];
+        _ = InvokeAsync(StateHasChanged);
     }
     
     private void OnError(string message)
     {
         _ = InvokeAsync(() =>
         {
+            // Use Snackbar for immediate, transient notification
+            Snackbar.Add(message, Severity.Error);
+            
+            // Keep StatusMessage for persistent visibility on the page
             StatusMessage = L["BLEError"] + ": " + message;
-            StateHasChanged();
-        });
-    }
-
-    private void OnFrameReceived(string frame)
-    {
-        _ = InvokeAsync(() =>
-        {
-            ReceivedFrames.Add(frame);
-            if (ReceivedFrames.Count > 100)
-                ReceivedFrames.RemoveAt(0);
             StateHasChanged();
         });
     }
@@ -150,14 +143,11 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         StatusMessage = string.Format(L["BLEConnectingTo"], device.Name);
         StateHasChanged();
 
-        IBleDevicePlugin? plugin = ManualPlugin;
-        bool success = await BleManager.ConnectAsync(device.Uuid, plugin);
+        bool success = await BleManager.ConnectAsync(device.Uuid);
 
         if (success)
         {
             StatusMessage = string.Format(L["BLEConnectedTo"], device.Name);
-            // Start listening for incoming frames from the bike
-            await BleManager.StartNotificationsAsync();
         }
         else if (string.IsNullOrEmpty(StatusMessage) || !StatusMessage.Contains(L["BLEError"]))
         {
@@ -169,7 +159,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     private async Task Disconnect()
     {
-        await BleManager.StopNotificationsAsync();
         await BleManager.DisconnectAsync();
         StatusMessage = L["BLEDisconnected"];
         StateHasChanged();
@@ -177,21 +166,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     private async Task SendTestFrame()
     {
-        if (ActivePlugin == null) return;
-        byte[] testFrame = ActivePlugin.CreateTestFrame();
-        bool success = await BleManager.SendControlDataAsync(testFrame);
-        if (success)
-        {
-            StatusMessage = L["BLETestSent"];
-            StateHasChanged();
-        }
-    }
-
-    private void OnManualPluginChanged(string? manufacturerId)
-    {
-        ManualPlugin = string.IsNullOrEmpty(manufacturerId)
-            ? null
-            : BleManager.Plugins.FirstOrDefault(p => p.ManufacturerId == manufacturerId);
+        // Future implementation
     }
 
     private void SaveOffRouteThreshold()
@@ -199,7 +174,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         Preferences.Set("off_route_threshold", _offRouteThreshold);
     }
 
-    private async Task<IEnumerable<GeoResult>> HomeSearchAsync(string query, CancellationToken ct)
+    private async Task<IEnumerable<GeoResult>>? HomeSearchAsync(string? query, CancellationToken ct)
     {
         return await GeocodingService.SuggestAsync(query, ct: ct);
     }
@@ -226,12 +201,8 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        BleManager.OnDeviceDiscovered -= OnDeviceDiscovered;
-        BleManager.OnDeviceDisappeared -= OnDeviceDisappeared;
-        BleManager.OnConnectionStateChanged -= OnConnectionStateChanged;
-        BleManager.OnError -= OnError;
-        BleManager.OnFrameReceived -= OnFrameReceived;
-        await BleManager.StopNotificationsAsync();
-        await BleManager.DisconnectAsync();
+        _stateSubscription?.Dispose();
+        _devicesSubscription?.Dispose();
+        _errorSubscription?.Dispose();
     }
 }

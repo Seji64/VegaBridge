@@ -29,14 +29,14 @@
         <MauiXamlInflator>SourceGen</MauiXamlInflator>
 
         <!-- Display name -->
-        <ApplicationTitle>VegaBridge</ApplicationTitle>
+        <ApplicationTitle>VegaBridgeApp</ApplicationTitle>
 
         <!-- App Identifier -->
         <ApplicationId>com.seji.vegabridge</ApplicationId>
 
         <!-- Versions -->
         <ApplicationDisplayVersion>1.0.1</ApplicationDisplayVersion>
-        <ApplicationVersion>5</ApplicationVersion>
+        <ApplicationVersion>6</ApplicationVersion>
 
         <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
         <WindowsPackageType>None</WindowsPackageType>
@@ -74,7 +74,6 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Bluetooth.Maui" Version="4.0.11" />
         <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="9.1.0" />
         <PackageReference Include="CommunityToolkit.Maui" Version="15.0.0" />
         <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.90" />
@@ -87,7 +86,9 @@
         <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
         <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+        <PackageReference Include="Shiny.BluetoothLE" Version="5.3.0" />
         <PackageReference Include="Shiny.Extensions.Stores" Version="5.1.4" />
+        <PackageReference Include="Shiny.Hosting.Maui" Version="5.3.0" />
         <PackageReference Include="Shiny.Locations" Version="5.3.0" />
     </ItemGroup>
 

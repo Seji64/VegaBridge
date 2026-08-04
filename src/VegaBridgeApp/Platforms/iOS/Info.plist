@@ -17,6 +17,7 @@
     <key>UIRequiredDeviceCapabilities</key>
     <array>
         <string>arm64</string>
+        <string>bluetooth-le</string>
     </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>

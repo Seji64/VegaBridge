@@ -5,11 +5,8 @@ namespace VegaBridgeApp.Models.BLE;
 /// </summary>
 public class BleDeviceInfo
 {
+    public required Guid Uuid { get; init; }
     public required string Name { get; init; }
-    public required string Uuid { get; init; }
-    public int Rssi { get; set; }
-    public bool IsConnectable { get; init; }
     public bool IsConnected { get; set; }
-    public bool IsPaired { get; init; }
-    public DateTime FirstDiscovered { get; init; }
+    public DateTime LastSeen { get; set; }
 }

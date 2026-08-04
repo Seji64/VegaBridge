@@ -1,410 +1,303 @@
-using System.Collections.Concurrent;
-using Bluetooth.Abstractions.Options;
-using Bluetooth.Abstractions.Scanning;
-using Bluetooth.Abstractions.Scanning.EventArgs;
-using Bluetooth.Abstractions.Scanning.Options;
+using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using Serilog;
+using Shiny.BluetoothLE;
 using VegaBridgeApp.Models.BLE;
-using VegaBridgeApp.Services.BLE.Plugins;
 
 namespace VegaBridgeApp.Services.BLE;
 
 /// <summary>
-/// Central BLE service that manages scanning, connecting, and data transmission.
-/// Wraps Bluetooth.Maui and dispatches manufacturer-specific plugins.
+/// Central BLE service that manages scanning and connecting using Shiny.BluetoothLE.
+/// Implements a reactive state machine to provide a predictable API for the UI.
 /// </summary>
-public class BleManagerService(IBluetoothScanner bleScanner) : IDisposable
+public class BleManagerService(IBleManager bleManager) : IDisposable
 {
-    private readonly List<IBleDevicePlugin> _plugins =
-    [
-        new MvAgustaBlePlugin()
-    ];
+    private IPeripheral? _activePeripheral;
+    private IDisposable? _scanSubscription;
+    private IDisposable? _connectionSubscription;
+    private CancellationTokenSource? _scanTimeoutCts;
+    private CancellationTokenSource? _retryCts;
 
-    private IBluetoothRemoteDevice? _connectedDevice;
-    private IBleDevicePlugin? _activePlugin;
+    // Maintain our own dictionary of discovered peripherals for reliable access
+    private readonly Dictionary<string, IPeripheral> _discoveredPeripherals = new();
 
-    private readonly ConcurrentDictionary<string, (IBluetoothRemoteDevice Device, int Rssi)> _discoveredDevices = new();
+    // ── Reactive State ──────────────────────────────────────────────────
 
-    // ── Events for the UI layer ───────────────────────────────────
-    public event Action<BleDeviceInfo>? OnDeviceDiscovered;
-    public event Action<BleDeviceInfo>? OnDeviceDisappeared;
-    public event Action<BleConnectionState>? OnConnectionStateChanged;
-    public event Action<string>? OnError;
+    private readonly BehaviorSubject<BleConnectionState> _state = new(BleConnectionState.Idle);
+    public IObservable<BleConnectionState> State => _state.AsObservable();
+    private BleConnectionState CurrentState => _state.Value;
 
-    /// <summary>Fired when a complete frame is received from the connected bike.</summary>
-    public event Action<string>? OnFrameReceived;
+    private readonly BehaviorSubject<IReadOnlyList<BleDeviceInfo>> _devices = new([]);
+    public IObservable<IReadOnlyList<BleDeviceInfo>> Devices => _devices.AsObservable();
+    public IReadOnlyList<BleDeviceInfo> CurrentDevices => _devices.Value;
 
-    // ── Observable state for UI ────────────────────────────────────
+    private readonly BehaviorSubject<string> _errorMessage = new(string.Empty);
+    public IObservable<string> ErrorMessages => _errorMessage.AsObservable();
 
-    private bool _isScanning;
-    public bool IsConnected => _connectedDevice is not null && _connectedDevice.IsConnected;
-    public IReadOnlyList<IBleDevicePlugin> Plugins => _plugins.AsReadOnly();
-    public IBleDevicePlugin? ActivePlugin => _activePlugin;
+    // ── Public API ────────────────────────────────────────────────────
 
-    // ── Public API ────────────────────────────────────────────────
+    public bool IsAnyDeviceConnected => bleManager.GetConnectedPeripherals().Any();
 
     public async Task<bool> RequestAccessAsync()
     {
         try
         {
-            bool hasAccess = await bleScanner.HasScannerPermissionsAsync();
-
-            if (!hasAccess)
-            {
-                await bleScanner.RequestScannerPermissionsAsync(true);
-            }
-            else
-            {
-                return true;
-            }
-
-            hasAccess = await bleScanner.HasScannerPermissionsAsync();
-
-            return !hasAccess ? throw new Exception("BLE access denied") : true;
+            AccessState accessState = await bleManager.RequestAccessAsync();
+            if (accessState == AccessState.Available) return true;
+            UpdateError("BLE access denied. Please check system permissions.");
+            return false;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            OnConnectionStateChanged?.Invoke(BleConnectionState.Error);
+            Log.Error(ex, "Critical error requesting BLE access");
+            UpdateError($"Access error: {ex.Message}");
             return false;
         }
     }
 
     public async Task StartScanningAsync()
     {
-        if (_isScanning) return;
+        // Always stop any existing scan first to prevent "existing scan" errors
+        StopScanning();
 
-        _isScanning = true;
-        OnConnectionStateChanged?.Invoke(BleConnectionState.Scanning);
-
-        // Build scan config with Service UUID filter
-        Guid[] serviceUuids = _plugins.Select(p => p.ServiceUuid).Distinct().ToArray();
-        ScanningOptions scanningOptions = new()
-        {
-            ScanMode = BluetoothScanMode.LowLatency,
-            IgnoreNamelessAdvertisements = true,
-            IgnoreDuplicateAdvertisements = true
-            //ServiceUuids = serviceUuids.Length > 0 ? serviceUuids : null
-        };
-
-        // Attach event handlers
-        bleScanner.AdvertisementReceived += OnAdvertisementReceived;
-        bleScanner.DeviceListChanged += OnDeviceListChanged;
+        if (!await RequestAccessAsync()) return;
 
         try
         {
-            await bleScanner.StartScanningIfNeededAsync(scanningOptions);
-            Log.Information("BLE scanning started (filtered: {Filtered})", serviceUuids.Length > 0);
+            _state.OnNext(BleConnectionState.Scanning);
+            
+            // Clear discovered devices but preserve the active connection if it exists
+            _discoveredPeripherals.Clear();
+            if (_activePeripheral != null)
+            {
+                _discoveredPeripherals[_activePeripheral.Uuid] = _activePeripheral;
+            }
+
+            Log.Information("BLE scanning started");
+            
+            // Subscribe to peripheral updates and keep the subscription to dispose it later
+            _scanSubscription = bleManager.ScanForUniquePeripherals().Subscribe(UpdateDeviceFromScanResult);
+            
+            _scanTimeoutCts = new CancellationTokenSource();
+            
+            await Task.Delay(TimeSpan.FromSeconds(30), _scanTimeoutCts.Token);
+            if (CurrentState == BleConnectionState.Scanning)
+            {
+                Log.Information("BLE scan automatic timeout reached");
+                StopScanning();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            /* Expected when scan is stopped manually */
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "BLE scanning failed");
-            CleanupScanningEvents();
-            _isScanning = false;
-            OnError?.Invoke($"Scan failed: {ex.Message}");
+            Log.Error(ex, "Failed to start BLE scan");
+            UpdateError($"Could not start scan: {ex.Message}");
         }
     }
 
-    private void OnDeviceListChanged(object? sender, DeviceListChangedEventArgs e)
+    public void StopScanning()
     {
-        if (e.AddedItems != null)
+        Log.Information("Stopping BLE scan");
+
+        // Cancel the timeout timer
+        _scanTimeoutCts?.Cancel();
+        _scanTimeoutCts?.Dispose();
+        _scanTimeoutCts = null;
+
+        // Dispose the subscription to stop receiving scan results
+        _scanSubscription?.Dispose();
+        _scanSubscription = null;
+
+        // Tell the hardware to stop scanning
+        bleManager.StopScan();
+
+        if (CurrentState == BleConnectionState.Scanning)
         {
-            foreach (IBluetoothRemoteDevice device in e.AddedItems)
-            {
-                BleDeviceInfo info = new()
-                {
-                    Name = device.Name ?? "Unknown",
-                    Uuid = device.Id,
-                    Rssi = device.SignalStrengthDbm,
-                    IsConnected = device.IsConnected,
-                    FirstDiscovered = DateTime.Now,
-                    IsConnectable = true
-                };
-                _discoveredDevices.TryAdd(device.Id, (device, device.SignalStrengthDbm));
-                OnDeviceDiscovered?.Invoke(info);
-            }
-        }
-
-        if (e.RemovedItems == null) return;
-        {
-            foreach (IBluetoothRemoteDevice device in e.RemovedItems)
-            {
-                if (!_discoveredDevices.TryRemove(device.Id, out (IBluetoothRemoteDevice Device, int Rssi) tuple)) continue;
-                BleDeviceInfo info = new()
-                {
-                    Name = tuple.Device.Name ?? "Unknown",
-                    Uuid = device.Id,
-                    Rssi = tuple.Rssi,
-                    IsConnected = false,
-                    FirstDiscovered = DateTime.Now,
-                    IsConnectable = true
-                };
-                OnDeviceDisappeared?.Invoke(info);
-            }
+            _state.OnNext(BleConnectionState.Idle);
         }
     }
 
-    private void OnAdvertisementReceived(object? sender, AdvertisementReceivedEventArgs e)
+    public async Task<bool> ConnectAsync(Guid deviceUuid)
     {
-        Log.Debug("Advertisement from: {Name}", e.Advertisement.DeviceName ?? "Unnamed");
-    }
+        if (CurrentState == BleConnectionState.Connecting) return false;
 
-    private void CleanupScanningEvents()
-    {
-        bleScanner.AdvertisementReceived -= OnAdvertisementReceived;
-        bleScanner.DeviceListChanged -= OnDeviceListChanged;
-    }
-
-    public  IReadOnlyList<IBluetoothRemoteDevice> GetDevices()
-    {
-        return bleScanner.GetDevices();
-    }
-
-    // ── Connection ─────────────────────────────────────────────
-
-    public async Task<bool> ConnectAsync(string deviceUuid, IBleDevicePlugin? plugin)
-    {
         try
         {
-            if (_connectedDevice is not null && _connectedDevice.IsConnected)
+            _state.OnNext(BleConnectionState.Connecting);
+            Log.Information("Attempting to connect to device {Uuid}", deviceUuid);
+
+            // Find peripheral from our maintained dictionary
+            string uuidKey = deviceUuid.ToString();
+            if (!_discoveredPeripherals.TryGetValue(uuidKey.ToUpper(), out IPeripheral? peripheral))
             {
-                Log.Warning("Already connected to a device; disconnect first.");
+                UpdateError("Device not found. Please scan again.");
                 return false;
             }
 
-            OnConnectionStateChanged?.Invoke(BleConnectionState.Connecting);
+            await peripheral.ConnectAsync(timeout: TimeSpan.FromSeconds(30));
 
-            IBluetoothRemoteDevice? device = bleScanner.GetDevice(d => d.Id == deviceUuid);
-            if (device is null)
-            {
-                OnError?.Invoke($"Device {deviceUuid} not found in cache. Start scanning first.");
-                OnConnectionStateChanged?.Invoke(BleConnectionState.Disconnected);
-                return false;
-            }
+            _activePeripheral = peripheral;
+            _state.OnNext(BleConnectionState.Connected);
 
-            ConnectionOptions options = new()
-            {
-                ConnectionRetry = RetryOptions.Default
-            };
+            Log.Information("Successfully connected to {Uuid}", deviceUuid);
+            
+            // Setup connection monitoring
+            SetupConnectionMonitoring(peripheral);
 
-            await device.ConnectAsync(options, TimeSpan.FromSeconds(30));
-            _connectedDevice = device;
-
-            // Wire up connection-lifecycle events
-            device.Connected += (_, _) =>
-            {
-                Log.Information("BLE device connected: {Name}", device.Name);
-                OnConnectionStateChanged?.Invoke(BleConnectionState.Connected);
-            };
-
-            device.Disconnected += (_, _) =>
-            {
-                Log.Information("BLE device disconnected: {Name}", device.Name);
-                OnConnectionStateChanged?.Invoke(BleConnectionState.Disconnected);
-                _connectedDevice = null;
-                _activePlugin = null;
-            };
-
-            device.UnexpectedDisconnection += (_, _) =>
-            {
-                Log.Warning("BLE unexpected disconnection: {Name}", device.Name);
-                OnConnectionStateChanged?.Invoke(BleConnectionState.Error);
-            };
-
-            // Resolve plugin (auto-detect if not supplied)
-            _activePlugin = plugin ?? DetectPlugin(device);
-            if (_activePlugin is null)
-            {
-                OnError?.Invoke("No matching BLE plugin found for this device.");
-                await DisconnectAsync();
-                return false;
-            }
-
-            // Discover services and characteristics
-            await device.ExploreServicesAsync(new ServiceExplorationOptions
-            {
-                ExploreCharacteristics = true,
-                ExploreDescriptors = true,
-                UseCache = true
-            });
-
-            Log.Information("Connected to {Name} via {Plugin}", device.Name, _activePlugin.DisplayName);
-            OnConnectionStateChanged?.Invoke(BleConnectionState.Connected);
+            UpdateDeviceList(); // Refresh connection status in list
             return true;
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "BLE connect failed for {Uuid}", deviceUuid);
-            OnError?.Invoke(ex.Message);
-            OnConnectionStateChanged?.Invoke(BleConnectionState.Error);
+            Log.Error(ex, "Connection failed for {Uuid}", deviceUuid);
+            UpdateError($"Connection failed: {ex.Message}");
             return false;
         }
     }
 
     public async Task DisconnectAsync()
     {
-        if (_connectedDevice is null)
-            return;
+        if (_activePeripheral == null) return;
 
         try
         {
-            OnConnectionStateChanged?.Invoke(BleConnectionState.Disconnecting);
-            await _connectedDevice.DisconnectAsync(TimeSpan.FromSeconds(10));
+            Log.Information("Disconnecting from {Uuid}", _activePeripheral.Uuid);
+            
+            // Cancel any ongoing retries and remove monitoring to prevent trigger-loop
+            if (_retryCts != null)
+            {
+                await _retryCts.CancelAsync();
+                _retryCts?.Dispose();
+                _retryCts = null;
+            }
+            _connectionSubscription?.Dispose();
+            _connectionSubscription = null;
+
+            await _activePeripheral.DisconnectAsync();
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "BLE disconnect error");
+            Log.Warning(ex, "Error during disconnection");
         }
         finally
         {
-            _connectedDevice = null;
-            _activePlugin = null;
-            OnConnectionStateChanged?.Invoke(BleConnectionState.Disconnected);
+            _activePeripheral = null;
+            _state.OnNext(BleConnectionState.Idle);
+            UpdateDeviceList();
         }
     }
 
-    // ── Data Transmission ──────────────────────────────────────
+    // ── Connection Monitoring & Retry ─────────────────────────────────────
 
-    public async Task<bool> SendControlDataAsync(byte[] data)
+    private void SetupConnectionMonitoring(IPeripheral peripheral)
     {
-        return await SendInternalAsync(data, isControl: true);
+        _connectionSubscription?.Dispose();
+
+        Log.Information("Setting up connection monitoring for {Uuid}", peripheral.Uuid);
+
+        // Combine disconnected and connection-failed events
+        _connectionSubscription = peripheral.WhenDisconnected()
+            .Subscribe(_ => HandleUnexpectedDisconnection(peripheral));
     }
 
-    public async Task<bool> SendDataAsync(byte[] data)
+    private async void HandleUnexpectedDisconnection(IPeripheral peripheral)
     {
-        return await SendInternalAsync(data, isControl: false);
+        // Check if this was an intentional disconnect (managed by _activePeripheral == null)
+        if (_activePeripheral == null) return;
+
+        Log.Warning("Unexpected disconnection detected for {Uuid}", peripheral.Uuid);
+        
+        // Update state immediately to inform UI
+        _state.OnNext(BleConnectionState.Idle);
+        UpdateDeviceList();
+        UpdateError("Connection lost. Attempting to reconnect...");
+
+        await RetryConnectionAsync(Guid.Parse(peripheral.Uuid));
     }
 
-    private async Task<bool> SendInternalAsync(byte[] data, bool isControl)
+    private async Task RetryConnectionAsync(Guid deviceUuid)
     {
-        if (_connectedDevice is null || !_connectedDevice.IsConnected || _activePlugin is null)
-        {
-            OnError?.Invoke("Not connected to a device or no active plugin.");
-            return false;
-        }
+        const int maxRetries = 3;
+        int attempt = 0;
 
-        try
-        {
-            return await _activePlugin.SendAsync(_connectedDevice, data, isControl);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Failed to send data via plugin {Plugin}", _activePlugin.DisplayName);
-            OnError?.Invoke(ex.Message);
-            return false;
-        }
-    }
+        _retryCts = new CancellationTokenSource();
+        CancellationToken token = _retryCts.Token;
 
-    // ── Notifications ──────────────────────────────────────────
-
-    public async Task StartNotificationsAsync()
-    {
-        if (_connectedDevice is null || !_connectedDevice.IsConnected)
+        while (attempt < maxRetries && !token.IsCancellationRequested)
         {
-            OnError?.Invoke("Not connected to a device.");
-            return;
-        }
-
-        try
-        {
-            IBluetoothRemoteCharacteristic? characteristic = ResolveReadCharacteristic();
-            if (characteristic is null)
+            attempt++;
+            try
             {
-                OnError?.Invoke("Read characteristic not found.");
+                Log.Information("Retry connection attempt {Attempt}/{Max} for {Uuid}", attempt, maxRetries, deviceUuid);
+                
+                // Wait before retrying (exponential backoff: 2, 4, 8 seconds)
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), token);
+
+                if (!await ConnectAsync(deviceUuid)) continue;
+                Log.Information("Successfully reconnected to {Uuid} on attempt {Attempt}", deviceUuid, attempt);
                 return;
             }
-
-            characteristic.ValueUpdated += OnReadCharacteristicValueUpdated;
-            await characteristic.StartListeningAsync(TimeSpan.FromSeconds(10), default);
-
-            Log.Information("Subscribed to read characteristic notifications");
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Failed to start notifications");
-            OnError?.Invoke(ex.Message);
-        }
-    }
-
-    public async Task StopNotificationsAsync()
-    {
-        if (_connectedDevice is null)
-            return;
-
-        try
-        {
-            IBluetoothRemoteCharacteristic? characteristic = ResolveReadCharacteristic();
-            if (characteristic is null)
+            catch (OperationCanceledException)
+            {
                 return;
-
-            characteristic.ValueUpdated -= OnReadCharacteristicValueUpdated;
-            await characteristic.StopListeningAsync(TimeSpan.FromSeconds(10), default);
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Failed to stop notifications");
-        }
-    }
-
-    // ── Private helpers ────────────────────────────────────────────
-
-    private IBleDevicePlugin? DetectPlugin(IBluetoothRemoteDevice device)
-    {
-        foreach (IBleDevicePlugin plugin in _plugins)
-        {
-            if (device.HasService(plugin.ServiceUuid))
-                return plugin;
-        }
-
-        return null;
-    }
-
-    private IBluetoothRemoteCharacteristic? ResolveReadCharacteristic()
-    {
-        if (_connectedDevice is null || _activePlugin is null)
-            return null;
-
-        IBluetoothRemoteService? service = _connectedDevice.GetService(_activePlugin.ServiceUuid);
-
-        IBluetoothRemoteCharacteristic? characteristic = service.GetCharacteristicOrDefault(Guid.Parse(_activePlugin.ReadCharacteristicUuid));
-        return characteristic ??
-               // Fallback: any characteristic with notify/indicate
-               service.GetCharacteristicOrDefault(c => c.CanListen);
-    }
-
-    private void OnReadCharacteristicValueUpdated(object? sender, ValueUpdatedEventArgs e)
-    {
-        try
-        {
-            byte[] bytes = e.NewValue.ToArray();
-            string hex = Convert.ToHexString(bytes);
-            Log.Debug("RX {Bytes} bytes: {Hex}", bytes.Length, hex);
-
-            if (_activePlugin is not null && _activePlugin.IsValidFrame(bytes))
-            {
-                if (!_activePlugin.TryParseFrame(bytes, out string command, out string[] fields)) return;
-                string frame = "\r" + command + "\x1E" + string.Join("\x1E", fields) + "\r";
-                OnFrameReceived?.Invoke(frame);
             }
-            else
+            catch (Exception ex)
             {
-                // Unknown frame — forward raw as hex
-                OnFrameReceived?.Invoke(hex);
+                Log.Warning(ex, "Retry attempt {Attempt} failed for {Uuid}", attempt, deviceUuid);
             }
         }
-        catch (Exception ex)
+
+        if (!token.IsCancellationRequested)
         {
-            Log.Warning(ex, "Error parsing incoming BLE frame");
+            Log.Error("All reconnection attempts failed for {Uuid}", deviceUuid);
+            UpdateError("Connection lost. Reconnection attempts failed.");
         }
+    }
+
+    private void UpdateDeviceFromScanResult(IPeripheral result)
+    {
+        // Store the peripheral for later connection
+        _discoveredPeripherals[result.Uuid] = result;
+
+        // Refresh the device list
+        UpdateDeviceList();
+    }
+
+    private void UpdateDeviceList()
+    {
+        List<BleDeviceInfo> list =
+        [
+            .. _discoveredPeripherals.Values
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name) && p.Name != "Unknown")
+                .Select(p => new BleDeviceInfo
+                {
+                    Uuid = Guid.Parse(p.Uuid),
+                    Name = p.Name!,
+                    IsConnected = p.IsConnected(),
+                    LastSeen = DateTime.Now
+                })
+        ];
+
+        _devices.OnNext(list);
+    }
+
+    private void UpdateError(string message)
+    {
+        _errorMessage.OnNext(message);
+        _state.OnNext(BleConnectionState.Error);
     }
 
     public void Dispose()
     {
-        if (_connectedDevice is not null)
-        {
-            _ = _connectedDevice.DisconnectAsync();
-            _connectedDevice = null;
-        }
-
-        _activePlugin = null;
+        StopScanning();
+        _connectionSubscription?.Dispose();
+        _retryCts?.Cancel();
+        _retryCts?.Dispose();
+        _state.Dispose();
+        _devices.Dispose();
+        _errorMessage.Dispose();
     }
 }
