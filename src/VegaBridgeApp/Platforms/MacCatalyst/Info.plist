@@ -22,6 +22,7 @@
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
+		<string>bluetooth-le</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -37,7 +38,15 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	
-	<!-- BLE Background Modes -->
+    <!-- Location Usage Descriptions -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>VegaBridge needs your location to show your position on the map and calculate routes.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>VegaBridge needs background location access to track your ride and provide turn-by-turn navigation, even when the screen is off.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>VegaBridge needs background location access to track your ride and provide turn-by-turn navigation, even when the screen is off.</string>
+
+    <!-- BLE Background Modes -->
     <key>UIBackgroundModes</key>
     <array>
         <string>bluetooth-central</string>

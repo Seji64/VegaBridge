@@ -5,13 +5,9 @@ namespace VegaBridgeApp.Models.BLE;
 /// </summary>
 public enum BleConnectionState
 {
-    Unknown,
-    NoBle,
+    Idle,
     Scanning,
-    FoundDevices,
     Connecting,
     Connected,
-    Disconnecting,
-    Disconnected,
     Error
 }

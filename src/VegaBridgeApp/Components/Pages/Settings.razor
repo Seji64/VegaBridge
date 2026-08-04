@@ -7,16 +7,6 @@
 
     <MudStack Spacing="3">
         
-        <!-- ── Connection status ──────────────────────────────────────── -->
-        @if (ConnectionState is BleConnectionState.Connected or BleConnectionState.Connecting 
-                                                      or BleConnectionState.Error)
-        {
-            <MudPaper Elevation="0" Class="pa-2" Style="border-radius: 12px;">
-                <MudChip T="string" Variant="Variant.Filled" Size="Size.Small"
-                         Color="@GetStatusSeverity()">@StatusMessage</MudChip>
-            </MudPaper>
-        }
-
         <!-- ── Connect / Disconnect ──────────────────────────────────────── -->
         <MudCard Elevation="2" Style="border-radius: 12px;">
             <MudCardContent>
@@ -25,7 +15,7 @@
                         Variant="Variant.Filled" 
                         Color="Color.Success"
                         OnClick="@ConnectToSelected"
-                        Disabled="@(SelectedDevice == null || IsConnected)" 
+                        Disabled="@(SelectedDevice == null || SelectedDevice.IsConnected || ConnectionState == BleConnectionState.Connecting)" 
                         StartIcon="@Icons.Material.Filled.ConnectWithoutContact"
                         FullWidth="true">
                         @L["Connect"]
@@ -65,162 +55,62 @@
                     {
                         <MudStack Row="true" AlignItems="AlignItems.Center" Class="ml-2" Style="display: inline-flex;">
                             <MudProgressCircular Color="Color.Info" Size="Size.Small" Indeterminate="true" />
-                            <MudText Typo="Typo.caption" Color="Color.Info" Class="ml-1">@L["BLEScanning"]</MudText>
+                            <MudButton OnClick="@StopBleScanAsync" StartIcon="@Icons.Material.Filled.Stop" Color="Color.Error">Stop Scanning</MudButton>
                         </MudStack>
                     }
                     else
                     {
+                        <MudSpacer/>
                         <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="@StartBleScanAsync"/>
                     }
                 </MudStack>
                 </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
-                @if (!Devices.Any(d => d.IsPaired))
+                @foreach (BleDeviceInfo device in Devices)
                 {
-                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Style="border-radius: 8px;">
-                        <MudStack>
-                            <MudText Typo="Typo.body2" Style="font-weight: 600;">@L["PairingInfoTitle"]</MudText>
-                            <MudText Typo="Typo.caption">@L["PairingInfoBody"]</MudText>
-                        </MudStack>
-                    </MudAlert>
-                }
-                else
-                {
-                    @foreach (BleDeviceInfo device in Devices)
-                    {
-                        <MudButton Variant="@(SelectedDevice?.Uuid == device.Uuid ? Variant.Filled : Variant.Outlined)" 
-                                   Color="@(SelectedDevice?.Uuid == device.Uuid ? Color.Primary : Color.Default)"
-                                   OnClick="@(() => SelectedDevice = device)" 
-                                   Class="pa-4 mb-2"
-                                   Style="text-align: left; width: 100%; justify-content: flex-start;">
-                            <MudStack Spacing="0" Style="width: 100%;">
-                                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
-                                    <MudText Typo="Typo.body2" Style="font-weight: 600;">@device.Name</MudText>
+                    <MudButton Variant="@(SelectedDevice?.Uuid == device.Uuid ? Variant.Filled : Variant.Outlined)" 
+                               Color="@(SelectedDevice?.Uuid == device.Uuid ? Color.Primary : Color.Default)"
+                               OnClick="@(() => SelectedDevice = device)" 
+                               Class="pa-4 mb-2"
+                               Style="text-align: left; width: 100%; justify-content: flex-start;">
+                        <MudStack Spacing="0" Style="width: 100%;">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.body1">@device.Name</MudText>
+                                @if (device.IsConnected || (SelectedDevice?.Uuid == device.Uuid && ConnectionState is BleConnectionState.Connecting or BleConnectionState.Error))
+                                {
                                     <MudChip T="string" Size="Size.Small"
-                                             Color="@(device.IsPaired ? Color.Tertiary : (device.IsConnected ? Color.Success : Color.Default))"
-                                             Variant="@((device.IsConnected || device.IsPaired) ? Variant.Filled : Variant.Text)">
-                                        @(device.IsPaired ? L["SystemPaired"] : device.IsConnected ? L["Connected"] : L["Found"])
+                                             Color="@GetDeviceStatusColor(device)"
+                                             Variant="Variant.Filled">
+                                        @GetDeviceStatusText(device)
                                     </MudChip>
-                                </MudStack>
-                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                                    @if (!device.IsPaired)
-                                    {
-                                        @switch (device.Rssi)
-                                        {
-                                            case > -60:
-                                                <MudIcon Icon="@Icons.Material.Filled.SignalCellular4Bar" Size="Size.Small" Color="Color.Success" />
-                                                break;
-                                            case > -80:
-                                                <MudIcon Icon="@Icons.Material.Filled.SignalCellularConnectedNoInternet0Bar" Size="Size.Small" Color="Color.Warning" />
-                                                break;
-                                            default:
-                                                <MudIcon Icon="@Icons.Material.Filled.SignalCellularConnectedNoInternet0Bar" Size="Size.Small" Color="Color.Error" />
-                                                break;
-                                        }
-                                        <MudText Typo="Typo.caption">@device.Rssi dBm</MudText>
-                                    }
-                                    @if (device.Name?.Contains("MV", StringComparison.OrdinalIgnoreCase) == true ||
-                                         device.Name?.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase) == true)
-                                    {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Class="ml-auto">MV AGUSTA</MudChip>
-                                    }
-                                </MudStack>
+                                }
                             </MudStack>
-                        </MudButton>
-                    }
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                @if (device.Name.Contains("MV", StringComparison.OrdinalIgnoreCase) ||
+                                     device.Name.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Class="ml-auto">MV AGUSTA</MudChip>
+                                }
+                            </MudStack>
+                        </MudStack>
+                    </MudButton>
                 }
             </MudCardContent>
         </MudCard>
 
-        <!-- ── Connection Details ────────────────────────────────────────── -->
-        @if (IsConnected && ActivePlugin != null)
+        <!-- ── Connection Details ──────────────────────────────────────── -->
+        @if (IsConnected)
         {
             <MudCard Elevation="2" Style="border-radius: 16px;">
                 <MudCardContent>
                     <MudText Typo="Typo.subtitle2" Class="mb-2">@L["ConnectionDetails"]</MudText>
-                    <MudGrid>
-                        <MudItem xs="6">
-                            <MudText Typo="Typo.caption" Class="text-muted">@L["Manufacturer"]</MudText>
-                            <MudText Typo="Typo.body2">@ActivePlugin.DisplayName</MudText>
-                        </MudItem>
-                        <MudItem xs="6">
-                            <MudText Typo="Typo.caption" Class="text-muted">@L["PluginId"]</MudText>
-                            <MudText Typo="Typo.body2">@ActivePlugin.ManufacturerId</MudText>
-                        </MudItem>
-                        <MudItem xs="12">
-                            <MudText Typo="Typo.caption" Class="text-muted">@L["ServiceUuid"]</MudText>
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="font-family: monospace;">@ActivePlugin.ServiceUuid</MudText>
-                        </MudItem>
-                    </MudGrid>
+                    <MudText Typo="Typo.body2">Connected to <b>@SelectedDevice?.Name</b></MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="font-family: monospace;">@SelectedDevice?.Uuid</MudText>
                 </MudCardContent>
             </MudCard>
         }
-
-        <!-- ── Frame Log Terminal ────────────────────────────────────────── -->
-        @if (ReceivedFrames.Count > 0)
-        {
-            <MudCard Elevation="2" Style="border-radius: 16px; overflow: hidden;">
-                <MudCardHeader Class="mud-theme-dark" Style="background: #2d2d2d;">
-                    <CardHeaderContent>
-                        <MudStack Row="true" AlignItems="AlignItems.Center">
-                            <MudIcon Icon="@Icons.Material.Filled.Terminal" Color="Color.Inherit" Size="Size.Small" />
-                            <MudText Typo="Typo.subtitle2" Color="Color.Inherit">@L["IncomingFrames"] (@ReceivedFrames.Count)</MudText>
-                        </MudStack>
-                    </CardHeaderContent>
-                    <CardHeaderActions>
-                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Inherit" OnClick="@(() => ReceivedFrames.Clear())" />
-                    </CardHeaderActions>
-                </MudCardHeader>
-                <MudCardContent Class="pa-0">
-                    <div style="height: 250px; overflow-y: auto; background-color: #000; color: #00ff00; font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace; font-size: 0.75rem; padding: 12px; line-height: 1.4;">
-                        @foreach (string frame in ReceivedFrames.AsEnumerable().Reverse())
-                        {
-                            <div style="border-bottom: 1px solid #1a1a1a; padding: 2px 0; display: flex;">
-                                <span style="color: #888; margin-right: 8px;">[RX]</span>
-                                <span>@frame</span>
-                            </div>
-                        }
-                    </div>
-                </MudCardContent>
-            </MudCard>
-        }
-
-        <!-- ── Plugin Management ────────────────────────────────────────── -->
-        <MudExpansionPanels MultiExpansion="false" Style="border-radius: 16px;">
-            <MudExpansionPanel Text="@L["PluginConfiguration"]">
-                <MudText Typo="Typo.body2" Class="mb-3">
-                    @L["PluginOverride"]
-                </MudText>
-                <MudSelect T="string"
-                           Label="@L["SelectPlugin"]"
-                           Variant="Variant.Outlined"
-                           Value="ManualPlugin?.ManufacturerId ?? string.Empty"
-                           ValueChanged="@OnManualPluginChanged">
-                    <MudSelectItem T="string" Value="@(string.Empty)">@L["AutoDetect"]</MudSelectItem>
-                    @foreach (IBleDevicePlugin plugin in BleManager.Plugins)
-                    {
-                        <MudSelectItem T="string" Value="@plugin.ManufacturerId">@plugin.DisplayName (@plugin.ManufacturerId)</MudSelectItem>
-                    }
-                </MudSelect>
-                
-                <MudDivider Class="my-4" />
-                
-                <MudText Typo="Typo.caption" Class="text-muted mb-2">@L["RegisteredPlugins"]</MudText>
-                <div class="d-flex flex-wrap gap-2">
-                    @foreach (IBleDevicePlugin plugin in BleManager.Plugins)
-                    {
-                        <MudChip T="string"
-                                 Size="Size.Small"
-                                 Color="@(plugin.ManufacturerId == ActivePlugin?.ManufacturerId ? Color.Primary : Color.Default)"
-                                 Variant="Variant.Text">
-                            @plugin.DisplayName
-                        </MudChip>
-                    }
-                </div>
-            </MudExpansionPanel>
-        </MudExpansionPanels>
-
+        
         <!-- ── Navigation Settings ──────────────────────────────────────── -->
         <MudCard Elevation="2" Style="border-radius: 16px;">
             <MudCardContent>

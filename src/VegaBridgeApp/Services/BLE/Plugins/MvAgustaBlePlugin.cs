@@ -1,5 +1,4 @@
 using System.Text;
-using Bluetooth.Abstractions.Scanning;
 
 // ReSharper disable InvalidXmlDocComment
 
@@ -100,9 +99,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         return BuildFrame("FINISH", "", "", "");
     }
 
-    public async Task<bool> SendAsync(IBluetoothRemoteDevice device, byte[] data, bool isControlFrame)
+    public async Task<bool> SendAsync(object device, byte[] data, bool isControlFrame)
     {
-        try
+        /*try
         {
             IBluetoothRemoteService? service = device.GetService(ServiceUuid);
             if (service == null) return false;
@@ -119,6 +118,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         {
             Serilog.Log.Error(ex, "MvAgustaBlePlugin failed to send data");
             return false;
-        }
+        }*/
+        return true;
     }
 }

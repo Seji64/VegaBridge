@@ -1,5 +1,3 @@
-using Bluetooth.Abstractions;
-using Bluetooth.Abstractions.Scanning;
 
 namespace VegaBridgeApp.Services.BLE;
 
@@ -53,7 +51,7 @@ public interface IBleDevicePlugin
     /// <param name="device">The connected BLE device.</param>
     /// <param name="data">The raw bytes to send.</param>
     /// <param name="isControlFrame">True if this is a control frame (e.g. Auth), false for data frames.</param>
-    Task<bool> SendAsync(IBluetoothRemoteDevice device, byte[] data, bool isControlFrame);
+    //Task<bool> SendAsync(IBluetoothRemoteDevice device, byte[] data, bool isControlFrame);
 
     /// <summary>
     /// Checks if a received data buffer is a valid frame for this plugin.
