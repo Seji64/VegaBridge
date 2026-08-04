@@ -166,7 +166,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     private async Task SendTestFrame()
     {
-        // Future implementation
+        await BleManager.SendTestFrameAsync();
     }
 
     private void SaveOffRouteThreshold()

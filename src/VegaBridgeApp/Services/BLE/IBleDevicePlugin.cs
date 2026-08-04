@@ -1,3 +1,4 @@
+using VegaBridgeApp.Models.BLE;
 
 namespace VegaBridgeApp.Services.BLE;
 
@@ -18,13 +19,22 @@ public interface IBleDevicePlugin
     string DisplayName { get; }
 
     /// <summary>
+    /// Short brand name for UI labels (e.g. "MV AGUSTA").
+    /// </summary>
+    string BrandName { get; }
+
+    /// <summary>
+    /// Determines if this plugin is compatible with the given device.
+    /// </summary>
+    bool IsCompatible(BleDeviceInfo device);
+
+    /// <summary>
     /// GATT Service UUID as a string.
     /// </summary>
     Guid ServiceUuid { get; }
 
     /// <summary>
-    /// GATT characteristic UUID for writing control data (e.g. Auth, Keepalive).
-    /// Usually supports Write-with-Response.
+    /// GATT characteristic UUID for writing control data.
     /// </summary>
     string ControlWriteCharacteristicUuid { get; }
 
@@ -34,39 +44,17 @@ public interface IBleDevicePlugin
     string ReadCharacteristicUuid { get; }
 
     /// <summary>
-    /// If true, writes use Write-with-Response (for Auth/Keepalive).
-    /// If false, writes use Write Command (fire-and-forget).
+    /// Sends a command to the device using the manufacturer-specific logic.
     /// </summary>
-    bool RequiresWriteWithResponse { get; }
+    Task SendAsync(IBleConnectedDevice device, string command, params string[] fields);
 
     /// <summary>
-    /// Builds a raw frame byte array from a command and its fields.
-    /// Frame format follows the manufacturer's protocol (e.g. \rCMD\x1Efields\r).
+    /// Creates and sends a simple test frame to verify BLE connectivity.
     /// </summary>
-    byte[] BuildFrame(string command, params string[] fields);
+    Task SendTestAsync(IBleConnectedDevice device);
 
     /// <summary>
-    /// Sends data to the device using the manufacturer-specific logic.
+    /// Handles incoming data buffers received from the device.
     /// </summary>
-    /// <param name="device">The connected BLE device.</param>
-    /// <param name="data">The raw bytes to send.</param>
-    /// <param name="isControlFrame">True if this is a control frame (e.g. Auth), false for data frames.</param>
-    //Task<bool> SendAsync(IBluetoothRemoteDevice device, byte[] data, bool isControlFrame);
-
-    /// <summary>
-    /// Checks if a received data buffer is a valid frame for this plugin.
-    /// </summary>
-    bool IsValidFrame(byte[] data);
-
-    /// <summary>
-    /// Attempts to parse a received data buffer into a command and field array.
-    /// Returns true on success.
-    /// </summary>
-    bool TryParseFrame(byte[] data, out string command, out string[] fields);
-
-    /// <summary>
-    /// Creates a simple test frame for manual transmission testing.
-    /// Typically a FINISH or benign command to verify BLE connectivity.
-    /// </summary>
-    byte[] CreateTestFrame();
+    void OnDataReceived(byte[] data);
 }
