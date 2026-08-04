@@ -1,4 +1,6 @@
 using System.Text;
+using Serilog;
+using VegaBridgeApp.Models.BLE;
 
 // ReSharper disable InvalidXmlDocComment
 
@@ -21,12 +23,44 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
 
     public string ManufacturerId => "MVAGUSTA";
     public string DisplayName => "MV Agusta";
+    public string BrandName => "MV AGUSTA";
     public Guid ServiceUuid => Guid.Parse("00003719-0000-1000-8000-00805f9b34fb");
     public string ControlWriteCharacteristicUuid => "00002345-0000-1000-8000-00805f9b34fb";
     public string ReadCharacteristicUuid => "00001234-0000-1000-8000-00805f9b34fb";
-    public bool RequiresWriteWithResponse => true;
 
-    public byte[] BuildFrame(string command, params string[] fields)
+    public bool IsCompatible(BleDeviceInfo device)
+    {
+        // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
+        return device.Name.Contains("MV", StringComparison.OrdinalIgnoreCase) || 
+               device.Name.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)
+    {
+        byte[] frame = BuildFrame(command, fields);
+        // Use Write-with-Response for this plugin as a default for reliability
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+    }
+
+    public async Task SendTestAsync(IBleConnectedDevice device)
+    {
+        // Test frame: sends FINISH (destination reached) to verify BLE connectivity.
+        byte[] frame = BuildFrame("FINISH", "", "", "");
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+    }
+
+    public void OnDataReceived(byte[] data)
+    {
+        if (TryParseFrame(data, out string command, out string[] fields))
+        {
+            // Logic to handle the parsed frame
+            // In a real scenario, this might trigger an event or update a state machine.
+            Log.Debug("MV Agusta Frame Received: {Command}, Fields: {Fields}", command, string.Join(", ", fields));
+        }
+    }
+
+    // Internal protocol helpers
+    private byte[] BuildFrame(string command, params string[] fields)
     {
         using MemoryStream ms = new();
         ms.WriteByte(Cr);
@@ -45,12 +79,12 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         return ms.ToArray();
     }
 
-    public bool IsValidFrame(byte[] data)
+    private bool IsValidFrame(byte[] data)
     {
         return data.Length >= 3 && data[0] == Cr && data[^1] == Cr;
     }
 
-    public bool TryParseFrame(byte[] data, out string command, out string[] fields)
+    private bool TryParseFrame(byte[] data, out string command, out string[] fields)
     {
         command = string.Empty;
         fields = [];
@@ -58,13 +92,11 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         if (!IsValidFrame(data))
             return false;
 
-        // Strip CR framing
         byte[] body = data[1..^1];
 
         if (body.Length == 0)
             return false;
 
-        // Split by RS (0x1E)
         byte[][] parts = SplitByRs(body);
 
         if (parts.Length == 0)
@@ -73,14 +105,14 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         command = Encoding.UTF8.GetString(parts[0]);
         fields = parts.Length > 1
             ? parts[1..].Select(b => Encoding.UTF8.GetString(b)).ToArray()
-            : Array.Empty<string>();
+            : [];
 
         return true;
     }
 
     private byte[][] SplitByRs(byte[] data)
     {
-        List<byte[]> result = new();
+        List<byte[]> result = [];
         int start = 0;
         for (int i = 0; i <= data.Length; i++)
         {
@@ -90,35 +122,6 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             result.Add(segment);
             start = i + 1;
         }
-        return result.ToArray();
-    }
-
-    /// <summary>Test frame: sends FINISH (destination reached) to verify BLE connectivity.</summary>
-    public byte[] CreateTestFrame()
-    {
-        return BuildFrame("FINISH", "", "", "");
-    }
-
-    public async Task<bool> SendAsync(object device, byte[] data, bool isControlFrame)
-    {
-        /*try
-        {
-            IBluetoothRemoteService? service = device.GetService(ServiceUuid);
-            if (service == null) return false;
-
-            IBluetoothRemoteCharacteristic? characteristic = service.GetCharacteristicOrDefault(Guid.Parse(ControlWriteCharacteristicUuid));
-            if (characteristic == null) return false;
-
-            bool useResponse = isControlFrame && RequiresWriteWithResponse;
-            
-            await characteristic.WriteValueAsync(data, useResponse, TimeSpan.FromSeconds(10));
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Serilog.Log.Error(ex, "MvAgustaBlePlugin failed to send data");
-            return false;
-        }*/
-        return true;
+        return [.. result];
     }
 }

@@ -59,7 +59,7 @@ public static class MauiProgram
         builder.Services.AddBluetoothLE();
         
         builder.Services.AddSingleton<BleManagerService>();
-        builder.Services.AddTransient<MvAgustaBlePlugin>();
+        builder.Services.AddTransient<IBleDevicePlugin, MvAgustaBlePlugin>();
 
         // ── GPS / Location (Shiny.Locations) ───────────────────────────────
         builder.Services.AddSingleton(TimeProvider.System);
