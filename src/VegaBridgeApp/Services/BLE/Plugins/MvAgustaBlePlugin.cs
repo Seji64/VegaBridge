@@ -2,6 +2,7 @@ using System.Text;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.BLE.MvAgusta;
+using System.Threading;
 
 // ReSharper disable InvalidXmlDocComment
 
@@ -10,7 +11,7 @@ namespace VegaBridgeApp.Services.BLE.Plugins;
 /// <summary>
 /// MV Agusta BLE plugin – implements the protocol for MV Agusta motorcycles.
 /// </summary>
-public class MvAgustaBlePlugin : IBleDevicePlugin
+public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 {
     private const byte Cr = 0x0D;
     private const byte Rs = 0x1E;
@@ -22,6 +23,11 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     public string ControlWriteCharacteristicUuid => "00002345-0000-1000-8000-00805f9b34fb";
     public string ReadCharacteristicUuid => "00001234-0000-1000-8000-00805f9b34fb";
 
+    // Heartbeat fields
+    private PeriodicTimer? _heartbeatTimer;
+    private CancellationTokenSource? _heartbeatCts;
+    private bool _isDisposed;
+
     public bool IsCompatible(BleDeviceInfo device)
     {
         // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
@@ -32,15 +38,16 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     public async Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)
     {
         byte[] frame = BuildFrame(command, fields);
-        // Use Write-with-Response for this plugin as a default for reliability
-        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+        // Use Write-without-Response for this characteristic as the device does not support response writes
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
     }
 
     public async Task SendTestAsync(IBleConnectedDevice device)
     {
         // Test frame: sends FINISH (destination reached) to verify BLE connectivity.
         byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
-        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+        // Use Write-without-Response for this characteristic as the device does not support response writes
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
     }
 
     // ─── Semantic Navigation Implementation ──────────────────────────────
@@ -58,6 +65,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         
         // Send initial status frame
         await SendStatusFrameAsync(device, 0, input.TotalDistanceKm * 1000, 0);
+        
+        // Start heartbeat when navigation begins
+        await StartHeartbeatAsync(device);
     }
 
     public async Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input)
@@ -70,7 +80,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             input.ManeuverIcon, 
             input.InstructionText, 
             input.StreetName);
-        await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: true);
+        await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
 
         // Send SM (Status/Motion) frame with current metrics
         await SendStatusFrameAsync(device, input.SpeedKmh, input.RemainingDistanceKm * 1000, input.DistanceToTurnM);
@@ -80,7 +90,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     {
         Log.Debug("MV Agusta: Navigation Finish");
         byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
-        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+        
+        // Stop heartbeat when navigation ends
+        await StopHeartbeatAsync();
     }
 
     public async Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input)
@@ -89,7 +102,108 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         
         // Signal the motorcycle that the route is being recalculated
         byte[] frame = BuildFrame(Commands.RENAVI, "off-route", "OFF ROUTE", $"{input.DistanceMeters:F0}m");
-        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+    }
+
+    // ─── Heartbeat Implementation ───────────────────────────────────────
+
+    /// <summary>
+    /// Starts the GUI1 keep-alive heartbeat timer (sends every 2-3 seconds).
+    /// </summary>
+    public async Task StartHeartbeatAsync(IBleConnectedDevice device)
+    {
+        // Stop any existing timer
+        await StopHeartbeatAsync();
+        
+        _heartbeatCts = new CancellationTokenSource();
+        _heartbeatTimer = new PeriodicTimer(TimeSpan.FromSeconds(2.5)); // Send every 2.5 seconds
+        
+        // Start the heartbeat loop
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (await _heartbeatTimer.WaitForNextTickAsync(_heartbeatCts.Token))
+                {
+                    if (_isDisposed) break;
+                    await SendGui1KeepAliveAsync(device);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when stopping
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "MV Agusta: Heartbeat error");
+            }
+        }, _heartbeatCts.Token);
+    }
+
+    /// <summary>
+    /// Stops the heartbeat timer.
+    /// </summary>
+    public async Task StopHeartbeatAsync()
+    {
+        if (_heartbeatCts != null)
+        {
+            _heartbeatCts.Cancel();
+            _heartbeatCts.Dispose();
+            _heartbeatCts = null;
+        }
+        
+        _heartbeatTimer?.Dispose();
+        _heartbeatTimer = null;
+    }
+
+    /// <summary>
+    /// Creates and sends a GUI1 keep-alive frame with a session ID.
+    /// </summary>
+    private async Task SendGui1KeepAliveAsync(IBleConnectedDevice device)
+    {
+        try
+        {
+            // Generate a fresh cryptographically random session ID for each heartbeat tick.
+            // This satisfies the spec requirement that the ID changes every 1-3 seconds and avoids magic strings.
+            string sessionId = GenerateSessionId();
+            
+            byte[] frame = BuildGui1Frame(sessionId);
+            // GUI1 uses Write-with-Response on handle 0x002A (same UUID as control characteristic)
+            await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+            Log.Debug("MV Agusta: Sent GUI1 keep-alive {SessionId}", sessionId);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "MV Agusta: Failed to send GUI1 keep-alive");
+        }
+    }
+
+    /// <summary>
+    /// Builds a GUI1 frame: \rGUI1\u001E<session_id>\r
+    /// </summary>
+    private byte[] BuildGui1Frame(string sessionId)
+    {
+        using MemoryStream ms = new();
+        ms.WriteByte(Cr);
+        ms.Write(Encoding.UTF8.GetBytes(Commands.GUI1));
+        ms.WriteByte(Rs);
+        ms.Write(Encoding.UTF8.GetBytes(sessionId));
+        ms.WriteByte(Cr);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Generates a cryptographically random 8-byte session ID (16 hex characters).
+    /// This satisfies the protocol requirement that GUI1 session IDs change each heartbeat.
+    /// </summary>
+    private string GenerateSessionId()
+    {
+        // Use RandomNumberGenerator for secure randomness
+        using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+        byte[] randomBytes = new byte[8]; // 8 bytes = 16 hex characters
+        rng.GetBytes(randomBytes);
+        // Convert to uppercase hex string (matching the spec's hex format)
+        return Convert.ToHexString(randomBytes).ToUpperInvariant();
     }
 
     // ─── Incoming Data Handling ──────────────────────────────────────────
@@ -112,7 +226,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             speedKmh.ToString("F0"),
             remainingDistanceM.ToString("F0"),
             distanceToTurnM.ToString("F0"));
-        await device.WriteAsync(ControlWriteCharacteristicUuid, smFrame, withResponse: true);
+        await device.WriteAsync(ControlWriteCharacteristicUuid, smFrame, withResponse: false);
     }
 
     private byte[] BuildFrame(string command, params string[] fields)
@@ -202,4 +316,16 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         { 15, TurnTypes.Finish },
         { 16, TurnTypes.Finish }
     };
+
+    // ─── IAsyncDisposable Implementation ───────────────────────────────────────
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        
+        await StopHeartbeatAsync();
+        
+        GC.SuppressFinalize(this);
+    }
 }

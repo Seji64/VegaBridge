@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using OpenLayers.Blazor;
 using System.Runtime.CompilerServices;
-using MetalPerformanceShadersGraph;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Models.Routes;

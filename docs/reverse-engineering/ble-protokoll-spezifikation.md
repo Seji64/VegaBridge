@@ -1,9 +1,10 @@
 # MV Agusta Brutale 800 — BLE Protokoll Spezifikation
 
-> **Stand:** 2026-07-16  
-> **Basis:** PacketLog `.pklg`-Capture + APK Decompilation (jadx)  
-> **Capture:** iPad 11,6 (iOS 26.5, Broadcom BCM_4355C1) — Navigationssession  
-> **App:** MV Ride v1.4.3 (Android) — dekompiliert via jadx  
+> **Stand:** 2026-08-27
+> **Version:** 3.1
+> **Basis:** PacketLog `.pklg`-Capture + APK Decompilation (jadx)
+> **Capture:** iPad 11,6 (iOS 26.5, Broadcom BCM_4355C1) — Navigationssession
+> **App:** MV Ride v1.4.3 (Android) — dekompiliert via jadx
 
 ---
 
@@ -25,13 +26,17 @@
 | Service | — | `00003719-0000-1000-8000-00805f9b34fb` | MV Ride Service |
 | `0x002A` | Write mit Response | `00002345-0000-1000-8000-00805f9b34fb` | GUID/Auth Keepalive |
 | `0x002D` | Write Command | *(unbekannt, im Capture nicht sichtbar)* | Navigationsdaten |
-| ? | Notify/Read | `00001234-0000-1000-8000-00805f9b34fb` | Bike → Phone (GPS-Download, NEED) |
+| ? | Notify/Read | `00001234-0000-1000-8000-0080-00805f9b34fb` | Bike → Phone (GPS-Download, NEED) |
 
 **Anmerkung:** Die UUIDs stammen aus der APK-Dekompilierung (`BluetoothService.java`).
 **Datenfluss:** Primär **Phone → Bike** (Navigationsbefehle). Das Bike sendet Daten über BLE-Notifications (auf dem Read-Characteristic `00001234-...`), z. B. GPS-Trip‑Downloads und NEED‑Anfragen.
 
 > **Hinweis:** Da die Service Discovery vor Capture-Beginn stattfand, sind die UUIDs nicht im `.pklg` sichtbar.
 > Zur Sicherheit sollten sie via nRF Connect / LightBlue direkt am Bike verifiziert werden.
+
+**Wichtige Hinweis zu den Write-Modes:**
+- **Handle `0x002A` (GUI1 Keepalive):** Muss mit **Write mit Response** (`withResponse: true`) angesprochen werden.
+- **Handle `0x002D` (alle Navigationsbefehle wie HELLO, VER, GPS, IOV, NEED, ORIG, DEST, REM, NAVI, SM, SM1, RENAVI, FINISH, G, MSG):** Muss mit **Write ohne Response** (`withResponse: false`) angesprochen werden, da das Bike keine Response auf dieses Characteristic unterstützt.
 
 ---
 
@@ -135,7 +140,7 @@ CommandDataPacket(arrayOf(
 
 | Feld | Beispiel | Beschreibung |
 |------|----------|-------------|
-| `session_id` | `250000BA04000000` | Hex-String als Session-ID. Alle 1–3 s aktualisiert. |
+| `session_id` | `250000BA04000000` | Hex-String als Session-ID. Alle 1–3 s aktualisiert. Die Implementierung des **MvAgustaBlePlugin** generiert nun eine neue 16‑Hex‑Ziffer (8‑Byte) UUID pro Heartbeat mit einer kryptografisch sicheren Random-Number-Generator-Quelle, wodurch die manuell gepflegten festen Paare obsolet werden.
 
 **Paare:** Die GUIDs werden immer **paarweise** gesendet, z.B. `BA04` + `C404` oder `B190` + `B1A0`.
 
@@ -820,4 +825,5 @@ Diese Kombination ist besonders nützlich, um zu bestätigen, ob ein „Write wi
 | 2026-07-16 | v1.0 | Erstfassung basierend auf `mvride_nav.pklg`-Capture |
 | 2026-07-16 | v2.0 | APK-Dekompilierung (jadx) – alle 16 Nachrichtentypen, UUIDs, Turn-Enum, Pairing-Mechanismus |
 | 2026-08-27 | v3.0 | Ergänzung Abschnitt 13: Weiteres Vorgehen mit LightBlue (iOS) – detaillierte Test‑ und Beobachtungsanleitung für BLE‑Analyse mit iPhone. |
+| 2026-08-27 | v3.1 | Hinzufügung der Write-Mode-Informationen für die Characteristic UUIDs und Implementierung des GUI1-Heartbeat-Mechanismus im MvAgustaBlePlugin. |
 
