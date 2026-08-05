@@ -18,7 +18,6 @@ public class GpsService : IDisposable
     private readonly IGpsManager _gpsManager;
 
     private readonly List<GpsReading> _breadcrumb = [];
-    private GpsReading? _lastReading;
 
     public GpsService(IGpsManager gpsManager)
     {
@@ -41,9 +40,9 @@ public class GpsService : IDisposable
 
     // ── Properties ───────────────────────────────────────────────────────
 
-    public bool IsTracking { get; private set; }
+    public bool IsTracking => _gpsManager.IsListening();
 
-    public GpsReading? LastReading => _lastReading;
+    public GpsReading? LastReading { get; private set; }
 
     /// <summary>
     /// Current speed in km/h, derived from the last reading.
@@ -53,22 +52,14 @@ public class GpsService : IDisposable
     {
         get
         {
-            if (_lastReading == null) return 0;
-            double kmh = _lastReading.Speed * 3.6;
+            if (LastReading == null) return 0;
+            double kmh = LastReading.Speed * 3.6;
             return double.IsNaN(kmh) || double.IsInfinity(kmh) || kmh < 0 ? 0 : kmh;
         }
     }
 
-    /// <summary>Current heading in degrees (0–360), or 0 when unknown.</summary>
-    public double CurrentHeading => _lastReading?.Heading ?? 0;
-
     /// <summary>Current position accuracy in meters, or 0 when unknown.</summary>
-    public double CurrentAccuracy => _lastReading?.PositionAccuracy ?? 0;
-
-    /// <summary>
-    /// Altitude in meters above sea level, or 0 when unknown.
-    /// </summary>
-    public double CurrentAltitude => _lastReading?.Altitude ?? 0;
+    public double CurrentAccuracy => LastReading?.PositionAccuracy ?? 0;
 
     /// <summary>Read-only snapshot of the breadcrumb trail.</summary>
     public IReadOnlyList<GpsReading> Breadcrumb => _breadcrumb.AsReadOnly();
@@ -79,22 +70,17 @@ public class GpsService : IDisposable
     /// Returns the last cached reading, or tries to get a quick fix.<br/>
     /// Does NOT start the GPS listener – safe to call anytime.
     /// </summary>
-    public async Task<GpsReading?> GetLastReadingOrCurrentAsync()
+    public async Task GetLastReadingOrCurrentAsync()
     {
-        if (_lastReading != null)
-            return _lastReading;
-
         try
         {
             GpsReading? reading = await _gpsManager.GetLastReadingOrCurrentPosition();
             if (reading != null)
-                _lastReading = reading;
-            return reading;
+                LastReading = reading;
         }
         catch (Exception ex)
         {
             Log.Debug(ex, "GetLastReadingOrCurrent failed");
-            return null;
         }
     }
 
@@ -112,13 +98,16 @@ public class GpsService : IDisposable
         try
         {
             AccessState shinyAccess = await Task.Run(() =>
-                _gpsManager.RequestAccess(new GpsRequest(GpsBackgroundMode.None)));
+                _gpsManager.RequestAccess(new GpsRequest()));
             Log.Debug("Shiny GPS access: {Access}", shinyAccess);
 
-            if (shinyAccess == AccessState.Available)
-                return true;
-            if (shinyAccess is AccessState.Denied or AccessState.Restricted)
-                return false;
+            switch (shinyAccess)
+            {
+                case AccessState.Available:
+                    return true;
+                case AccessState.Denied or AccessState.Restricted:
+                    return false;
+            }
         }
         catch (Exception ex)
         {
@@ -168,20 +157,22 @@ public class GpsService : IDisposable
             ? GpsRequest.Realtime(true)
             : GpsRequest.Foreground;
 
-        await _gpsManager.StartListener(request);
-        IsTracking = true;
+        if (!IsTracking)
+        {
+            await _gpsManager.StartListener(request);
+        }
+        
         TrackingChanged?.Invoke(true);
 
         Log.Information("GPS tracking started (background: {Bg})", backgroundMode);
     }
-
+    
     /// <summary>Stop GPS tracking.</summary>
     public async Task StopTrackingAsync()
     {
         if (!IsTracking) return;
 
         await _gpsManager.StopListener();
-        IsTracking = false;
         TrackingChanged?.Invoke(false);
 
         Log.Information("GPS tracking stopped ({BreadcrumbCount} points collected)",
@@ -199,14 +190,14 @@ public class GpsService : IDisposable
 
     private void OnForegroundReading(object? sender, GpsReading reading)
     {
-        _lastReading = reading;
+        LastReading = reading;
         _breadcrumb.Add(reading);
         ReadingReceived?.Invoke(reading);
     }
 
     private void OnBackgroundReading(GpsReading reading)
-    {
-        _lastReading = reading;
+    { ;
+        LastReading = reading;
         _breadcrumb.Add(reading);
         ReadingReceived?.Invoke(reading);
     }

@@ -1,6 +1,7 @@
 using System.Text;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
+using VegaBridgeApp.Models.BLE.MvAgusta;
 
 // ReSharper disable InvalidXmlDocComment
 
@@ -8,13 +9,6 @@ namespace VegaBridgeApp.Services.BLE.Plugins;
 
 /// <summary>
 /// MV Agusta BLE plugin – implements the protocol for MV Agusta motorcycles.
-/// 
-/// Protocol details (from decompiled APK + packet capture):
-///   Service UUID: 00003719-0000-1000-8000-00805f9b34fb
-///   Write char:   00002345-0000-1000-8000-00805f9b34fb  (Write-with-Response for Auth/Keepalive)
-///   Read char:    00001234-0000-1000-8000-00805f9b34fb  (Notify for bike→phone)
-/// 
-/// Frame format: \r<CMD>\x1E<field1>\x1E<field2>...\r
 /// </summary>
 public class MvAgustaBlePlugin : IBleDevicePlugin
 {
@@ -45,9 +39,60 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     public async Task SendTestAsync(IBleConnectedDevice device)
     {
         // Test frame: sends FINISH (destination reached) to verify BLE connectivity.
-        byte[] frame = BuildFrame("FINISH", "", "", "");
+        byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
     }
+
+    // ─── Semantic Navigation Implementation ──────────────────────────────
+
+    public async Task SendNavigationStartAsync(IBleConnectedDevice device, NavigationStartInput input)
+    {
+        Log.Debug("MV Agusta: Navigation Start - {Distance:F1}km, {Time:F0}min", input.TotalDistanceKm, input.TotalTimeMin);
+        
+        // Send initial NAVI frame with first maneuver (if available)
+        if (input.UpcomingManeuvers?.Count > 0)
+        {
+            NavigationUpdateInput first = input.UpcomingManeuvers[0];
+            await SendNavigationUpdateAsync(device, first with { IsFinal = false });
+        }
+        
+        // Send initial status frame
+        await SendStatusFrameAsync(device, 0, input.TotalDistanceKm * 1000, 0);
+    }
+
+    public async Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input)
+    {
+        Log.Debug("MV Agusta: Navigation Update - Maneuver {Index}/{Total}: {Icon}, Dist: {Dist:F0}m, Speed: {Speed:F0}km/h", 
+            input.CurrentManeuverIndex + 1, input.TotalManeuvers, input.ManeuverIcon, input.DistanceToTurnM, input.SpeedKmh);
+
+        // Send NAVI frame with maneuver info
+        byte[] naviFrame = BuildFrame(Commands.NAVI, 
+            input.ManeuverIcon, 
+            input.InstructionText, 
+            input.StreetName);
+        await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: true);
+
+        // Send SM (Status/Motion) frame with current metrics
+        await SendStatusFrameAsync(device, input.SpeedKmh, input.RemainingDistanceKm * 1000, input.DistanceToTurnM);
+    }
+
+    public async Task SendNavigationFinishAsync(IBleConnectedDevice device)
+    {
+        Log.Debug("MV Agusta: Navigation Finish");
+        byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+    }
+
+    public async Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input)
+    {
+        Log.Warning("MV Agusta: Off-Route Alert - {Dist:F1}m at {Lat},{Lon}", input.DistanceMeters, input.Latitude, input.Longitude);
+        
+        // Signal the motorcycle that the route is being recalculated
+        byte[] frame = BuildFrame(Commands.RENAVI, "off-route", "OFF ROUTE", $"{input.DistanceMeters:F0}m");
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
+    }
+
+    // ─── Incoming Data Handling ──────────────────────────────────────────
 
     public void OnDataReceived(byte[] data)
     {
@@ -59,7 +104,17 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         }
     }
 
-    // Internal protocol helpers
+    // ─── Internal Protocol Helpers ───────────────────────────────────────
+
+    private async Task SendStatusFrameAsync(IBleConnectedDevice device, double speedKmh, double remainingDistanceM, double distanceToTurnM)
+    {
+        byte[] smFrame = BuildFrame(Commands.SM,
+            speedKmh.ToString("F0"),
+            remainingDistanceM.ToString("F0"),
+            distanceToTurnM.ToString("F0"));
+        await device.WriteAsync(ControlWriteCharacteristicUuid, smFrame, withResponse: true);
+    }
+
     private byte[] BuildFrame(string command, params string[] fields)
     {
         using MemoryStream ms = new();
@@ -124,4 +179,27 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         }
         return [.. result];
     }
+
+    // ─── Valhalla > MV Agusta Icon Mapping ─────────────────────────────
+    // Moved here from NavigationService to keep protocol details in the plugin.
+
+    private static readonly Dictionary<int, string> ValhallaToMvAgustaIcon = new()
+    {
+        { 1, TurnTypes.TurnRight },
+        { 2, TurnTypes.TurnLeft },
+        { 3, TurnTypes.Straight },
+        { 4, TurnTypes.TurnSlightRight },
+        { 5, TurnTypes.TurnSlightLeft },
+        { 6, TurnTypes.TurnSlightRight },
+        { 7, TurnTypes.TurnSlightLeft },
+        { 8, TurnTypes.Straight },
+        { 9, TurnTypes.TurnSlightRight },
+        { 10, TurnTypes.TurnSlightLeft },
+        { 11, TurnTypes.Straight },
+        { 12, TurnTypes.Straight },
+        { 13, TurnTypes.RoundaboutRight1 },
+        { 14, TurnTypes.RoundaboutLeft1 },
+        { 15, TurnTypes.Finish },
+        { 16, TurnTypes.Finish }
+    };
 }

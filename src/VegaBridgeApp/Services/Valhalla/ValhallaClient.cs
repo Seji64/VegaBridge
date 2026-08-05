@@ -1,6 +1,6 @@
 using System.Net;
 using Flurl.Http;
-using Microsoft.Extensions.Logging;
+using Serilog;
 using VegaBridgeApp.Models.Valhalla;
 
 namespace VegaBridgeApp.Services.Valhalla;
@@ -16,13 +16,11 @@ public class ValhallaClient : IValhallaClient
     private const string HttpClientName = "Valhalla";
 
     private readonly FlurlClient _flurlClient;
-    private readonly ILogger<ValhallaClient> _logger;
 
-    public ValhallaClient(IHttpClientFactory httpClientFactory, ILogger<ValhallaClient> logger)
+    public ValhallaClient(IHttpClientFactory httpClientFactory)
     {
         HttpClient httpClient = httpClientFactory.CreateClient(HttpClientName);
         _flurlClient = new FlurlClient(httpClient);
-        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -30,7 +28,7 @@ public class ValhallaClient : IValhallaClient
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        _logger.LogDebug("Requesting route from Valhalla");
+        Log.Debug("Requesting route from Valhalla");
 
         try
         {
@@ -41,11 +39,11 @@ public class ValhallaClient : IValhallaClient
             
              if (response?.Trip == null)
              {
-                 _logger.LogWarning("Valhalla returned OK but with no trip data");
+                 Log.Warning("Valhalla returned OK but with no trip data");
                  return Result.Failure("Valhalla returned an empty response (no trip)");
              }
             
-             _logger.LogInformation(
+             Log.Information(
                  "Route received: {Distance} km, {Time} s, {LegCount} leg(s)",
                  response.Trip.Summary?.Length,
                  response.Trip.Summary?.Time,
@@ -57,53 +55,53 @@ public class ValhallaClient : IValhallaClient
         catch (FlurlHttpException ex) when (ex.StatusCode == (int)HttpStatusCode.BadRequest)
         {
             string? errorBody = await TryGetErrorBody(ex);
-            _logger.LogError(ex, "Valhalla 400: {Error}", errorBody);
+            Log.Error(ex, "Valhalla 400: {Error}", errorBody);
             return Result.Failure($"Invalid route request (400): {errorBody ?? "unknown error"}", ex);
         }
         // ── 404 – wrong URL (not retried) ──
         catch (FlurlHttpException ex) when (ex.StatusCode == (int)HttpStatusCode.NotFound)
         {
-            _logger.LogError(ex, "Valhalla 404 – check base URL");
+            Log.Error(ex, "Valhalla 404 – check base URL");
             return Result.Failure("Valhalla endpoint not found (404) – check the base URL", ex);
         }
         // ── 429 – rate‑limited (not retried – caller should back off) ──
         catch (FlurlHttpException ex) when (ex.StatusCode == (int)HttpStatusCode.TooManyRequests)
         {
-            _logger.LogError(ex, "Valhalla 429 – rate limit hit");
+            Log.Error(ex, "Valhalla 429 – rate limit hit");
             return Result.Failure("Too many requests (429) – try again later", ex);
         }
         // ── Transient errors – these have already been retried by the resilience handler ──
         catch (FlurlHttpTimeoutException ex)
         {
-            _logger.LogError(ex, "Valhalla timed out after all retries");
+            Log.Error(ex, "Valhalla timed out after all retries");
             return Result.Failure(
                 "Valhalla did not respond – check your network or the server URL", ex);
         }
         catch (FlurlParsingException ex)
         {
-            _logger.LogError(ex, "Failed to parse Valhalla response");
+            Log.Error(ex, "Failed to parse Valhalla response");
             return Result.Failure($"Failed to parse Valhalla response: {ex.Message}", ex);
         }
         catch (FlurlHttpException ex)
         {
             string? errorBody = await TryGetErrorBody(ex);
-            _logger.LogError(ex, "Valhalla HTTP error {Status}: {Error}", ex.StatusCode, errorBody);
+            Log.Error(ex, "Valhalla HTTP error {Status}: {Error}", ex.StatusCode, errorBody);
             return Result.Failure(
                 $"Valhalla returned HTTP {ex.StatusCode}: {errorBody ?? ex.Message}", ex);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogError("Valhalla request timed out");
+            Log.Error("Valhalla request timed out");
             return Result.Failure("Valhalla request timed out");
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Valhalla request was cancelled");
+            Log.Information("Valhalla request was cancelled");
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error calling Valhalla API");
+            Log.Error(ex, "Unexpected error calling Valhalla API");
             return Result.Failure($"Unexpected error: {ex.Message}", ex);
         }
     }

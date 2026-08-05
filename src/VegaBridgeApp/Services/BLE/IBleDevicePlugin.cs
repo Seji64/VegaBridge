@@ -45,6 +45,7 @@ public interface IBleDevicePlugin
 
     /// <summary>
     /// Sends a command to the device using the manufacturer-specific logic.
+    /// Kept for raw/test access.
     /// </summary>
     Task SendAsync(IBleConnectedDevice device, string command, params string[] fields);
 
@@ -57,4 +58,29 @@ public interface IBleDevicePlugin
     /// Handles incoming data buffers received from the device.
     /// </summary>
     void OnDataReceived(byte[] data);
+
+    // ─── Semantic Navigation Methods ─────────────────────────────────────
+
+    /// <summary>
+    /// Sends navigation start sequence to the device.
+    /// Called once when navigation begins.
+    /// </summary>
+    Task SendNavigationStartAsync(IBleConnectedDevice device, NavigationStartInput input);
+
+    /// <summary>
+    /// Sends a navigation update (maneuver, speed, distance) to the device.
+    /// Called on maneuver change and periodically (throttled) for status updates.
+    /// </summary>
+    Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input);
+
+    /// <summary>
+    /// Sends navigation finish sequence to the device.
+    /// Called when destination is reached.
+    /// </summary>
+    Task SendNavigationFinishAsync(IBleConnectedDevice device);
+
+    /// <summary>
+    /// Sends an off-route alert to the device.
+    /// </summary>
+    Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input);
 }

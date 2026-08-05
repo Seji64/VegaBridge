@@ -1,5 +1,5 @@
 using Flurl.Http;
-using Microsoft.Extensions.Logging;
+using Serilog;
 using VegaBridgeApp.Models.Geocoding;
 
 namespace VegaBridgeApp.Services.Geocoding;
@@ -12,13 +12,11 @@ public class GeocodingService : IGeocodingService
     internal const string HttpClientName = "Photon";
     
     private readonly FlurlClient _flurlClient;
-    private readonly ILogger<GeocodingService> _logger;
 
-    public GeocodingService(IHttpClientFactory httpClientFactory, ILogger<GeocodingService> logger)
+    public GeocodingService(IHttpClientFactory httpClientFactory)
     {
         HttpClient httpClient = httpClientFactory.CreateClient(HttpClientName);
         _flurlClient = new FlurlClient(httpClient);
-        _logger = logger;
     }
 
     public async Task<List<GeoResult>> SuggestAsync(string query, int limit = 5, CancellationToken ct = default)
@@ -44,7 +42,7 @@ public class GeocodingService : IGeocodingService
         }
         catch (FlurlHttpException ex)
         {
-            _logger.LogWarning(ex, "Photon request failed for query '{Query}'", query);
+            Log.Warning(ex, "Photon request failed for query '{Query}'", query);
             return [];
         }
         catch (OperationCanceledException)
@@ -59,7 +57,7 @@ public class GeocodingService : IGeocodingService
         {
             PhotonResponse? response = await _flurlClient
                 .Request("reverse")
-                .SetQueryParams(new { lon = lon, lat = lat, lang = "de" })
+                .SetQueryParams(new { lon, lat, lang = "de" })
                 .GetJsonAsync<PhotonResponse>(cancellationToken: ct);
             
             if (response?.Features == null || response.Features.Count == 0)
@@ -72,7 +70,7 @@ public class GeocodingService : IGeocodingService
         }
         catch (FlurlHttpException ex)
         {
-            _logger.LogWarning(ex, "Photon request failed");
+            Log.Warning(ex, "Photon request failed");
             return [];
         }
         catch (OperationCanceledException)

@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+using Serilog;
 using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Services.Location;
 using VegaBridgeApp.Services.Routes;
@@ -17,11 +17,9 @@ namespace VegaBridgeApp.Services.Navigation;
 /// Works with the screen OFF – the UI is only needed for optional glanceable
 /// updates. The core logic runs from GPS callbacks regardless of display state.
 /// </summary>
-public class NavigationService
+public class NavigationService(GpsService gps)
 {
-    private readonly GpsService _gps;
-    private readonly ILogger<NavigationService> _logger;
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     // ── Route data (set once per navigation session) ──────────────────────
     private List<Coordinate> _routeCoords = [];
@@ -30,9 +28,6 @@ public class NavigationService
     private bool _isNavigating;
 
     // ── Session state ────────────────────────────────────────────────────
-    private double _totalDistanceKm;
-    private double _totalTimeMin;
-    private GpsReading? _lastReading;
     private double _distanceToNextTurnM;
     private double _remainingDistanceKm;
     private double _remainingTimeMin;
@@ -41,12 +36,6 @@ public class NavigationService
     private const double OffRouteThresholdDefaultM = 10.0;
 
     private double OffRouteThresholdM => Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
-
-    public NavigationService(GpsService gps, ILogger<NavigationService> logger)
-    {
-        _gps = gps;
-        _logger = logger;
-    }
 
     // ── Events (for UI + BLE layers) ─────────────────────────────────────
 
@@ -65,9 +54,6 @@ public class NavigationService
     /// <summary>Fired when the rider is significantly off the planned route.</summary>
     public event Action<double, double, double>? OffRouteDetected; // lat, lon, distanceM
 
-    /// <summary>Fired for every BLE command that would be sent (simulation mode).</summary>
-    public event Action<string, byte[]>? BleCommandSimulated;
-
     // ── Properties ───────────────────────────────────────────────────────
 
     public bool IsNavigating => _isNavigating;
@@ -75,9 +61,9 @@ public class NavigationService
     public int TotalManeuvers => _maneuvers.Count;
     public Maneuver? CurrentManeuver =>
         _maneuvers.Count > _currentManeuverIndex ? _maneuvers[_currentManeuverIndex] : null;
-    public double TotalDistanceKm => _totalDistanceKm;
-    public double TotalTimeMin => _totalTimeMin;
-    public bool IsOffRoute => _isOffRoute;
+    public double TotalDistanceKm { get; private set; }
+
+    public double TotalTimeMin { get; private set; }
 
     // ── Public API ───────────────────────────────────────────────────────
 
@@ -88,20 +74,29 @@ public class NavigationService
     /// <param name="maneuvers">All maneuvers across all legs.</param>
     /// <param name="totalDistanceKm">Total route distance.</param>
     /// <param name="totalTimeMin">Total estimated time.</param>
-    public void StartNavigation(
+    public async Task StartNavigation(
         string mergedShape,
         List<Maneuver> maneuvers,
         double totalDistanceKm,
         double totalTimeMin)
     {
+        bool wasNavigating;
         lock (_lock)
         {
-            if (_isNavigating) StopNavigation();
+            wasNavigating = _isNavigating;
+            if (wasNavigating)
+            {
+                _isNavigating = false;
+                gps.ReadingReceived -= OnGpsReading;
+                _currentManeuverIndex = 0;
+                _routeCoords = [];
+                _maneuvers = [];
+            }
 
             _routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
             _maneuvers = maneuvers;
-            _totalDistanceKm = totalDistanceKm;
-            _totalTimeMin = totalTimeMin;
+            TotalDistanceKm = totalDistanceKm;
+            TotalTimeMin = totalTimeMin;
             _currentManeuverIndex = 0;
             _remainingDistanceKm = totalDistanceKm;
             _remainingTimeMin = totalTimeMin;
@@ -109,12 +104,18 @@ public class NavigationService
             _isNavigating = true;
         }
 
+        if (wasNavigating)
+        {
+            await gps.StopTrackingAsync();
+        }
+
         NavigationStateChanged?.Invoke(true);
 
-        // Subscribe to GPS updates
-        _gps.ReadingReceived += OnGpsReading;
+        // Start GPS tracking and subscribe to readings
+        await gps.StartTrackingAsync(backgroundMode: true);
+        gps.ReadingReceived += OnGpsReading;
 
-        _logger.LogInformation(
+        Log.Information(
             "Navigation started: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers, {Points} route points",
             totalDistanceKm, totalTimeMin, maneuvers.Count, _routeCoords.Count);
 
@@ -123,21 +124,27 @@ public class NavigationService
     }
 
     /// <summary>Stop the current navigation session.</summary>
-    public void StopNavigation()
+    public async Task StopNavigation()
     {
+        bool wasNavigating;
         lock (_lock)
         {
-            if (!_isNavigating) return;
+            wasNavigating = _isNavigating;
+            if (!wasNavigating) return;
 
-            _gps.ReadingReceived -= OnGpsReading;
+            gps.ReadingReceived -= OnGpsReading;
             _isNavigating = false;
             _currentManeuverIndex = 0;
             _routeCoords = [];
             _maneuvers = [];
         }
 
-        NavigationStateChanged?.Invoke(false);
-        _logger.LogInformation("Navigation stopped");
+        if (wasNavigating)
+        {
+            await gps.StopTrackingAsync();
+            NavigationStateChanged?.Invoke(false);
+            Log.Information("Navigation stopped");
+        }
     }
 
     /// <summary>
@@ -150,8 +157,8 @@ public class NavigationService
         {
             _routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
             _maneuvers = maneuvers;
-            _totalDistanceKm = totalDistanceKm;
-            _totalTimeMin = totalTimeMin;
+            TotalDistanceKm = totalDistanceKm;
+            TotalTimeMin = totalTimeMin;
             _currentManeuverIndex = 0;
             _remainingDistanceKm = totalDistanceKm;
             _remainingTimeMin = totalTimeMin;
@@ -159,7 +166,7 @@ public class NavigationService
         }
 
         FireCurrentManeuver();
-        _logger.LogInformation(
+        Log.Information(
             "Route rerouted: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers",
             totalDistanceKm, totalTimeMin, maneuvers.Count);
     }
@@ -172,9 +179,7 @@ public class NavigationService
         {
             if (!_isNavigating || _routeCoords.Count < 2) return;
 
-        _lastReading = reading;
-
-        // 1. Snap current position to route + check off-route
+            // 1. Snap current position to route + check off-route
         (int snappedIndex, double distanceMeters) = FindNearestRouteIndex(
             reading.Position.Latitude, reading.Position.Longitude);
 
@@ -183,14 +188,12 @@ public class NavigationService
         // Off-route detection
         if (distanceMeters > OffRouteThresholdM)
         {
-            if (!_isOffRoute)
-            {
-                _isOffRoute = true;
-                _logger.LogWarning(
-                    "Off route! {Dist:F1}m from route", distanceMeters);
-                OffRouteDetected?.Invoke(
-                    reading.Position.Latitude, reading.Position.Longitude, distanceMeters);
-            }
+            if (_isOffRoute) return;
+            _isOffRoute = true;
+            Log.Warning(
+                "Off route! {Dist:F1}m from route", distanceMeters);
+            OffRouteDetected?.Invoke(
+                reading.Position.Latitude, reading.Position.Longitude, distanceMeters);
             // Don't update maneuver/distances while off-route
             return;
         }
@@ -207,9 +210,9 @@ public class NavigationService
             // Check for arrival
             if (_currentManeuverIndex >= _maneuvers.Count)
             {
-                _logger.LogInformation("Destination reached!");
+                Log.Information("Destination reached!");
                 NavigationCompleted?.Invoke();
-                StopNavigation();
+                _ = StopNavigation();
                 return;
             }
 
@@ -237,9 +240,6 @@ public class NavigationService
             IsStationary = reading.IsStationary
         };
         StatusUpdated?.Invoke(status);
-
-        // 5. Simulate BLE commands (logged, not sent yet)
-        SimulateBleCommands(status, maneuverChanged);
         }
     }
 
@@ -262,11 +262,9 @@ public class NavigationService
                 _routeCoords[i + 1].Longitude, _routeCoords[i + 1].Latitude,
                 out double t);
 
-            if (distSq < bestDistSq)
-            {
-                bestDistSq = distSq;
-                bestIndex = t >= 0.5 ? i + 1 : i;
-            }
+            if (!(distSq < bestDistSq)) continue;
+            bestDistSq = distSq;
+            bestIndex = t >= 0.5 ? i + 1 : i;
         }
 
         double distanceMeters = GeoMath.DistanceMeters(
@@ -351,10 +349,10 @@ public class NavigationService
         }
 
         double remainingKm = remainingM / 1000.0;
-        double fractionRemaining = _totalDistanceKm > 0
-            ? remainingKm / _totalDistanceKm
+        double fractionRemaining = TotalDistanceKm > 0
+            ? remainingKm / TotalDistanceKm
             : 1;
-        double remainingMin = _totalTimeMin * fractionRemaining;
+        double remainingMin = TotalTimeMin * fractionRemaining;
 
         return (remainingKm, remainingMin);
     }
@@ -378,74 +376,15 @@ public class NavigationService
             RoundaboutExitCount = m.RoundaboutExitCount,
             TravelMode = m.TravelMode,
             TravelType = m.TravelType,
-            BLEIcon = MapValhallaToMvAgusta(m.Type),
+            BLEIcon = "", // Plugin will map Valhalla Type to icon,
             RoundaboutExit = m.RoundaboutExit
         };
 
         ManeuverChanged?.Invoke(info);
-        _logger.LogDebug(
-            "Maneuver {I}/{T}: {Instr} ({Icon})",
+        Log.Debug(
+            "Maneuver {I}/{T}: {Instr} (ValhallaType={Type})",
             _currentManeuverIndex + 1, _maneuvers.Count,
-            m.Instruction, info.BLEIcon);
-    }
-
-    // ── BLE simulation ──────────────────────────────────────────────────
-
-    private void SimulateBleCommands(NavigationStatus status, bool maneuverChanged)
-    {
-        if (maneuverChanged && CurrentManeuver != null)
-        {
-            string icon = MapValhallaToMvAgusta(CurrentManeuver.Type);
-            string instruction = CurrentManeuver.Instruction ?? "";
-            string street = CurrentManeuver.StreetNames?.FirstOrDefault() ?? "";
-
-            byte[] naviFrame = BuildBleFrame("NAVI", icon, instruction, street);
-            BleCommandSimulated?.Invoke("NAVI", naviFrame);
-
-            byte[] smFrame = BuildBleFrame("SM",
-                status.SpeedKmh.ToString("F0"),
-                (status.RemainingDistanceKm * 1000).ToString("F0"),
-                status.DistanceToNextTurnM.ToString("F0"));
-            BleCommandSimulated?.Invoke("SM", smFrame);
-        }
-
-        byte[] smUpdate = BuildBleFrame("SM",
-            status.SpeedKmh.ToString("F0"),
-            (status.RemainingDistanceKm * 1000).ToString("F0"),
-            status.DistanceToNextTurnM.ToString("F0"));
-        BleCommandSimulated?.Invoke("SM (periodic)", smUpdate);
-    }
-
-    private static byte[] BuildBleFrame(params string[] fields)
-    {
-        string frame = $"\r{string.Join("\x1E", fields)}\r";
-        return System.Text.Encoding.UTF8.GetBytes(frame);
-    }
-
-    // ── Valhalla → MV Agusta turn type mapping ───────────────────────────
-
-    private static string MapValhallaToMvAgusta(int valhallaType)
-    {
-        return valhallaType switch
-        {
-            1 => "turn-right",
-            2 => "turn-left",
-            3 => "straight",
-            4 => "turn-slight-right",
-            5 => "turn-slight-left",
-            6 => "turn-slight-right",
-            7 => "turn-slight-left",
-            8 => "straight",
-            9 => "turn-slight-right",
-            10 => "turn-slight-left",
-            11 => "straight",
-            12 => "straight",
-            13 => "roundabout-right-1",
-            14 => "roundabout-left-1",
-            15 => "Finish",
-            16 => "Finish",
-            _ => "straight"
-        };
+            m.Instruction, m.Type);
     }
 }
 
@@ -463,7 +402,7 @@ public class NavigationManeuverInfo
     public int? RoundaboutExitCount { get; init; }
     public string? TravelMode { get; init; }
     public string? TravelType { get; init; }
-    public string BLEIcon { get; init; } = "straight";
+    public string BLEIcon { get; init; } = "";
     public int? RoundaboutExit { get; init; }
 }
 
