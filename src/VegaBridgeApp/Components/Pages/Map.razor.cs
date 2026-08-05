@@ -6,6 +6,8 @@ using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Models.Routes;
 using VegaBridgeApp.Services.Routes;
 using VegaBridgeApp.Services.Navigation;
+using VegaBridgeApp.Models.Navigation;
+using VegaBridgeApp.Components.Dialogs;
 using VegaBridgeApp.Components.Dialogs;
 using MudBlazor;
 using Shiny.Locations;
@@ -177,8 +179,10 @@ public partial class Map : ComponentBase, IAsyncDisposable
     {
         if (_disposed) return;
         _navStatus = status;
+        // Use DisplayManeuverIndex (look-ahead) for progress if available, otherwise fall back to physical index
+        int progressIndex = status.DisplayManeuverIndex > 0 ? status.DisplayManeuverIndex : status.CurrentManeuverIndex;
         _navProgress = status.TotalManeuvers > 0
-            ? Math.Clamp((double)(status.CurrentManeuverIndex + 1) / status.TotalManeuvers * 100, 0, 100)
+            ? Math.Clamp((double)(progressIndex + 1) / status.TotalManeuvers * 100, 0, 100)
             : 0;
         InvokeAsync(StateHasChanged);
     }
@@ -365,7 +369,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
                         }
                     }
                 };
-                await _map.AddLayer(layer);
+                await _map?.AddLayer(layer);
             }
             // else: Layer existiert bereits – nicht updaten!
             // Kein RemoveLayer/AddLayer -> Karte bleibt interaktiv
@@ -795,7 +799,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
         }
 
         // Neue Route → Dialog nach Namen fragen
-        DialogParameters<RenameDialog> parameters = new DialogParameters<RenameDialog>
+        DialogParameters<RenameDialog> parameters = new()
         {
             { nameof(RenameDialog.ContentText), (string)L["SaveDialogPrompt"] },
             { nameof(RenameDialog.ButtonText), (string)L["Save"] },
@@ -1020,38 +1024,40 @@ public partial class Map : ComponentBase, IAsyncDisposable
         }
     }
 
-    private string GetTurnIcon(string bleIcon)
+    private string GetTurnIcon(int valhallaType)
     {
-        return bleIcon switch
+        string iconKey = NavigationIconMapper.GetSemanticIcon(valhallaType);
+        return iconKey switch
         {
-            "turn-left" => Icons.Material.Filled.TurnLeft,
-            "turn-right" => Icons.Material.Filled.TurnRight,
-            "turn-slight-left" => Icons.Material.Filled.TurnSlightLeft,
-            "turn-slight-right" => Icons.Material.Filled.TurnSlightRight,
-            "turn-sharp-left" => Icons.Material.Filled.TurnSharpLeft,
-            "turn-sharp-right" => Icons.Material.Filled.TurnSharpRight,
-            "uturn-left" or "uturn-right" => Icons.Material.Filled.UTurnLeft,
-            "straight" => Icons.Material.Filled.Straight,
-            "Finish" => Icons.Material.Filled.Flag,
-            "roundabout-left-1" or "roundabout-left-2" or "roundabout-right-1" or "roundabout-right-2" => Icons.Material.Filled.RotateRight,
+            NavigationIconMapper.IconTurnLeft => Icons.Material.Filled.TurnLeft,
+            NavigationIconMapper.IconTurnRight => Icons.Material.Filled.TurnRight,
+            NavigationIconMapper.IconSlightLeft => Icons.Material.Filled.TurnSlightLeft,
+            NavigationIconMapper.IconSlightRight => Icons.Material.Filled.TurnSlightRight,
+            NavigationIconMapper.IconSharpLeft => Icons.Material.Filled.TurnSharpLeft,
+            NavigationIconMapper.IconSharpRight => Icons.Material.Filled.TurnSharpRight,
+            NavigationIconMapper.IconUTurn => Icons.Material.Filled.UTurnLeft,
+            NavigationIconMapper.IconStraight => Icons.Material.Filled.Straight,
+            NavigationIconMapper.IconFinish => Icons.Material.Filled.Flag,
+            NavigationIconMapper.IconRoundabout => Icons.Material.Filled.RotateRight,
             _ => Icons.Material.Filled.Straight
         };
     }
 
-    private string GetTurnLabel(string bleIcon)
+    private string GetTurnLabel(int valhallaType)
     {
-        return bleIcon switch
+        string iconKey = NavigationIconMapper.GetSemanticIcon(valhallaType);
+        return iconKey switch
         {
-            "turn-left" => L["TurnLeft"],
-            "turn-right" => L["TurnRight"],
-            "turn-slight-left" => L["TurnSlightLeft"],
-            "turn-slight-right" => L["TurnSlightRight"],
-            "turn-sharp-left" => L["TurnSharpLeft"],
-            "turn-sharp-right" => L["TurnSharpRight"],
-            "uturn-left" or "uturn-right" => L["UTurn"],
-            "straight" => L["Straight"],
-            "Finish" => L["Arrival"],
-            "roundabout-left-1" or "roundabout-left-2" or "roundabout-right-1" or "roundabout-right-2" => L["Roundabout"],
+            NavigationIconMapper.IconTurnLeft => L["TurnLeft"],
+            NavigationIconMapper.IconTurnRight => L["TurnRight"],
+            NavigationIconMapper.IconSlightLeft => L["TurnSlightLeft"],
+            NavigationIconMapper.IconSlightRight => L["TurnSlightRight"],
+            NavigationIconMapper.IconSharpLeft => L["TurnSharpLeft"],
+            NavigationIconMapper.IconSharpRight => L["TurnSharpRight"],
+            NavigationIconMapper.IconUTurn => L["UTurn"],
+            NavigationIconMapper.IconStraight => L["Straight"],
+            NavigationIconMapper.IconFinish => L["Arrival"],
+            NavigationIconMapper.IconRoundabout => L["Roundabout"],
             _ => L["Straight"]
         };
     }

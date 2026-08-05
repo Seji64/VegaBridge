@@ -1,5 +1,7 @@
 using Serilog;
+using VegaBridgeApp.Models.BLE.MvAgusta;
 using VegaBridgeApp.Models.Valhalla;
+using VegaBridgeApp.Models.Navigation;
 using VegaBridgeApp.Services.Location;
 using VegaBridgeApp.Services.Routes;
 using VegaBridgeApp.Utils;
@@ -24,6 +26,7 @@ public class NavigationService(GpsService gps)
     // ── Route data (set once per navigation session) ──────────────────────
     private List<Coordinate> _routeCoords = [];
     private List<Maneuver> _maneuvers = [];
+    private List<int> _relevantManeuverIndices = []; // Indizes der Nicht-Geradeaus-Manöver (vorab berechnet)
     private int _currentManeuverIndex;
     private bool _isNavigating;
 
@@ -67,6 +70,38 @@ public class NavigationService(GpsService gps)
 
     // ── Public API ───────────────────────────────────────────────────────
 
+    private int GetDisplayManeuverIndex()
+    {
+        lock (_lock)
+        {
+            if (!_isNavigating || _maneuvers.Count == 0)
+                return 0;
+            if (_currentManeuverIndex >= _maneuvers.Count)
+                return _maneuvers.Count - 1;
+
+            // Wenn das aktuelle Manöver NICHT 'Geradeaus' ist, zeigen wir es an.
+            if (!IsStraightManeuver(_maneuvers[_currentManeuverIndex]))
+            {
+                return _currentManeuverIndex;
+            }
+
+            // Wenn es 'Geradeaus' ist, suchen wir das nächste relevante (Nicht-Geradeaus) Manöver.
+            foreach (int candidateIndex in _relevantManeuverIndices.Where(candidateIndex => candidateIndex > _currentManeuverIndex))
+            {
+                return candidateIndex;
+            }
+            
+            // Fallback: Wenn nichts mehr kommt, zeige das letzte Manöver
+            return _maneuvers.Count - 1;
+        }
+    }
+
+    private bool IsStraightManeuver(Maneuver m)
+    {
+        // Uses shared neutral mapping instead of MV Agusta plugin
+        return NavigationConstants.IsStraightManeuver(m.Type);
+    }
+
     /// <summary>
     /// Start navigating along a Valhalla route.
     /// </summary>
@@ -95,6 +130,21 @@ public class NavigationService(GpsService gps)
 
             _routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
             _maneuvers = maneuvers;
+            
+            // 1. Vorab berechnete Liste der Indizes relevanter Manöver (Nicht-Geradeaus)
+            _relevantManeuverIndices = maneuvers
+                .Select((m, i) => (m, i))
+                .Where(x => !IsStraightManeuver(x.m))
+                .Select(x => x.i)
+                .ToList();
+            
+            // 2. Füge Indizes aller Geradeaus-Manöver am Ende hinzu, damit Look Ahead bei
+            //    langen Geraden das letzte Manöver (Ziel) anzeigt
+            _relevantManeuverIndices.AddRange(maneuvers
+                .Select((m, i) => (m, i))
+                .Where(x => IsStraightManeuver(x.m))
+                .Select(x => x.i));
+            
             TotalDistanceKm = totalDistanceKm;
             TotalTimeMin = totalTimeMin;
             _currentManeuverIndex = 0;
@@ -201,11 +251,20 @@ public class NavigationService(GpsService gps)
         // Back on route
         _isOffRoute = false;
         int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
+        
+        // Determine the index for display (look-ahead for next turn)
+        int displayIndex = GetDisplayManeuverIndex(); 
+        
         bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
-
+        
+        // We trigger a UI/BLE update if the physical segment changes OR if the display target changes
+        // To be safe, we calculate the new display index after updating _currentManeuverIndex
         if (maneuverChanged)
         {
             _currentManeuverIndex = newManeuverIndex;
+            
+            // Re-calculate display index after updating current index
+            displayIndex = GetDisplayManeuverIndex();
 
             // Check for arrival
             if (_currentManeuverIndex >= _maneuvers.Count)
@@ -216,10 +275,18 @@ public class NavigationService(GpsService gps)
                 return;
             }
 
-            FireCurrentManeuver();
+            FireCurrentManeuver(displayIndex);
+        }
+        else 
+        {
+            // Even if physical segment didn't change, we might need to update 
+            // if the look-ahead target changed (less common but possible)
+            // For now, we rely on the 1Hz StatusUpdated to keep the distance countdown running.
         }
 
         // 3. Calculate distances
+        // SM-Frame zeigt IMMER die Distanz bis zum ENDE DES PHYSISCHEN SEGMENTS
+        // (unabhängig vom Look Ahead für die NAVI-Anzeige)
         _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex);
         (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
         _remainingDistanceKm = remainingKm;
@@ -227,6 +294,9 @@ public class NavigationService(GpsService gps)
 
         // 4. Fire status update
         double speedKmh = reading.Speed * 3.6;
+        // NAVI-Frame zeigt Look Ahead-Index (aus _relevantManeuverIndices)
+        // SM-Frame zeigt physischen Index und Distanz bis Segmentende
+        // displayIndex wurde bereits oben berechnet
         NavigationStatus status = new()
         {
             SpeedKmh = speedKmh,
@@ -234,6 +304,7 @@ public class NavigationService(GpsService gps)
             RemainingDistanceKm = _remainingDistanceKm,
             RemainingTimeMin = _remainingTimeMin,
             CurrentManeuverIndex = _currentManeuverIndex,
+            DisplayManeuverIndex = displayIndex,
             TotalManeuvers = _maneuvers.Count,
             Heading = reading.Heading,
             Accuracy = reading.PositionAccuracy,
@@ -359,15 +430,20 @@ public class NavigationService(GpsService gps)
 
     // ── Maneuver change notification ─────────────────────────────────────
 
-    private void FireCurrentManeuver()
+    private void FireCurrentManeuver(int index = -1)
     {
-        Maneuver? m = CurrentManeuver;
+        int targetIndex = index != -1 ? index : GetDisplayManeuverIndex();
+        
+        if (targetIndex < 0 || targetIndex >= _maneuvers.Count) return;
+
+        Maneuver? m = _maneuvers[targetIndex];
         if (m == null) return;
 
         NavigationManeuverInfo info = new()
         {
-            Index = _currentManeuverIndex,
+            Index = targetIndex,
             Total = _maneuvers.Count,
+            ValhallaType = m.Type,
             Instruction = m.Instruction ?? "",
             StreetNames = m.StreetNames ?? [],
             LengthKm = m.Length,
@@ -376,45 +452,14 @@ public class NavigationService(GpsService gps)
             RoundaboutExitCount = m.RoundaboutExitCount,
             TravelMode = m.TravelMode,
             TravelType = m.TravelType,
-            BLEIcon = "", // Plugin will map Valhalla Type to icon,
             RoundaboutExit = m.RoundaboutExit
         };
 
         ManeuverChanged?.Invoke(info);
         Log.Debug(
-            "Maneuver {I}/{T}: {Instr} (ValhallaType={Type})",
-            _currentManeuverIndex + 1, _maneuvers.Count,
+            "Maneuver Display {I}/{T}: {Instr} (ValhallaType={Type})",
+            targetIndex + 1, _maneuvers.Count,
             m.Instruction, m.Type);
     }
 }
 
-// ── Event payloads ─────────────────────────────────────────────────────
-
-public class NavigationManeuverInfo
-{
-    public int Index { get; init; }
-    public int Total { get; init; }
-    public string Instruction { get; init; } = "";
-    public List<string> StreetNames { get; init; } = [];
-    public double LengthKm { get; init; }
-    public double TimeMin { get; init; }
-    public double? TurnDegree { get; init; }
-    public int? RoundaboutExitCount { get; init; }
-    public string? TravelMode { get; init; }
-    public string? TravelType { get; init; }
-    public string BLEIcon { get; init; } = "";
-    public int? RoundaboutExit { get; init; }
-}
-
-public class NavigationStatus
-{
-    public double SpeedKmh { get; init; }
-    public double DistanceToNextTurnM { get; init; }
-    public double RemainingDistanceKm { get; init; }
-    public double RemainingTimeMin { get; init; }
-    public int CurrentManeuverIndex { get; init; }
-    public int TotalManeuvers { get; init; }
-    public double Heading { get; init; }
-    public double Accuracy { get; init; }
-    public bool IsStationary { get; init; }
-}

@@ -2,7 +2,6 @@ using System.Text;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.BLE.MvAgusta;
-using System.Threading;
 
 // ReSharper disable InvalidXmlDocComment
 
@@ -93,7 +92,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
         
         // Stop heartbeat when navigation ends
-        await StopHeartbeatAsync();
+        StopHeartbeat();
     }
 
     public async Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input)
@@ -110,16 +109,16 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     /// <summary>
     /// Starts the GUI1 keep-alive heartbeat timer (sends every 2-3 seconds).
     /// </summary>
-    public async Task StartHeartbeatAsync(IBleConnectedDevice device)
+    private async Task StartHeartbeatAsync(IBleConnectedDevice device)
     {
         // Stop any existing timer
-        await StopHeartbeatAsync();
+        StopHeartbeat();
         
         _heartbeatCts = new CancellationTokenSource();
         _heartbeatTimer = new PeriodicTimer(TimeSpan.FromSeconds(2.5)); // Send every 2.5 seconds
         
         // Start the heartbeat loop
-        _ = Task.Run(async () =>
+        await Task.Run(async () =>
         {
             try
             {
@@ -143,7 +142,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     /// <summary>
     /// Stops the heartbeat timer.
     /// </summary>
-    public async Task StopHeartbeatAsync()
+    private void StopHeartbeat()
     {
         if (_heartbeatCts != null)
         {
@@ -297,26 +296,6 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     // ─── Valhalla > MV Agusta Icon Mapping ─────────────────────────────
     // Moved here from NavigationService to keep protocol details in the plugin.
 
-    private static readonly Dictionary<int, string> ValhallaToMvAgustaIcon = new()
-    {
-        { 1, TurnTypes.TurnRight },
-        { 2, TurnTypes.TurnLeft },
-        { 3, TurnTypes.Straight },
-        { 4, TurnTypes.TurnSlightRight },
-        { 5, TurnTypes.TurnSlightLeft },
-        { 6, TurnTypes.TurnSlightRight },
-        { 7, TurnTypes.TurnSlightLeft },
-        { 8, TurnTypes.Straight },
-        { 9, TurnTypes.TurnSlightRight },
-        { 10, TurnTypes.TurnSlightLeft },
-        { 11, TurnTypes.Straight },
-        { 12, TurnTypes.Straight },
-        { 13, TurnTypes.RoundaboutRight1 },
-        { 14, TurnTypes.RoundaboutLeft1 },
-        { 15, TurnTypes.Finish },
-        { 16, TurnTypes.Finish }
-    };
-
     // ─── IAsyncDisposable Implementation ───────────────────────────────────────
 
     public async ValueTask DisposeAsync()
@@ -324,7 +303,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         if (_isDisposed) return;
         _isDisposed = true;
         
-        await StopHeartbeatAsync();
+        StopHeartbeat();
         
         GC.SuppressFinalize(this);
     }
