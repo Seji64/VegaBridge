@@ -29,7 +29,7 @@
         <MauiXamlInflator>SourceGen</MauiXamlInflator>
 
         <!-- Display name -->
-        <ApplicationTitle>VegaBridge</ApplicationTitle>
+        <ApplicationTitle>VegaBridgeApp</ApplicationTitle>
 
         <!-- App Identifier -->
         <ApplicationId>com.seji.vegabridge</ApplicationId>
