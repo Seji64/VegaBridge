@@ -174,4 +174,6 @@
   <data name="RegisteredPlugins" xml:space="preserve"><value>Registrierte Hardware-Plugins:</value></data>
   <data name="IncomingFrames" xml:space="preserve"><value>Eingehende Frames</value></data>
   <data name="BLEScanning" xml:space="preserve"><value>Suche nach Geräten…</value></data>
+  <data name="GpsManagedByNavigation" xml:space="preserve"><value>GPS wird von aktiver Navigation gesteuert</value></data>
+  <data name="NoGpsFix" xml:space="preserve"><value>Kein GPS-Fix verfügbar</value></data>
 </root>

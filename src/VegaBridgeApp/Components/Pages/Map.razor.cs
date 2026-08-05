@@ -39,6 +39,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
     private bool _gpsMarkerInitialized;
     private bool _disposed;
     private int _breadcrumbUpdating;
+    private int _markerUpdating;
     private DateTime _lastUiRefresh = DateTime.MinValue;
     private DateTime _lastBreadcrumbUpdate = DateTime.MinValue;
     private DateTime _lastRerouteTime = DateTime.MinValue;
@@ -51,6 +52,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
     private NavigationManeuverInfo? _navManeuver;
     private NavigationStatus? _navStatus;
     private double _navProgress;
+    private bool _isNavigating;
 
     protected override void OnInitialized()
     {
@@ -96,6 +98,13 @@ public partial class Map : ComponentBase, IAsyncDisposable
 
     private async Task ToggleGpsTracking()
     {
+        // Don't allow manual GPS toggle during active navigation
+        if (_isNavigating)
+        {
+            Snackbar.Add(L["GpsManagedByNavigation"], Severity.Info);
+            return;
+        }
+
         try
         {
             if (Gps.IsTracking)
@@ -188,13 +197,14 @@ public partial class Map : ComponentBase, IAsyncDisposable
     private void OnNavigationStateChanged(bool isNavigating)
     {
         if (_disposed) return;
+        _isNavigating = isNavigating;
         if (!isNavigating)
         {
             _navManeuver = null;
             _navStatus = null;
             _navProgress = 0;
-            InvokeAsync(StateHasChanged);
         }
+        InvokeAsync(StateHasChanged);
     }
     
     // ── Map Marker Helpers ──────────────────────────────────────────────
@@ -205,81 +215,94 @@ public partial class Map : ComponentBase, IAsyncDisposable
         OpenStreetMap? map = _map;
         if (map == null) return;
 
-        double lon = reading.Position.Longitude;
-        double lat = reading.Position.Latitude;
-        OpenLayers.Blazor.Coordinate coord = new(lon, lat);
+        // Prevent reentrancy (ObservableCollection mutation during CollectionChanged)
+        if (Interlocked.CompareExchange(ref _markerUpdating, 1, 0) != 0) return;
 
-        if (!_gpsMarkerInitialized)
+        try
         {
-            // Create the position marker (blue dot)
-            Marker marker = new()
+            double lon = reading.Position.Longitude;
+            double lat = reading.Position.Latitude;
+            OpenLayers.Blazor.Coordinate coord = new(lon, lat);
+
+            if (!_gpsMarkerInitialized)
             {
-                Coordinate = coord,
-                Type = MarkerType.MarkerPin,
-                PinColor = PinColor.Blue
-            };
-            map.MarkersList.Add(marker);
-
-            // Create a heading indicator (arrow marker)
-            double headingRad = reading.Heading * Math.PI / 180;
-            Marker headingMarker = new()
-            {
-                Coordinate = coord,
-                Type = MarkerType.MarkerAwesome,
-                PinColor = PinColor.Green,
-                Rotation = headingRad
-            };
-            map.MarkersList.Add(headingMarker);
-
-            _lastMarkerLon = lon;
-            _lastMarkerLat = lat;
-            _hasLastMarkerCoord = true;
-            _gpsMarkerInitialized = true;
-        }
-        else
-        {
-            // 1. Time-based throttle: every 2s max to avoid IPC flood
-            DateTime now = DateTime.UtcNow;
-            if ((now - _lastMarkerUpdate).TotalSeconds < 2) return;
-
-            // 2. Distance-based throttle: only update if moved > 1 meter
-            if (_hasLastMarkerCoord)
-            {
-                double dist = GeoMath.DistanceMeters(
-                    _lastMarkerLat, _lastMarkerLon,
-                    lat, lon);
-                if (dist < 1.0) return;
-            }
-
-            _lastMarkerUpdate = now;
-            _lastMarkerLon = lon;
-            _lastMarkerLat = lat;
-
-            // Update markers in-place via MarkersList indexer (avoids Clear+Add JS flood)
-            map.MarkersList[0] = new Marker
-            {
-                Coordinate = coord,
-                Type = MarkerType.MarkerPin,
-                PinColor = PinColor.Blue
-            };
-
-            if (map.MarkersList.Count >= 2)
-            {
-                double headingRad = reading.Heading * Math.PI / 180;
-                MarkerType oldType = ((Marker)map.MarkersList[1]).Type;
-                map.MarkersList[1] = new Marker
+                // Create the position marker (blue dot)
+                Marker marker = new()
                 {
                     Coordinate = coord,
-                    Type = oldType,
-                    PinColor = PinColor.Green,
-                    Rotation = headingRad,
-                    Text = "➤"
+                    Type = MarkerType.MarkerPin,
+                    PinColor = PinColor.Blue
                 };
-            }
-        }
+                map.MarkersList.Add(marker);
 
-        // Update breadcrumb
-        await UpdateBreadcrumbAsync();
+                // Create a heading indicator (arrow marker)
+                double headingRad = reading.Heading * Math.PI / 180;
+                Marker headingMarker = new()
+                {
+                    Coordinate = coord,
+                    Type = MarkerType.MarkerAwesome,
+                    PinColor = PinColor.Green,
+                    Rotation = headingRad
+                };
+                map.MarkersList.Add(headingMarker);
+
+                _lastMarkerLon = lon;
+                _lastMarkerLat = lat;
+                _hasLastMarkerCoord = true;
+                _gpsMarkerInitialized = true;
+            }
+            else
+            {
+                // 1. Time-based throttle: every 2s max to avoid IPC flood
+                DateTime now = DateTime.UtcNow;
+                if ((now - _lastMarkerUpdate).TotalSeconds < 2) return;
+
+                // 2. Distance-based throttle: only update if moved > 1 meter
+                if (_hasLastMarkerCoord)
+                {
+                    double dist = GeoMath.DistanceMeters(
+                        _lastMarkerLat, _lastMarkerLon,
+                        lat, lon);
+                    if (dist < 1.0) return;
+                }
+
+                _lastMarkerUpdate = now;
+                _lastMarkerLon = lon;
+                _lastMarkerLat = lat;
+
+                // Update markers in-place via MarkersList indexer (avoids Clear+Add JS flood)
+                if (map.MarkersList.Count > 0)
+                {
+                    map.MarkersList[0] = new Marker
+                    {
+                        Coordinate = coord,
+                        Type = MarkerType.MarkerPin,
+                        PinColor = PinColor.Blue
+                    };
+                }
+
+                if (map.MarkersList.Count >= 2)
+                {
+                    double headingRad = reading.Heading * Math.PI / 180;
+                    MarkerType oldType = ((Marker)map.MarkersList[1]).Type;
+                    map.MarkersList[1] = new Marker
+                    {
+                        Coordinate = coord,
+                        Type = oldType,
+                        PinColor = PinColor.Green,
+                        Rotation = headingRad,
+                        Text = "➤"
+                    };
+                }
+            }
+
+            // Update breadcrumb
+            await UpdateBreadcrumbAsync();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _markerUpdating, 0);
+        }
     }
 
     private async Task ClearGpsMarkersAsync()
@@ -291,7 +314,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
         _gpsMarkerInitialized = false;
 
         // Also remove breadcrumb layer if present
-        Layer? breadcrumbLayer = map.LayersList
+        Layer? breadcrumbLayer = map.LayersList?
             .FirstOrDefault(l => l.Id == BreadcrumbLayerId);
         if (breadcrumbLayer != null)
             await map.RemoveLayer(breadcrumbLayer);
@@ -313,7 +336,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
 
         try
         {
-            Layer? existing = map.LayersList
+            Layer? existing = map.LayersList?
                 .FirstOrDefault(l => l.Id == BreadcrumbLayerId);
 
             if (existing == null)
@@ -890,12 +913,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
             (string mergedShape, List<Maneuver> allManeuvers, double totalKm, double totalMin) =
                 PrepareNavigationData(_currentRouteResponse.Trip.Legs);
 
-            if (!Gps.IsTracking)
-            {
-                await Gps.StartTrackingAsync(backgroundMode: true);
-            }
-
-            NavService.StartNavigation(mergedShape, allManeuvers, totalKm, totalMin);
+            await NavService.StartNavigation(mergedShape, allManeuvers, totalKm, totalMin);
 
             Snackbar.Add(L["NavigationStarted"], Severity.Success);
         }
@@ -907,13 +925,9 @@ public partial class Map : ComponentBase, IAsyncDisposable
 
     private async Task ExitNavigation()
     {
-        NavService.StopNavigation();
-        if (Gps.IsTracking)
-        {
-            Gps.ClearBreadcrumb();
-            await Gps.StopTrackingAsync();
-            await ClearGpsMarkersAsync();
-        }
+        await NavService.StopNavigation();
+        // NavService.StopNavigation() handles GPS stop internally
+        await ClearGpsMarkersAsync();
         Snackbar.Add(L["NavigationStopped"], Severity.Info);
     }
 
@@ -1066,7 +1080,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
         if (map == null) return;
 
         // 2. Alte Route-Layer entfernen
-        Layer? existingLayer = map.LayersList.FirstOrDefault(l => l.Id == RouteLayerId);
+        Layer? existingLayer = map.LayersList?.FirstOrDefault(l => l.Id == RouteLayerId);
         if (existingLayer != null)
             await map.RemoveLayer(existingLayer);
 
@@ -1129,36 +1143,23 @@ public partial class Map : ComponentBase, IAsyncDisposable
         return $"{lat.Value:F5}, {lon.Value:F5}";
     }
 
-    private async Task OnFabClicked()
+    private async Task GetMyCurrentPosition()
     {
         OpenStreetMap? map = _map;
         if (map == null) return;
 
-        if (!Gps.IsTracking)
-        {
-            await ToggleGpsTracking();
-            
-            // Auf ersten GPS-Fix warten (max 5s)
-            if (Gps.LastReading == null)
-            {
-                using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
-                try
-                {
-                    await foreach (GpsReading _ in WaitForGpsFixAsync(cts.Token))
-                    {
-                        break;
-                    }
-                }
-                catch (OperationCanceledException) { }
-            }
-        }
-
+        await Gps.GetLastReadingOrCurrentAsync();
+        
         if (Gps.LastReading != null)
         {
             OpenLayers.Blazor.Coordinate coord = new(
                 Gps.LastReading.Position.Longitude,
                 Gps.LastReading.Position.Latitude);
             await map.SetCenter(coord);
+        }
+        else
+        {
+            Snackbar.Add(L["NoGpsFix"], Severity.Info);
         }
     }
 

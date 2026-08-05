@@ -1,5 +1,5 @@
 using System.Xml.Linq;
-using Microsoft.Extensions.Logging;
+using Serilog;
 using VegaBridgeApp.Models.Routes;
 using VegaBridgeApp.Utils;
 using Coordinate = VegaBridgeApp.Models.Valhalla.Coordinate;
@@ -13,10 +13,7 @@ namespace VegaBridgeApp.Services.Routes;
 public class GpxService : IGpxService
 {
     private static readonly XNamespace GpxNs = "http://www.topografix.com/GPX/1/1";
-    private readonly ILogger<GpxService> _logger;
-
-    public GpxService(ILogger<GpxService> logger) => _logger = logger;
-
+    
     // ── Parse ───────────────────────────────────────────────────────────
 
     /// <inheritdoc />
@@ -68,7 +65,7 @@ public class GpxService : IGpxService
                     .ToList();
             }
 
-            _logger.LogDebug("GPX parse: trk={Trk}({TrkPts}pts) rte={Rte}({RtePts}pts)",
+            Log.Debug("GPX parse: trk={Trk}({TrkPts}pts) rte={Rte}({RtePts}pts)",
                 trackPoints?.Count >= 2, trackPoints?.Count ?? 0,
                 routePoints?.Count >= 2, routePoints?.Count ?? 0);
 
@@ -82,7 +79,7 @@ public class GpxService : IGpxService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to parse GPX");
+            Log.Error(ex, "Failed to parse GPX");
             return Task.FromResult(new GpxParseResult());
         }
     }

@@ -235,6 +235,75 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
+    /// <summary>
+    /// Execute a semantic navigation action through the active plugin.
+    /// Called by BleNavigationCoordinator.
+    /// </summary>
+    public async Task ExecuteNavigationActionAsync(string action, object input)
+    {
+        if (_activePeripheral == null || _activePlugin == null)
+        {
+            Log.Debug("ExecuteNavigationActionAsync skipped: no active device/plugin");
+            return;
+        }
+
+        try
+        {
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+
+            switch (action)
+            {
+                case "SendNavigationStartAsync":
+                {
+                    if (input is NavigationStartInput startInput)
+                        await _activePlugin.SendNavigationStartAsync(wrapper, startInput);
+                    break;
+                }
+                case "SendNavigationUpdateAsync":
+                {
+                    if (input is NavigationUpdateInput updateInput)
+                    {
+                        await _activePlugin.SendNavigationUpdateAsync(wrapper, updateInput);
+                    }
+                    break;
+                }
+                case "SendOffRouteAlertAsync":
+                {
+                    if (input is OffRouteAlertInput alertInput)
+                        await _activePlugin.SendOffRouteAlertAsync(wrapper, alertInput);
+                    break;
+                }
+                default:
+                    Log.Warning("Unknown navigation action: {Action}", action);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to execute navigation action {Action}", action);
+            UpdateError($"Navigation command failed: {ex.Message}", isCritical: false);
+        }
+    }
+
+    /// <summary>
+    /// Handles destination reached via the active plugin.
+    /// </summary>
+    public async Task ExecuteNavigationFinishAsync()
+    {
+        if (_activePeripheral == null || _activePlugin == null) return;
+
+        try
+        {
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+            await _activePlugin.SendNavigationFinishAsync(wrapper);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to send navigation finish");
+            UpdateError($"Navigation finish failed: {ex.Message}", isCritical: false);
+        }
+    }
+
     // ── Connection Monitoring & Retry ─────────────────────────────────────
 
     private void SetupConnectionMonitoring(IPeripheral peripheral)
@@ -327,7 +396,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 .Where(p => !string.IsNullOrWhiteSpace(p.Name) && p.Name != "Unknown")
                 .Select(p => 
                 {
-                    var deviceInfo = new BleDeviceInfo
+                    BleDeviceInfo deviceInfo = new BleDeviceInfo
                     {
                         Uuid = Guid.Parse(p.Uuid),
                         Name = p.Name!,
@@ -336,7 +405,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     };
                     
                     // Determine brand based on compatible plugin
-                    var plugin = _plugins.FirstOrDefault(pl => pl.IsCompatible(deviceInfo));
+                    IBleDevicePlugin? plugin = _plugins.FirstOrDefault(pl => pl.IsCompatible(deviceInfo));
                     deviceInfo.Brand = plugin?.BrandName;
                     
                     return deviceInfo;

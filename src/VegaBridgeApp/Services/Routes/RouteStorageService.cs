@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
+using Serilog;
 using VegaBridgeApp.Models.Routes;
 
 namespace VegaBridgeApp.Services.Routes;
@@ -10,29 +10,25 @@ namespace VegaBridgeApp.Services.Routes;
 public class RouteStorageService : IRouteStorageService
 {
     private readonly string _storageDir;
-    private readonly ILogger<RouteStorageService> _logger;
     private static readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
 
-    public RouteStorageService(ILogger<RouteStorageService> logger)
+    public RouteStorageService()
     {
-        _logger = logger;
         _storageDir = Path.Combine(FileSystem.AppDataDirectory, "routes");
 
-        if (!Directory.Exists(_storageDir))
-        {
-            Directory.CreateDirectory(_storageDir);
-            _logger.LogDebug("Created route storage directory: {Dir}", _storageDir);
-        }
+        if (Directory.Exists(_storageDir)) return;
+        Directory.CreateDirectory(_storageDir);
+        Log.Debug("Created route storage directory: {Dir}", _storageDir);
     }
 
     public async Task<List<SavedRoute>> GetAllRoutesAsync()
     {
-        var routes = new List<SavedRoute>();
+        List<SavedRoute> routes = new List<SavedRoute>();
 
         try
         {
             string[] files = Directory.GetFiles(_storageDir, "*.json");
-            _logger.LogDebug("Found {Count} route files in {Dir}", files.Length, _storageDir);
+            Log.Debug("Found {Count} route files in {Dir}", files.Length, _storageDir);
 
             foreach (string file in files)
             {
@@ -40,12 +36,12 @@ public class RouteStorageService : IRouteStorageService
                 if (route != null) routes.Add(route);
             }
 
-            _logger.LogInformation("Loaded {Count} saved routes", routes.Count);
+            Log.Information("Loaded {Count} saved routes", routes.Count);
             return routes.OrderByDescending(r => r.CreatedAt).ToList();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load routes from {Dir}", _storageDir);
+            Log.Error(ex, "Failed to load routes from {Dir}", _storageDir);
             return [];
         }
     }
@@ -73,14 +69,14 @@ public class RouteStorageService : IRouteStorageService
 
             File.Move(tempPath, filePath, overwrite: true);
 
-            _logger.LogInformation(
+            Log.Information(
                 "Saved route {Id} — {Name} ({Km:F1} km, {Pts} pts, {Bytes} bytes)",
                 route.Id, route.Name, route.DistanceKm,
                 route.Waypoints?.Count ?? 0, new FileInfo(filePath).Length);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to save route {Id} ({Name})", route.Id, route.Name);
+            Log.Error(ex, "Failed to save route {Id} ({Name})", route.Id, route.Name);
             if (File.Exists(tempPath))
                 File.Delete(tempPath);
             throw new IOException($"Failed to save route {route.Id}", ex);
@@ -94,7 +90,7 @@ public class RouteStorageService : IRouteStorageService
         if (File.Exists(filePath))
         {
             await Task.Run(() => File.Delete(filePath));
-            _logger.LogInformation("Deleted route {Id}", id);
+            Log.Information("Deleted route {Id}", id);
         }
     }
 
@@ -109,12 +105,12 @@ public class RouteStorageService : IRouteStorageService
 
         try
         {
-            using FileStream stream = File.OpenRead(filePath);
+            await using FileStream stream = File.OpenRead(filePath);
             return await JsonSerializer.DeserializeAsync<SavedRoute>(stream, _jsonOptions);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to deserialize route file: {File}", Path.GetFileName(filePath));
+            Log.Warning(ex, "Failed to deserialize route file: {File}", Path.GetFileName(filePath));
             return null;
         }
     }

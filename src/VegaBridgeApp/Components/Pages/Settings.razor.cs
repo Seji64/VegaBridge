@@ -78,17 +78,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
-    private MudBlazor.Color GetStatusSeverity()
-    {
-        return ConnectionState switch
-        {
-            BleConnectionState.Connected => MudBlazor.Color.Success,
-            BleConnectionState.Connecting => MudBlazor.Color.Warning,
-            BleConnectionState.Error => MudBlazor.Color.Error,
-            _ => MudBlazor.Color.Default
-        };
-    }
-
     private string? GetDeviceStatusText(BleDeviceInfo device)
     {
         if (device.IsConnected) return L["Connected"];
@@ -96,7 +85,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         {
             return ConnectionState switch
             {
-                BleConnectionState.Connecting => "Connecting...",
+                BleConnectionState.Connecting => L["Connecting"],
                 BleConnectionState.Error => L["BLEError"],
                 _ => null
             };
@@ -109,7 +98,12 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         if (device.IsConnected) return MudBlazor.Color.Success;
         if (SelectedDevice?.Uuid == device.Uuid)
         {
-            return GetStatusSeverity();
+            return ConnectionState switch
+            {
+                BleConnectionState.Connecting => MudBlazor.Color.Warning,
+                BleConnectionState.Error => MudBlazor.Color.Error,
+                _ => MudBlazor.Color.Default
+            };
         }
         return MudBlazor.Color.Default;
     }
@@ -140,7 +134,8 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         BleDeviceInfo? device = SelectedDevice;
         if (device == null) return;
 
-        StatusMessage = string.Format(L["BLEConnectingTo"], device.Name);
+        string connectingMessage = string.Format(L["BLEConnectingTo"], device.Name);
+        StatusMessage = connectingMessage;
         StateHasChanged();
 
         bool success = await BleManager.ConnectAsync(device.Uuid);
@@ -149,8 +144,9 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         {
             StatusMessage = string.Format(L["BLEConnectedTo"], device.Name);
         }
-        else if (string.IsNullOrEmpty(StatusMessage) || !StatusMessage.Contains(L["BLEError"]))
+        else if (StatusMessage == connectingMessage)
         {
+            // Only set generic failure if no specific error message was set by OnError
             StatusMessage = L["BLEConnectFailed"];
         }
 
@@ -167,6 +163,18 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private async Task SendTestFrame()
     {
         await BleManager.SendTestFrameAsync();
+    }
+
+    private async Task HandleScanButtonClick()
+    {
+        if (IsScanning)
+        {
+            StopBleScanAsync();
+        }
+        else
+        {
+            await StartBleScanAsync();
+        }
     }
 
     private void SaveOffRouteThreshold()
