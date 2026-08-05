@@ -2,6 +2,7 @@ using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Services.Navigation;
+using VegaBridgeApp.Models.Navigation;
 
 namespace VegaBridgeApp.Services.BLE;
 
@@ -152,7 +153,7 @@ public class BleNavigationCoordinator : IDisposable
 
         NavigationUpdateInput input = new()
         {
-            ManeuverIcon = "", // filled by BleManagerService via plugin mapping
+            ManeuverIcon = NavigationIconMapper.GetSemanticIcon(maneuver.ValhallaType),
             InstructionText = maneuver.Instruction,
             StreetName = maneuver.StreetNames.FirstOrDefault() ?? string.Empty,
             DistanceToTurnM = status.DistanceToNextTurnM,
@@ -187,7 +188,6 @@ public class BleNavigationCoordinator : IDisposable
             RoundaboutExitCount = m.RoundaboutExitCount,
             TravelMode = m.TravelMode,
             TravelType = m.TravelType,
-            BLEIcon = "",
             RoundaboutExit = m.RoundaboutExit
         };
     }

@@ -50,8 +50,8 @@
                         <MudStack Spacing="0">
                             <!-- Icon + Label row -->
                             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.Center" Spacing="1">
-                                <MudIcon Size="Size.Small" Icon="@GetTurnIcon(_navManeuver.BLEIcon)" Color="Color.Inherit"/>
-                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@GetTurnLabel(_navManeuver.BLEIcon)</MudChip>
+                                <MudIcon Size="Size.Small" Icon="@GetTurnIcon(_navManeuver.ValhallaType)" Color="Color.Inherit"/>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@GetTurnLabel(_navManeuver.ValhallaType)</MudChip>
                                 @if (_navManeuver.RoundaboutExitCount is > 0)
                                 {
                                     <MudChip T="string" Size="Size.Small" Color="Color.Warning">
