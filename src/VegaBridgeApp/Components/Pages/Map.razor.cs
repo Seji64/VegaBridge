@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using OpenLayers.Blazor;
 using System.Runtime.CompilerServices;
+using MetalPerformanceShadersGraph;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Models.Routes;
@@ -1121,8 +1122,37 @@ public partial class Map : ComponentBase, IAsyncDisposable
             _errorMessage = L["RouteNoGeometry"];
             return;
         }
-
+        
         await ShowRouteOnMapFromPolyline(combinedShape);
+
+        // ── Markers for Start, Waypoints and Destination ──
+        if (response.Trip.Locations is { Count: > 0 })
+        {
+            // Keep the first two markers (GPS position and heading arrow)
+            // Clear all markers from index 2 onwards to remove old route pins
+            if (map.MarkersList.Count > 2)
+            {
+                List<Shape> gpsMarkers = [.. map.MarkersList.Take(2)];
+                map.MarkersList.Clear();
+                foreach (Shape m in gpsMarkers) map.MarkersList.Add(m);
+            }
+
+            List<Location> locations = response.Trip.Locations;
+            for (int i = 0; i < locations.Count; i++)
+            {
+                Location loc = locations[i];
+                OpenLayers.Blazor.Coordinate coord = new(loc.Lon, loc.Lat);
+                
+                // Color logic: Red for destination, Green for start/waypoints
+                PinColor color = PinColor.Green;
+                if (i == locations.Count - 1)
+                {
+                    color = PinColor.Red;
+                }
+
+                map.MarkersList.Add(new Marker(MarkerType.MarkerPin, coord, "", color));
+            }
+        }
 
         Summary? summary = response.Trip?.Summary;
         if (summary is { MinLat: not null, MaxLat: not null, MinLon: not null, MaxLon: not null })
