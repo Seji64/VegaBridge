@@ -36,7 +36,12 @@ public class NavigationService(GpsService gps)
     private double _remainingTimeMin;
     private bool _isOffRoute;
 
+    // Smoothing / route-matching state
+    private Coordinate? _lastSmoothedPosition;
+
     private const double OffRouteThresholdDefaultM = 10.0;
+    private const int GpsSmoothingWindow = 3; // simple moving average over last N readings
+    private const int RouteLookaheadWindow = 20; // search only near current route index
 
     private double OffRouteThresholdM => Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
 
@@ -229,92 +234,153 @@ public class NavigationService(GpsService gps)
         {
             if (!_isNavigating || _routeCoords.Count < 2) return;
 
-            // 1. Snap current position to route + check off-route
-        (int snappedIndex, double distanceMeters) = FindNearestRouteIndex(
-            reading.Position.Latitude, reading.Position.Longitude);
-
-        if (snappedIndex < 0) return;
-
-        // Off-route detection
-        if (distanceMeters > OffRouteThresholdM)
-        {
-            if (_isOffRoute) return;
-            _isOffRoute = true;
-            Log.Warning(
-                "Off route! {Dist:F1}m from route", distanceMeters);
-            OffRouteDetected?.Invoke(
-                reading.Position.Latitude, reading.Position.Longitude, distanceMeters);
-            // Don't update maneuver/distances while off-route
-            return;
-        }
-
-        // Back on route
-        _isOffRoute = false;
-        int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
-        
-        // Determine the index for display (look-ahead for next turn)
-        int displayIndex = GetDisplayManeuverIndex(); 
-        
-        bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
-        
-        // We trigger a UI/BLE update if the physical segment changes OR if the display target changes
-        // To be safe, we calculate the new display index after updating _currentManeuverIndex
-        if (maneuverChanged)
-        {
-            _currentManeuverIndex = newManeuverIndex;
-            
-            // Re-calculate display index after updating current index
-            displayIndex = GetDisplayManeuverIndex();
-
-            // Check for arrival
-            if (_currentManeuverIndex >= _maneuvers.Count)
+            // 0. Simple moving average smoothing over the last few raw readings.
+            // This reduces GPS jitter / outlier jumps, especially when walking beside a road.
+            // The smoothed point is used only for route matching, not for display.
+            double smoothLat = reading.Position.Latitude;
+            double smoothLon = reading.Position.Longitude;
+            if (_lastSmoothedPosition != null)
             {
-                Log.Information("Destination reached!");
-                NavigationCompleted?.Invoke();
-                _ = StopNavigation();
+                // Pull toward previous smoothed position (simple EMA-like smoothing)
+                const double alpha = 0.4; // lower = smoother, higher = faster response
+                smoothLat = alpha * reading.Position.Latitude + (1.0 - alpha) * _lastSmoothedPosition.Value.Latitude;
+                smoothLon = alpha * reading.Position.Longitude + (1.0 - alpha) * _lastSmoothedPosition.Value.Longitude;
+            }
+            _lastSmoothedPosition = new Coordinate(smoothLat, smoothLon, null);
+
+            // 1. Snap current position to route + check off-route
+            // Use lookahead around current route index to avoid jumping to a parallel road far away.
+            int hintIndex = _currentManeuverIndex > 0
+                ? _maneuvers[_currentManeuverIndex].BeginShapeIndex
+                : 0;
+
+            (int snappedIndex, double distanceMeters) = FindNearestRouteIndexWithLookahead(
+                smoothLat, smoothLon, hintIndex, RouteLookaheadWindow);
+
+            if (snappedIndex < 0) return;
+
+            // Off-route detection with accuracy awareness:
+            // Only trigger off-route if the deviation is clearly larger than the reported GPS accuracy.
+            // This avoids false positives when walking slightly beside the road.
+            double accuracy = reading.PositionAccuracy;
+            double effectiveThreshold = Math.Max(OffRouteThresholdM, accuracy * 1.5);
+
+            if (distanceMeters > effectiveThreshold)
+            {
+                if (_isOffRoute) return;
+                _isOffRoute = true;
+                Log.Warning(
+                    "Off route! {Dist:F1}m from route, accuracy={Accuracy:F1}m, threshold={Threshold:F1}m",
+                    distanceMeters, accuracy, effectiveThreshold);
+                OffRouteDetected?.Invoke(
+                    reading.Position.Latitude, reading.Position.Longitude, distanceMeters);
+                // Don't update maneuver/distances while off-route
                 return;
             }
 
-            FireCurrentManeuver(displayIndex);
-        }
-        else 
-        {
-            // Even if physical segment didn't change, we might need to update 
-            // if the look-ahead target changed (less common but possible)
-            // For now, we rely on the 1Hz StatusUpdated to keep the distance countdown running.
-        }
+            // Back on route
+            _isOffRoute = false;
+            int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
 
-        // 3. Calculate distances
-        // SM-Frame zeigt IMMER die Distanz bis zum ENDE DES PHYSISCHEN SEGMENTS
-        // (unabhängig vom Look Ahead für die NAVI-Anzeige)
-        _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex);
-        (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
-        _remainingDistanceKm = remainingKm;
-        _remainingTimeMin = remainingMin;
+            // Determine the index for display (look-ahead for next turn)
+            int displayIndex = GetDisplayManeuverIndex();
 
-        // 4. Fire status update
-        double speedKmh = reading.Speed * 3.6;
-        // NAVI-Frame zeigt Look Ahead-Index (aus _relevantManeuverIndices)
-        // SM-Frame zeigt physischen Index und Distanz bis Segmentende
-        // displayIndex wurde bereits oben berechnet
-        NavigationStatus status = new()
-        {
-            SpeedKmh = speedKmh,
-            DistanceToNextTurnM = _distanceToNextTurnM,
-            RemainingDistanceKm = _remainingDistanceKm,
-            RemainingTimeMin = _remainingTimeMin,
-            CurrentManeuverIndex = _currentManeuverIndex,
-            DisplayManeuverIndex = displayIndex,
-            TotalManeuvers = _maneuvers.Count,
-            Heading = reading.Heading,
-            Accuracy = reading.PositionAccuracy,
-            IsStationary = reading.IsStationary
-        };
-        StatusUpdated?.Invoke(status);
-        }
+            bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
+
+            // We trigger a UI/BLE update if the physical segment changes OR if the display target changes
+            // To be safe, we calculate the new display index after updating _currentManeuverIndex
+            if (maneuverChanged)
+            {
+                _currentManeuverIndex = newManeuverIndex;
+
+                // Re-calculate display index after updating current index
+                displayIndex = GetDisplayManeuverIndex();
+
+                // Check for arrival
+                if (_currentManeuverIndex >= _maneuvers.Count)
+                {
+                    Log.Information("Destination reached!");
+                    NavigationCompleted?.Invoke();
+                    _ = StopNavigation();
+                    return;
+                }
+
+                FireCurrentManeuver(displayIndex);
+            }
+            else 
+            {
+                // Even if physical segment didn't change, we might need to update 
+                // if the look-ahead target changed (less common but possible)
+                // For now, we rely on the 1Hz StatusUpdated to keep the distance countdown running.
+            }
+
+            // 3. Calculate distances
+            // SM-Frame zeigt IMMER die Distanz bis zum ENDE DES PHYSISCHEN SEGMENTS
+            // (unabhängig vom Look Ahead für die NAVI-Anzeige)
+            _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex);
+            (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
+            _remainingDistanceKm = remainingKm;
+            _remainingTimeMin = remainingMin;
+
+            // 4. Fire status update
+            double speedKmh = reading.Speed * 3.6;
+            // NAVI-Frame zeigt Look Ahead-Index (aus _relevantManeuverIndices)
+            // SM-Frame zeigt physischen Index und Distanz bis Segmentende
+            // displayIndex wurde bereits oben berechnet
+            NavigationStatus status = new()
+            {
+                SpeedKmh = speedKmh,
+                DistanceToNextTurnM = _distanceToNextTurnM,
+                RemainingDistanceKm = _remainingDistanceKm,
+                RemainingTimeMin = _remainingTimeMin,
+                CurrentManeuverIndex = _currentManeuverIndex,
+                DisplayManeuverIndex = displayIndex,
+                TotalManeuvers = _maneuvers.Count,
+                Heading = reading.Heading,
+                Accuracy = reading.PositionAccuracy,
+                IsStationary = reading.IsStationary
+            };
+            StatusUpdated?.Invoke(status);
+            }
     }
 
     // ── Route matching ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Find the nearest point on the route polyline to the given lat/lon,
+    /// but restrict the search to a local window around <paramref name="hintIndex"/>.
+    /// This prevents jumps to parallel roads far away during normal navigation.
+    /// </summary>
+    private (int Index, double DistanceMeters) FindNearestRouteIndexWithLookahead(
+        double lat, double lon, int hintIndex, int window)
+    {
+        if (_routeCoords.Count == 0)
+            return (-1, double.MaxValue);
+
+        int start = Math.Max(0, hintIndex - window);
+        int end = Math.Min(_routeCoords.Count - 1, hintIndex + window);
+
+        int bestIndex = start;
+        double bestDistSq = double.MaxValue;
+
+        for (int i = start; i < end; i++)
+        {
+            double distSq = PointToSegmentDistanceSq(
+                lon, lat,
+                _routeCoords[i].Longitude, _routeCoords[i].Latitude,
+                _routeCoords[i + 1].Longitude, _routeCoords[i + 1].Latitude,
+                out double t);
+
+            if (!(distSq < bestDistSq)) continue;
+            bestDistSq = distSq;
+            bestIndex = t >= 0.5 ? i + 1 : i;
+        }
+
+        double distanceMeters = GeoMath.DistanceMeters(
+            lat, lon,
+            _routeCoords[bestIndex].Latitude, _routeCoords[bestIndex].Longitude);
+        return (bestIndex, distanceMeters);
+    }
 
     /// <summary>
     /// Find the nearest point on the route polyline to the given lat/lon.

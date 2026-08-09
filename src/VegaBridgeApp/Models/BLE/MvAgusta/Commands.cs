@@ -22,4 +22,5 @@ public static class Commands
     public const string FINISH = "FINISH";
     public const string G = "G";
     public const string MSG = "MSG";
+    public const string PING = "PING";
 }

@@ -132,12 +132,17 @@ public class BleNavigationCoordinator : IDisposable
     {
         if (_currentManeuver == null) return;
 
+        // Ensure we send correct units and matching field structures:
+        // DEST: Address, Lat, Lon (all 3 must be filled even as placeholders)
+        // REM: Remaining distance in METERS (as integer string), not kilometers.
         NavigationStartInput input = new()
         {
             TotalDistanceKm = _navigation.TotalDistanceKm,
             TotalTimeMin = _navigation.TotalTimeMin,
             UpcomingManeuvers = []
         };
+
+        BleCommandLogger.Log($"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={_navigation.TotalManeuvers}");
 
         await _bleManager.ExecuteNavigationActionAsync(
             "SendNavigationStartAsync", input);
@@ -151,11 +156,18 @@ public class BleNavigationCoordinator : IDisposable
         NavigationStatus status = _currentStatus;
         NavigationManeuverInfo maneuver = _currentManeuver;
 
+        // The display maneuver (look-ahead) contains the upcoming turn's street names.
+        // IntersectionName = road name of the upcoming maneuver (street you're turning ONTO).
+        // This matches the official MV Ride app: direction.getRoadName() from HERE SDK.
+        string intersectionName = maneuver.StreetNames.FirstOrDefault() ?? string.Empty;
+        string street = intersectionName; // StreetName kept for compatibility; same value for MV Agusta
+
         NavigationUpdateInput input = new()
         {
             ManeuverIcon = NavigationIconMapper.GetSemanticIcon(maneuver.ValhallaType),
             InstructionText = maneuver.Instruction,
-            StreetName = maneuver.StreetNames.FirstOrDefault() ?? string.Empty,
+            StreetName = street,
+            IntersectionName = intersectionName,
             DistanceToTurnM = status.DistanceToNextTurnM,
             SpeedKmh = status.SpeedKmh,
             RemainingDistanceKm = status.RemainingDistanceKm,
@@ -164,6 +176,8 @@ public class BleNavigationCoordinator : IDisposable
             TotalManeuvers = maneuver.Total,
             IsFinal = maneuver.Index >= maneuver.Total - 1 && status.DistanceToNextTurnM <= 0
         };
+
+        BleCommandLogger.Log($"NAV UPDATE INPUT: icon={input.ManeuverIcon}, instr={input.InstructionText}, street={input.StreetName}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h, remDist={input.RemainingDistanceKm:F1}km, idx={input.CurrentManeuverIndex}/{input.TotalManeuvers}");
 
         await _bleManager.ExecuteNavigationActionAsync(
             "SendNavigationUpdateAsync", input);

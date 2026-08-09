@@ -5,9 +5,7 @@ using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Models.Routes;
 using VegaBridgeApp.Services.Routes;
-using VegaBridgeApp.Services.Navigation;
 using VegaBridgeApp.Models.Navigation;
-using VegaBridgeApp.Components.Dialogs;
 using VegaBridgeApp.Components.Dialogs;
 using MudBlazor;
 using Shiny.Locations;
@@ -369,7 +367,10 @@ public partial class Map : ComponentBase, IAsyncDisposable
                         }
                     }
                 };
-                await _map?.AddLayer(layer);
+                if (_map != null)
+                {
+                    await _map.AddLayer(layer);
+                }
             }
             // else: Layer existiert bereits – nicht updaten!
             // Kein RemoveLayer/AddLayer -> Karte bleibt interaktiv
@@ -916,7 +917,6 @@ public partial class Map : ComponentBase, IAsyncDisposable
         {
             (string mergedShape, List<Maneuver> allManeuvers, double totalKm, double totalMin) =
                 PrepareNavigationData(_currentRouteResponse.Trip.Legs);
-
             await NavService.StartNavigation(mergedShape, allManeuvers, totalKm, totalMin);
 
             Snackbar.Add(L["NavigationStarted"], Severity.Success);
@@ -1139,6 +1139,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
             {
                 List<Shape> gpsMarkers = [.. map.MarkersList.Take(2)];
                 map.MarkersList.Clear();
+                StateHasChanged();
                 foreach (Shape m in gpsMarkers) map.MarkersList.Add(m);
             }
 

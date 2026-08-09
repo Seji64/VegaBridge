@@ -22,10 +22,17 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     public string ControlWriteCharacteristicUuid => "00002345-0000-1000-8000-00805f9b34fb";
     public string ReadCharacteristicUuid => "00001234-0000-1000-8000-00805f9b34fb";
 
-    // Heartbeat fields
-    private PeriodicTimer? _heartbeatTimer;
-    private CancellationTokenSource? _heartbeatCts;
+    // Heartbeat fields - PING keepalive (official MV Ride uses PING, not GUI1 writes)
+    private PeriodicTimer? _pingTimer;
+    private CancellationTokenSource? _pingCts;
+    private Task? _pingTask;
+    private string? _lastBikeSessionId;
     private bool _isDisposed;
+
+    /// <summary>
+    /// Gets the last GUI1 session ID received from the bike (for reference only).
+    /// </summary>
+    public string? LastBikeSessionId => _lastBikeSessionId;
 
     public bool IsCompatible(BleDeviceInfo device)
     {
@@ -37,15 +44,20 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     public async Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)
     {
         byte[] frame = BuildFrame(command, fields);
+        BleCommandLogger.Log($"SEND {command} frame: {BitConverter.ToString(frame)}");
         // Use Write-without-Response for this characteristic as the device does not support response writes
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
     }
 
     public async Task SendTestAsync(IBleConnectedDevice device)
     {
-        // Test frame: sends FINISH (destination reached) to verify BLE connectivity.
-        byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
-        // Use Write-without-Response for this characteristic as the device does not support response writes
+        // Test frame: sends a WhatsApp‑style MSG command so the user sees a readable message on the bike.
+        // The MSG format is: ⏎MSG⏝<appId>⏝<message>⏝<title>⏎
+        // Using "whatsapp" as the appId mirrors the real MV Ride app behaviour and guarantees a visible payload.
+        byte[] frame = BuildFrame(Commands.MSG, "whatsapp", "Test from VegaBridge", "VegaBridge");
+        // Log the raw frame for debugging
+        BleCommandLogger.Log($"SEND MSG frame: {BitConverter.ToString(frame)}");
+        // Write‑without‑Response is fine for MSG – the bike only needs to display the payload.
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
     }
 
@@ -54,19 +66,24 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     public async Task SendNavigationStartAsync(IBleConnectedDevice device, NavigationStartInput input)
     {
         Log.Debug("MV Agusta: Navigation Start - {Distance:F1}km, {Time:F0}min", input.TotalDistanceKm, input.TotalTimeMin);
+        BleCommandLogger.Log($"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={input.UpcomingManeuvers?.Count ?? 0}");
         
-        // Send initial NAVI frame with first maneuver (if available)
-        if (input.UpcomingManeuvers?.Count > 0)
-        {
-            NavigationUpdateInput first = input.UpcomingManeuvers[0];
-            await SendNavigationUpdateAsync(device, first with { IsFinal = false });
-        }
+        // DEST format (from pklg capture): DEST|\x1e|lon\x1e|lat\x1e|
+        // Field 1 (address) is empty in the official MV Ride app.
+        // Field 2 = longitude, field 3 = latitude (both 6 decimal places).
+        // TODO: Pass real start coordinates through NavigationStartInput once available.
+        string lon = "9.258020";  // placeholder
+        string lat = "48.775730"; // placeholder
+        await SendAsync(device, Commands.DEST, "", lon, lat);
+        await Task.Delay(200);
         
-        // Send initial status frame
-        await SendStatusFrameAsync(device, 0, input.TotalDistanceKm * 1000, 0);
+        // REM format (from pklg capture): REM|\x1e|<meters>\x1e|
+        // 3 RS separators → 4 fields: command, empty, meters, empty
+        await SendAsync(device, Commands.REM, "", (input.TotalDistanceKm * 1000).ToString("F0"), "");
+        await Task.Delay(200);
         
-        // Start heartbeat when navigation begins
-        await StartHeartbeatAsync(device);
+        // Start PING keepalive when navigation begins
+        await StartPingAsync(device);
     }
 
     public async Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input)
@@ -74,135 +91,165 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         Log.Debug("MV Agusta: Navigation Update - Maneuver {Index}/{Total}: {Icon}, Dist: {Dist:F0}m, Speed: {Speed:F0}km/h", 
             input.CurrentManeuverIndex + 1, input.TotalManeuvers, input.ManeuverIcon, input.DistanceToTurnM, input.SpeedKmh);
 
-        // Send NAVI frame with maneuver info
-        byte[] naviFrame = BuildFrame(Commands.NAVI, 
-            input.ManeuverIcon, 
-            input.InstructionText, 
-            input.StreetName);
+        // NAVI format: NAVI|icon|navigationGuide|intersectionName
+        // Per BluetoothService.java (mvride v1.4.3):
+        // - navigationGuide = direction.getDescription() (e.g., "Links abbiegen\nRosenstraße")
+        // - intersectionName = direction.getRoadName() (e.g., "Rosenstraße")
+        // - Both strings truncated to 60 chars by the official app
+        // - Instruction ends with newline separator
+        const int maxLen = 60;
+        
+        string navigationGuide = string.IsNullOrEmpty(input.InstructionText)
+            ? ""
+            : (input.InstructionText.EndsWith("\n", StringComparison.Ordinal)
+                ? input.InstructionText
+                : input.InstructionText + "\n");
+        
+        // Truncate to 60 chars as per official implementation
+        if (navigationGuide.Length > maxLen)
+            navigationGuide = navigationGuide[..maxLen];
+        
+        string intersectionName = string.IsNullOrEmpty(input.IntersectionName)
+            ? (string.IsNullOrEmpty(input.StreetName) ? "" : input.StreetName)
+            : input.IntersectionName;
+        if (intersectionName.Length > maxLen)
+            intersectionName = intersectionName[..maxLen];
+        
+        byte[] naviFrame = BuildFrame(Commands.NAVI,
+            input.ManeuverIcon,
+            navigationGuide,
+            intersectionName);
+        BleCommandLogger.Log($"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
 
         // Send SM (Status/Motion) frame with current metrics
         await SendStatusFrameAsync(device, input.SpeedKmh, input.RemainingDistanceKm * 1000, input.DistanceToTurnM);
+        
+        // Send SM1 countdown frame when approaching a turn (within ~300m for left, ~250m for right)
+        // MV Ride sends SM1 with type 902 (left turns) or 901 (right turns) and a countdown value.
+        // The countdown decreases from ~7 to 0 as you approach the turn.
+        if (input.DistanceToTurnM <= 300 && input.DistanceToTurnM > 0)
+        {
+            // Determine SM1 type based on maneuver icon
+            string sm1Type = input.ManeuverIcon.Contains("left", StringComparison.OrdinalIgnoreCase) ? "902" : "901";
+            // Countdown: 7 at ~300m, decreasing to 0 at the turn
+            int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
+            await SendSm1CountdownAsync(device, sm1Type, countdown);
+        }
+        
+        // Add a slight delay to give the bike time to process the user‑visible frames
+        await Task.Delay(250); // 250 ms – experimentally safe for most MV phones
+        
+        // Log the navigation update for debugging
+        BleCommandLogger.Log($"NAV UPDATE: idx={input.CurrentManeuverIndex}, icon={input.ManeuverIcon}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h");
     }
 
     public async Task SendNavigationFinishAsync(IBleConnectedDevice device)
     {
         Log.Debug("MV Agusta: Navigation Finish");
+        // Build and send FINISH frame – log it so we can trace the end of a route.
         byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
+        BleCommandLogger.Log($"SEND FINISH frame: {BitConverter.ToString(frame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
         
-        // Stop heartbeat when navigation ends
-        StopHeartbeat();
+        // Stop keepalive when navigation ends
+        await StopPingAsync();
     }
 
     public async Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input)
     {
         Log.Warning("MV Agusta: Off-Route Alert - {Dist:F1}m at {Lat},{Lon}", input.DistanceMeters, input.Latitude, input.Longitude);
         
-        // Signal the motorcycle that the route is being recalculated
-        byte[] frame = BuildFrame(Commands.RENAVI, "off-route", "OFF ROUTE", $"{input.DistanceMeters:F0}m");
+        // RENAVI format (from pklg capture): RENAVI|\x1e|\x1e|
+        // All fields empty – the bike switches to rerouting mode based on the command alone.
+        byte[] frame = BuildFrame(Commands.RENAVI, "", "", "");
+        BleCommandLogger.Log($"SEND RENAVI frame: {BitConverter.ToString(frame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+        
+        BleCommandLogger.Log($"OFF-ROUTE ALERT: dist={input.DistanceMeters:F0}m, lat={input.Latitude:F6}, lon={input.Longitude:F6}");
     }
 
-    // ─── Heartbeat Implementation ───────────────────────────────────────
-
     /// <summary>
-    /// Starts the GUI1 keep-alive heartbeat timer (sends every 2-3 seconds).
+    /// Starts the PING keepalive timer (sends every ~15 seconds, matching official app behavior).
     /// </summary>
-    private async Task StartHeartbeatAsync(IBleConnectedDevice device)
+    private async Task StartPingAsync(IBleConnectedDevice device)
     {
         // Stop any existing timer
-        StopHeartbeat();
+        await StopPingAsync();
         
-        _heartbeatCts = new CancellationTokenSource();
-        _heartbeatTimer = new PeriodicTimer(TimeSpan.FromSeconds(2.5)); // Send every 2.5 seconds
+        _pingCts = new CancellationTokenSource();
+        _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // Official app sends PING once in capture, but keepalive every ~15s
         
-        // Start the heartbeat loop
-        await Task.Run(async () =>
+        // Start the ping loop and store the task for proper disposal
+        _pingTask = Task.Run(async () =>
         {
             try
             {
-                while (await _heartbeatTimer.WaitForNextTickAsync(_heartbeatCts.Token))
+                while (await _pingTimer.WaitForNextTickAsync(_pingCts.Token))
                 {
                     if (_isDisposed) break;
-                    await SendGui1KeepAliveAsync(device);
+                    await SendPingAsync(device);
                 }
             }
             catch (OperationCanceledException)
             {
                 // Expected when stopping
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!_isDisposed)
             {
-                Log.Error(ex, "MV Agusta: Heartbeat error");
+                Log.Error(ex, "MV Agusta: PING keepalive error");
             }
-        }, _heartbeatCts.Token);
+        }, _pingCts.Token);
     }
 
     /// <summary>
-    /// Stops the heartbeat timer.
+    /// Stops the PING keepalive timer and waits for the task to complete.
     /// </summary>
-    private void StopHeartbeat()
+    private async Task StopPingAsync()
     {
-        if (_heartbeatCts != null)
+        if (_pingCts != null)
         {
-            _heartbeatCts.Cancel();
-            _heartbeatCts.Dispose();
-            _heartbeatCts = null;
+            _pingCts.Cancel();
+            _pingCts.Dispose();
+            _pingCts = null;
         }
         
-        _heartbeatTimer?.Dispose();
-        _heartbeatTimer = null;
+        _pingTimer?.Dispose();
+        _pingTimer = null;
+
+        // Wait for the ping task to finish gracefully
+        if (_pingTask != null)
+        {
+            try
+            {
+                await _pingTask;
+            }
+            catch (OperationCanceledException) { /* Expected */ }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "MV Agusta: PING task ended with error during stop");
+            }
+            _pingTask = null;
+        }
     }
 
     /// <summary>
-    /// Creates and sends a GUI1 keep-alive frame with a session ID.
+    /// Sends a PING keepalive frame (official MV Ride keepalive mechanism).
+    /// PING format: \rPING\u001E\u001E\u001E\r (4 fields, all empty after command)
     /// </summary>
-    private async Task SendGui1KeepAliveAsync(IBleConnectedDevice device)
+    private async Task SendPingAsync(IBleConnectedDevice device)
     {
         try
         {
-            // Generate a fresh cryptographically random session ID for each heartbeat tick.
-            // This satisfies the spec requirement that the ID changes every 1-3 seconds and avoids magic strings.
-            string sessionId = GenerateSessionId();
-            
-            byte[] frame = BuildGui1Frame(sessionId);
-            // GUI1 uses Write-with-Response on handle 0x002A (same UUID as control characteristic)
-            await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
-            Log.Debug("MV Agusta: Sent GUI1 keep-alive {SessionId}", sessionId);
+            byte[] frame = BuildFrame(Commands.PING, "", "", "");
+            BleCommandLogger.Log($"SEND PING frame: {BitConverter.ToString(frame)}");
+            await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+            Log.Debug("MV Agusta: Sent PING keepalive");
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "MV Agusta: Failed to send GUI1 keep-alive");
+            Log.Error(ex, "MV Agusta: Failed to send PING keepalive");
         }
-    }
-
-    /// <summary>
-    /// Builds a GUI1 frame: \rGUI1\u001E<session_id>\r
-    /// </summary>
-    private byte[] BuildGui1Frame(string sessionId)
-    {
-        using MemoryStream ms = new();
-        ms.WriteByte(Cr);
-        ms.Write(Encoding.UTF8.GetBytes(Commands.GUI1));
-        ms.WriteByte(Rs);
-        ms.Write(Encoding.UTF8.GetBytes(sessionId));
-        ms.WriteByte(Cr);
-        return ms.ToArray();
-    }
-
-    /// <summary>
-    /// Generates a cryptographically random 8-byte session ID (16 hex characters).
-    /// This satisfies the protocol requirement that GUI1 session IDs change each heartbeat.
-    /// </summary>
-    private string GenerateSessionId()
-    {
-        // Use RandomNumberGenerator for secure randomness
-        using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
-        byte[] randomBytes = new byte[8]; // 8 bytes = 16 hex characters
-        rng.GetBytes(randomBytes);
-        // Convert to uppercase hex string (matching the spec's hex format)
-        return Convert.ToHexString(randomBytes).ToUpperInvariant();
     }
 
     // ─── Incoming Data Handling ──────────────────────────────────────────
@@ -211,9 +258,20 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     {
         if (TryParseFrame(data, out string command, out string[] fields))
         {
+            // Handle GUI1 heartbeat from bike - update session ID
+            if (command == "GUI1" && fields.Length > 0)
+            {
+                _lastBikeSessionId = fields[0];
+                BleCommandLogger.Log($"RECV GUI1 frame: {BitConverter.ToString(data)}, sessionId={fields[0]}");
+            }
             // Logic to handle the parsed frame
             // In a real scenario, this might trigger an event or update a state machine.
+            BleCommandLogger.Log($"RECV {command} frame: {BitConverter.ToString(data)}");
             Log.Debug("MV Agusta Frame Received: {Command}, Fields: {Fields}", command, string.Join(", ", fields));
+        }
+        else
+        {
+            BleCommandLogger.Log($"RECV INVALID frame: {BitConverter.ToString(data)}");
         }
     }
 
@@ -221,11 +279,16 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 
     private async Task SendStatusFrameAsync(IBleConnectedDevice device, double speedKmh, double remainingDistanceM, double distanceToTurnM)
     {
+        // SM format: SM|speed_field|remainingDistanceM|distanceToTurnM
+        // Field 1 is "0" in official captures.
         byte[] smFrame = BuildFrame(Commands.SM,
-            speedKmh.ToString("F0"),
+            "0",  
             remainingDistanceM.ToString("F0"),
             distanceToTurnM.ToString("F0"));
+        BleCommandLogger.Log($"SEND SM frame: {BitConverter.ToString(smFrame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, smFrame, withResponse: false);
+        
+        await Task.Delay(150);
     }
 
     private byte[] BuildFrame(string command, params string[] fields)
@@ -296,6 +359,19 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     // ─── Valhalla > MV Agusta Icon Mapping ─────────────────────────────
     // Moved here from NavigationService to keep protocol details in the plugin.
 
+    /// <summary>
+    /// Sends an SM1 countdown frame (turn approach indicator).
+    /// MV Ride sends SM1|902|X for left turns, SM1|901|X for right turns.
+    /// The countdown X goes from ~7 down to 0 as you approach the turn.
+    /// </summary>
+    private async Task SendSm1CountdownAsync(IBleConnectedDevice device, string sm1Type, int countdown)
+    {
+        byte[] frame = BuildFrame(Commands.SM1, sm1Type, countdown.ToString(), "");
+        BleCommandLogger.Log($"SEND SM1 frame: {BitConverter.ToString(frame)}");
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+        await Task.Delay(100);
+    }
+
     // ─── IAsyncDisposable Implementation ───────────────────────────────────────
 
     public async ValueTask DisposeAsync()
@@ -303,7 +379,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         if (_isDisposed) return;
         _isDisposed = true;
         
-        StopHeartbeat();
+        await StopPingAsync();
         
         GC.SuppressFinalize(this);
     }
