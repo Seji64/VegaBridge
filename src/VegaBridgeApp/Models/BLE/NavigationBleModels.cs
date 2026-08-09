@@ -31,6 +31,11 @@ public sealed record NavigationUpdateInput
     public required string StreetName { get; init; }
 
     /// <summary>
+    /// Kreuzung/Straße des Ziels/manövers; often identical to StreetName in official captures.
+    /// </summary>
+    public string? IntersectionName { get; init; }
+
+    /// <summary>
     /// Distanz zum nächsten Manöver in Metern.
     /// </summary>
     public required double DistanceToTurnM { get; init; }

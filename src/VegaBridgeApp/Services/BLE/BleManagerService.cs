@@ -23,7 +23,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     // Maintain our own dictionary of discovered peripherals for reliable access
     private readonly ConcurrentDictionary<string, IPeripheral> _discoveredPeripherals = new();
+    
     private readonly IEnumerable<IBleDevicePlugin> _plugins = plugins;
+
+    // Expose active plugin for advanced access (e.g., session ID)
+    public IBleDevicePlugin? ActivePlugin => _activePlugin;
 
     // ── Reactive State ──────────────────────────────────────────────────
 
@@ -133,7 +137,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             _activePeripheral = peripheral;
             
             // Plugin Selection
-            BleDeviceInfo deviceInfo = new BleDeviceInfo { Uuid = deviceUuid, Name = peripheral.Name! };
+            BleDeviceInfo deviceInfo = new() { Uuid = deviceUuid, Name = peripheral.Name! };
             _activePlugin = _plugins.FirstOrDefault(p => p.IsCompatible(deviceInfo));
 
             if (_activePlugin == null)
@@ -205,7 +209,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         try
         {
-            BleConnectedDeviceWrapper wrapper = new BleConnectedDeviceWrapper(_activePeripheral, _activePlugin);
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+            BleCommandLogger.Log("SEND TEST FRAME (via SendTestAsync)");
             await _activePlugin.SendTestAsync(wrapper);
         }
         catch (Exception ex)
@@ -225,7 +230,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         try
         {
-            BleConnectedDeviceWrapper wrapper = new BleConnectedDeviceWrapper(_activePeripheral, _activePlugin);
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+            BleCommandLogger.Log($"SEND CMD: {command} fields=[{string.Join(", ", fields)}]");
             await _activePlugin.SendAsync(wrapper, command, fields);
         }
         catch (Exception ex)
@@ -246,6 +252,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             Log.Debug("ExecuteNavigationActionAsync skipped: no active device/plugin");
             return;
         }
+
+        BleCommandLogger.Log($"NAV ACTION: {action}");
 
         try
         {
@@ -291,6 +299,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     public async Task ExecuteNavigationFinishAsync()
     {
         if (_activePeripheral == null || _activePlugin == null) return;
+
+        BleCommandLogger.Log("NAV ACTION: SendNavigationFinishAsync");
 
         try
         {
@@ -396,7 +406,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 .Where(p => !string.IsNullOrWhiteSpace(p.Name) && p.Name != "Unknown")
                 .Select(p => 
                 {
-                    BleDeviceInfo deviceInfo = new BleDeviceInfo
+                    BleDeviceInfo deviceInfo = new()
                     {
                         Uuid = Guid.Parse(p.Uuid),
                         Name = p.Name!,

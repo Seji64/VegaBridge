@@ -1,8 +1,14 @@
 using Microsoft.AspNetCore.Components;
+
 using MudBlazor;
 using Serilog;
+using System.IO;
+using System.Text;
+using CommunityToolkit.Maui.Storage;
+using VegaBridgeApp.Components.Dialogs;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
+using VegaBridgeApp.Models.BLE.MvAgusta;
 
 namespace VegaBridgeApp.Components.Pages;
 
@@ -160,10 +166,91 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         StateHasChanged();
     }
 
-    private async Task SendTestFrame()
+    /*
+    private async Task SendNavigationTestSequenceAsync()
     {
-        await BleManager.SendTestFrameAsync();
+        if (!IsConnected) return;
+
+        BleCommandLogger.ClearLog();
+        BleCommandLogger.Log("=== TEST SEQUENCE START (Standard) ===");
+        StatusMessage = "Sending standard nav test sequence...";
+        StateHasChanged();
+
+        await BleManager.SendCommandAsync(Commands.DEST, "Ziel", "0.000000", "0.000000");
+        await Task.Delay(200);
+        await BleManager.SendCommandAsync(Commands.REM, "", "10500");
+        await Task.Delay(200);
+        await BleManager.SendCommandAsync(Commands.NAVI, "turn-left", "Links abbiegen\\n", "Hauptstraße", "Hauptstraße");
+        await Task.Delay(200);
+        await BleManager.SendCommandAsync(Commands.SM, "0", "10500", "250");
+        await Task.Delay(200);
+        await BleManager.SendCommandAsync(Commands.SM1, "902", "7", "");
+        await Task.Delay(200);
+        await BleManager.SendCommandAsync(Commands.GUI1, GenerateSessionId());
+
+        StatusMessage = "Phase 1: Links abbiegen (10s)...";
+        StateHasChanged();
+        await Task.Delay(5000);
+        await BleManager.SendCommandAsync(Commands.SM, "0", "10450", "230");
+        await BleManager.SendCommandAsync(Commands.GUI1, GenerateSessionId());
+        await Task.Delay(5000);
+
+        await BleManager.SendCommandAsync(Commands.NAVI, "turn-right", "Rechts abbiegen\\n", "Nebenstraße", "Nebenstraße");
+        await Task.Delay(200);
+        await BleManager.SendCommandAsync(Commands.SM, "0", "10200", "180");
+        await Task.Delay(200);
+        await BleManager.SendCommandAsync(Commands.SM1, "901", "6", "");
+        await Task.Delay(200);
+        await BleManager.SendCommandAsync(Commands.GUI1, GenerateSessionId());
+
+        StatusMessage = "Phase 2: Rechts abbiegen (10s)...";
+        StateHasChanged();
+        await Task.Delay(5000);
+        await BleManager.SendCommandAsync(Commands.SM, "0", "9800", "150");
+        await BleManager.SendCommandAsync(Commands.GUI1, GenerateSessionId());
+        await Task.Delay(5000);
+
+        await BleManager.SendCommandAsync(Commands.FINISH, "", "", "");
+        BleCommandLogger.Log("=== TEST SEQUENCE END (Standard) ===");
+        StatusMessage = "Test sequence complete.";
+        StateHasChanged();
     }
+    */
+
+    private async Task ExportBleLogAsync()
+    {
+        IReadOnlyList<string> lines = BleCommandLogger.GetLog();
+        if (lines.Count == 0)
+        {
+            Snackbar.Add("BLE log is empty.", Severity.Info);
+            return;
+        }
+
+        string content = string.Join('\n', lines);
+        byte[] bytes = Encoding.UTF8.GetBytes(content);
+        using MemoryStream stream = new(bytes);
+
+        string filename = $"ble_log_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.txt";
+        FileSaverResult saveResult = await FileSaver.Default.SaveAsync(filename, stream, CancellationToken.None);
+
+        if (saveResult.IsSuccessful)
+        {
+            Snackbar.Add($"BLE log saved ({lines.Count} lines).", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add(saveResult.Exception?.Message ?? "Save cancelled.", Severity.Error);
+        }
+
+        BleCommandLogger.ClearLog();
+    }
+
+    private void ClearBleLog()
+    {
+        BleCommandLogger.ClearLog();
+        Snackbar.Add("BLE log cleared.", Severity.Info);
+    }
+
 
     private async Task HandleScanButtonClick()
     {
