@@ -127,6 +127,19 @@ public static class MauiProgram
         // ── Navigation State Machine ─────────────────────────────────────────
         builder.Services.AddSingleton<NavigationService>();
 
-        return builder.Build();
+        // ── BLE ↔ Navigation bridge ───────────────────────────────────────────
+        // BleNavigationCoordinator subscribes to NavigationService events in its
+        // constructor and translates them into BLE frames via BleManagerService.
+        // It MUST be resolved once at startup, otherwise no navigation frames
+        // (DEST/REM/NAVI/SM/SM1/FINISH) are ever sent during real route navigation.
+        builder.Services.AddSingleton<BleNavigationCoordinator>();
+
+        MauiApp app = builder.Build();
+
+        // Force-instantiate the coordinator now (singleton) so it subscribes
+        // to navigation events for the app's lifetime.
+        _ = app.Services.GetRequiredService<BleNavigationCoordinator>();
+
+        return app;
     }
 }

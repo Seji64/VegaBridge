@@ -1,5 +1,4 @@
 using Serilog;
-using VegaBridgeApp.Models.BLE.MvAgusta;
 using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Models.Navigation;
 using VegaBridgeApp.Services.Location;
@@ -14,14 +13,60 @@ namespace VegaBridgeApp.Services.Navigation;
 /// Navigation state machine.
 /// 
 /// Tracks the rider's position along a Valhalla route, determines the current
-/// maneuver, calculates distances, and fires events for the UI and BLE layers.
-/// 
+/// maneuver, calculates distances, and reports state changes through
+/// <see cref="INavigationSink"/>.
+///
 /// Works with the screen OFF – the UI is only needed for optional glanceable
 /// updates. The core logic runs from GPS callbacks regardless of display state.
 /// </summary>
 public class NavigationService(GpsService gps)
 {
     private readonly Lock _lock = new();
+    private readonly List<INavigationSink> _sinks = [];
+
+    /// <summary>
+    /// Registers a sink for navigation events. Safe to call multiple times.
+    /// </summary>
+    public void AddSink(INavigationSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+        lock (_sinks)
+        {
+            if (!_sinks.Contains(sink))
+                _sinks.Add(sink);
+        }
+    }
+
+    /// <summary>
+    /// Unregisters a sink. No-op if sink was not registered.
+    /// </summary>
+    public void RemoveSink(INavigationSink sink)
+    {
+        lock (_sinks)
+        {
+            _sinks.Remove(sink);
+        }
+    }
+
+    private async Task NotifySinksAsync(Func<INavigationSink, Task> invoke)
+    {
+        List<INavigationSink> snapshot;
+        lock (_sinks)
+        {
+            snapshot = _sinks.ToList();
+        }
+        foreach (var sink in snapshot)
+        {
+            try
+            {
+                await invoke(sink);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "INavigationSink threw an exception");
+            }
+        }
+    }
 
     // ── Route data (set once per navigation session) ──────────────────────
     private List<Coordinate> _routeCoords = [];
@@ -44,23 +89,6 @@ public class NavigationService(GpsService gps)
     private const int RouteLookaheadWindow = 20; // search only near current route index
 
     private double OffRouteThresholdM => Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
-
-    // ── Events (for UI + BLE layers) ─────────────────────────────────────
-
-    /// <summary>Fired when the rider enters a new maneuver zone.</summary>
-    public event Action<NavigationManeuverInfo>? ManeuverChanged;
-
-    /// <summary>Fired periodically (~1 Hz) with current speed / distance / ETA.</summary>
-    public event Action<NavigationStatus>? StatusUpdated;
-
-    /// <summary>Fired when the destination is reached.</summary>
-    public event Action? NavigationCompleted;
-
-    /// <summary>Fired when navigation starts or stops.</summary>
-    public event Action<bool>? NavigationStateChanged;
-
-    /// <summary>Fired when the rider is significantly off the planned route.</summary>
-    public event Action<double, double, double>? OffRouteDetected; // lat, lon, distanceM
 
     // ── Properties ───────────────────────────────────────────────────────
 
@@ -164,7 +192,12 @@ public class NavigationService(GpsService gps)
             await gps.StopTrackingAsync();
         }
 
-        NavigationStateChanged?.Invoke(true);
+        _ = NotifySinksAsync(s => s.OnStartAsync(new NavigationStartInfo
+        {
+            TotalDistanceKm = TotalDistanceKm,
+            TotalTimeMin = TotalTimeMin,
+            ManeuverCount = maneuvers.Count
+        }));
 
         // Start GPS tracking and subscribe to readings
         await gps.StartTrackingAsync(backgroundMode: true);
@@ -197,8 +230,8 @@ public class NavigationService(GpsService gps)
         if (wasNavigating)
         {
             await gps.StopTrackingAsync();
-            NavigationStateChanged?.Invoke(false);
             Log.Information("Navigation stopped");
+            _ = NotifySinksAsync(s => s.OnFinishAsync());
         }
     }
 
@@ -272,8 +305,9 @@ public class NavigationService(GpsService gps)
                 Log.Warning(
                     "Off route! {Dist:F1}m from route, accuracy={Accuracy:F1}m, threshold={Threshold:F1}m",
                     distanceMeters, accuracy, effectiveThreshold);
-                OffRouteDetected?.Invoke(
-                    reading.Position.Latitude, reading.Position.Longitude, distanceMeters);
+
+                _ = NotifySinksAsync(s => s.OnOffRouteAsync(
+                        reading.Position.Latitude, reading.Position.Longitude, distanceMeters));
                 // Don't update maneuver/distances while off-route
                 return;
             }
@@ -300,8 +334,8 @@ public class NavigationService(GpsService gps)
                 if (_currentManeuverIndex >= _maneuvers.Count)
                 {
                     Log.Information("Destination reached!");
-                    NavigationCompleted?.Invoke();
                     _ = StopNavigation();
+
                     return;
                 }
 
@@ -340,7 +374,7 @@ public class NavigationService(GpsService gps)
                 Accuracy = reading.PositionAccuracy,
                 IsStationary = reading.IsStationary
             };
-            StatusUpdated?.Invoke(status);
+            _ = NotifySinksAsync(s => s.OnStatusAsync(status));
             }
     }
 
@@ -386,29 +420,6 @@ public class NavigationService(GpsService gps)
     /// Find the nearest point on the route polyline to the given lat/lon.
     /// Returns the index into <see cref="_routeCoords"/> and the distance in meters.
     /// </summary>
-    private (int Index, double DistanceMeters) FindNearestRouteIndex(double lat, double lon)
-    {
-        int bestIndex = 0;
-        double bestDistSq = double.MaxValue;
-
-        for (int i = 0; i < _routeCoords.Count - 1; i++)
-        {
-            double distSq = PointToSegmentDistanceSq(
-                lon, lat,
-                _routeCoords[i].Longitude, _routeCoords[i].Latitude,
-                _routeCoords[i + 1].Longitude, _routeCoords[i + 1].Latitude,
-                out double t);
-
-            if (!(distSq < bestDistSq)) continue;
-            bestDistSq = distSq;
-            bestIndex = t >= 0.5 ? i + 1 : i;
-        }
-
-        double distanceMeters = GeoMath.DistanceMeters(
-            lat, lon,
-            _routeCoords[bestIndex].Latitude, _routeCoords[bestIndex].Longitude);
-        return (bestIndex, distanceMeters);
-    }
 
     /// <summary>Squared distance from point (px,py) to segment (ax,ay)-(bx,by).</summary>
     private static double PointToSegmentDistanceSq(
@@ -521,7 +532,6 @@ public class NavigationService(GpsService gps)
             RoundaboutExit = m.RoundaboutExit
         };
 
-        ManeuverChanged?.Invoke(info);
         Log.Debug(
             "Maneuver Display {I}/{T}: {Instr} (ValhallaType={Type})",
             targetIndex + 1, _maneuvers.Count,
