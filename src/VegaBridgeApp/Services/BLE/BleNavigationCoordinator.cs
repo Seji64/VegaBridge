@@ -1,18 +1,18 @@
 using Serilog;
 using VegaBridgeApp.Models.BLE;
+using VegaBridgeApp.Models.Navigation;
 using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Services.Navigation;
-using VegaBridgeApp.Models.Navigation;
 
 namespace VegaBridgeApp.Services.BLE;
 
 /// <summary>
 /// Mediator bridging NavigationService (domain) → BleManagerService (transport).
 ///
-/// Listens to navigation events, enriches them with semantic data, and delegates
-/// plugin calls to the BleManagerService (which owns the active plugin and device).
+/// Implementiert <see cref="INavigationSink"/>, damit der <see cref="NavigationService"/>
+/// Navigation-Events direkt an die BLE-Schicht melden kann.
 /// </summary>
-public class BleNavigationCoordinator : IDisposable
+public class BleNavigationCoordinator : INavigationSink, IDisposable
 {
     private readonly NavigationService _navigation;
     private readonly BleManagerService _bleManager;
@@ -34,12 +34,8 @@ public class BleNavigationCoordinator : IDisposable
         _bleManager = bleManager;
 
         Log.Information("BleNavigationCoordinator initializing and subscribing to events...");
-        
-        _navigation.NavigationStateChanged += OnNavigationStateChanged;
-        _navigation.ManeuverChanged += OnManeuverChanged;
-        _navigation.StatusUpdated += OnStatusUpdated;
-        _navigation.OffRouteDetected += OnOffRouteDetected;
-        _navigation.NavigationCompleted += OnNavigationCompleted;
+
+        _navigation.AddSink(this);
 
         // Sync if already navigating
         if (_navigation.IsNavigating)
@@ -53,44 +49,47 @@ public class BleNavigationCoordinator : IDisposable
 
     public void Dispose()
     {
-        _navigation.NavigationStateChanged -= OnNavigationStateChanged;
-        _navigation.ManeuverChanged -= OnManeuverChanged;
-        _navigation.StatusUpdated -= OnStatusUpdated;
-        _navigation.OffRouteDetected -= OnOffRouteDetected;
-        _navigation.NavigationCompleted -= OnNavigationCompleted;
+        _navigation.RemoveSink(this);
 
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
     }
 
-    // ─── Event Handlers ──────────────────────────────────────────────────
+    // ─── INavigationSink ─────────────────────────────────────────────────
 
-    private void OnNavigationStateChanged(bool isNavigating)
+    /// <inheritdoc />
+    public async Task OnStartAsync(NavigationStartInfo start)
     {
-        switch (isNavigating)
+        _currentManeuver = GetManeuverInfo();
+        if (_currentManeuver == null)
+            return;
+
+        _isNavigating = true;
+        _currentStatus = null;
+
+        NavigationStartInput input = new()
         {
-            case true when !_isNavigating:
-                _isNavigating = true;
-                _currentManeuver = GetManeuverInfo();
-                _currentStatus = null;
-                _ = Task.Run(async () => await SendStartAsync());
-                break;
-            case false when _isNavigating:
-                _isNavigating = false;
-                _currentManeuver = null;
-                _currentStatus = null;
-                break;
-        }
+            TotalDistanceKm = start.TotalDistanceKm,
+            TotalTimeMin = start.TotalTimeMin,
+            UpcomingManeuvers = []
+        };
+
+        BleCommandLogger.Log($"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={start.ManeuverCount}");
+
+        await _bleManager.ExecuteNavigationActionAsync(
+            "SendNavigationStartAsync", input);
     }
 
-    private void OnManeuverChanged(NavigationManeuverInfo info)
+    /// <inheritdoc />
+    public async Task OnManeuverAsync(NavigationManeuverInfo maneuver)
     {
-        _currentManeuver = info;
-        _ = Task.Run(async () => await SendUpdateAsync());
+        _currentManeuver = maneuver;
+        await SendUpdateAsync();
     }
 
-    private void OnStatusUpdated(NavigationStatus status)
+    /// <inheritdoc />
+    public async Task OnStatusAsync(NavigationStatus status)
     {
         _currentStatus = status;
 
@@ -99,10 +98,11 @@ public class BleNavigationCoordinator : IDisposable
             return;
 
         _lastStatusSent = now;
-        _ = Task.Run(async () => await SendUpdateAsync());
+        await SendUpdateAsync();
     }
 
-    private void OnOffRouteDetected(double lat, double lon, double distM)
+    /// <inheritdoc />
+    public async Task OnOffRouteAsync(double lat, double lon, double distM)
     {
         OffRouteAlertInput input = new()
         {
@@ -112,41 +112,22 @@ public class BleNavigationCoordinator : IDisposable
             DetectedAt = DateTimeOffset.UtcNow
         };
 
-        _ = Task.Run(async () => await _bleManager.ExecuteNavigationActionAsync(
+        await _bleManager.ExecuteNavigationActionAsync(
             nameof(IBleDevicePlugin.SendOffRouteAlertAsync),
-            input));
+            input);
     }
 
-    private void OnNavigationCompleted()
+    /// <inheritdoc />
+    public async Task OnFinishAsync()
     {
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
 
-        _ = Task.Run(async () => await _bleManager.ExecuteNavigationFinishAsync());
+        await _bleManager.ExecuteNavigationFinishAsync();
     }
 
-    // ─── Sending Helpers ─────────────────────────────────────────────────
-
-    private async Task SendStartAsync()
-    {
-        if (_currentManeuver == null) return;
-
-        // Ensure we send correct units and matching field structures:
-        // DEST: Address, Lat, Lon (all 3 must be filled even as placeholders)
-        // REM: Remaining distance in METERS (as integer string), not kilometers.
-        NavigationStartInput input = new()
-        {
-            TotalDistanceKm = _navigation.TotalDistanceKm,
-            TotalTimeMin = _navigation.TotalTimeMin,
-            UpcomingManeuvers = []
-        };
-
-        BleCommandLogger.Log($"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={_navigation.TotalManeuvers}");
-
-        await _bleManager.ExecuteNavigationActionAsync(
-            "SendNavigationStartAsync", input);
-    }
+    // -- Helpers
 
     private async Task SendUpdateAsync()
     {
@@ -156,11 +137,8 @@ public class BleNavigationCoordinator : IDisposable
         NavigationStatus status = _currentStatus;
         NavigationManeuverInfo maneuver = _currentManeuver;
 
-        // The display maneuver (look-ahead) contains the upcoming turn's street names.
-        // IntersectionName = road name of the upcoming maneuver (street you're turning ONTO).
-        // This matches the official MV Ride app: direction.getRoadName() from HERE SDK.
         string intersectionName = maneuver.StreetNames.FirstOrDefault() ?? string.Empty;
-        string street = intersectionName; // StreetName kept for compatibility; same value for MV Agusta
+        string street = intersectionName;
 
         NavigationUpdateInput input = new()
         {
@@ -188,7 +166,8 @@ public class BleNavigationCoordinator : IDisposable
     private NavigationManeuverInfo? GetManeuverInfo()
     {
         Maneuver? m = _navigation.CurrentManeuver;
-        if (m == null) return null;
+        if (m == null)
+            return null;
 
         return new NavigationManeuverInfo
         {

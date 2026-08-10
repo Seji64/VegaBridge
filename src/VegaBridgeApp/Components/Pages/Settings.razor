@@ -59,6 +59,25 @@
 
                         <MudButton
                             Variant="Variant.Outlined"
+                            Color="Color.Primary"
+                            Size="Size.Small"
+                            Disabled="!IsConnected"
+                            StartIcon="@Icons.Material.Filled.Navigation"
+                            FullWidth="true"
+                            OnClick="@SendNavigationTestSequenceAsync">
+                            Nav Test Sequence (rapid)
+                        </MudButton>
+
+                        <MudSwitch
+                            T="bool"
+                            Color="Color.Primary"
+                            Value="@Gui1ResponseEnabled"
+                            ValueChanged="(bool v) => { Gui1ResponseEnabled = v; StateHasChanged(); }">
+                            GUI1-Response (A/B Test)
+                        </MudSwitch>
+
+                        <MudButton
+                            Variant="Variant.Outlined"
                             Color="Color.Secondary"
                             Size="Size.Small"
                             Disabled="!IsConnected"

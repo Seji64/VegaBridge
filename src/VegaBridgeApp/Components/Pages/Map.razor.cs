@@ -10,13 +10,14 @@ using VegaBridgeApp.Components.Dialogs;
 using MudBlazor;
 using Shiny.Locations;
 using VegaBridgeApp.Models.Utils;
+using VegaBridgeApp.Services.Navigation;
 using VegaBridgeApp.Utils;
 using Coordinate = VegaBridgeApp.Models.Valhalla.Coordinate;
 using Location = VegaBridgeApp.Models.Valhalla.Location;
 
 namespace VegaBridgeApp.Components.Pages;
 
-public partial class Map : ComponentBase, IAsyncDisposable
+public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 {
     [Parameter]
     public string? RouteId { get; set; }
@@ -52,7 +53,6 @@ public partial class Map : ComponentBase, IAsyncDisposable
     private NavigationManeuverInfo? _navManeuver;
     private NavigationStatus? _navStatus;
     private double _navProgress;
-    private bool _isNavigating;
 
     protected override void OnInitialized()
     {
@@ -60,12 +60,8 @@ public partial class Map : ComponentBase, IAsyncDisposable
         Gps.ReadingReceived += OnGpsReading;
         Gps.TrackingChanged += OnGpsTrackingChanged;
 
-        // Subscribe to navigation events
-        NavService.ManeuverChanged += OnManeuverChanged;
-        NavService.StatusUpdated += OnStatusUpdated;
-        NavService.NavigationCompleted += OnNavigationCompleted;
-        NavService.NavigationStateChanged += OnNavigationStateChanged;
-        NavService.OffRouteDetected += OnOffRouteDetected;
+        // Subscribe to navigation events via sink
+        NavService.AddSink(this);
     }
 
     private void AddWaypoint()
@@ -99,7 +95,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
     private async Task ToggleGpsTracking()
     {
         // Don't allow manual GPS toggle during active navigation
-        if (_isNavigating)
+        if (NavService.IsNavigating)
         {
             Snackbar.Add(L["GpsManagedByNavigation"], Severity.Info);
             return;
@@ -163,50 +159,47 @@ public partial class Map : ComponentBase, IAsyncDisposable
 
     // ── Navigation Event Handlers ───────────────────────────────────────
 
-    private void OnManeuverChanged(NavigationManeuverInfo info)
+    public async Task OnManeuverAsync(NavigationManeuverInfo maneuver)
     {
         if (_disposed) return;
-        _navManeuver = info;
-        _navProgress = info.Total > 0
-            ? (double)(info.Index + 1) / info.Total * 100
+        _navManeuver = maneuver;
+        _navProgress = maneuver.Total > 0
+            ? (double)(maneuver.Index + 1) / maneuver.Total * 100
             : 0;
-        InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
-    private void OnStatusUpdated(NavigationStatus status)
+    public async Task OnStatusAsync(NavigationStatus status)
     {
         if (_disposed) return;
         _navStatus = status;
-        // Use DisplayManeuverIndex (look-ahead) for progress if available, otherwise fall back to physical index
         int progressIndex = status.DisplayManeuverIndex > 0 ? status.DisplayManeuverIndex : status.CurrentManeuverIndex;
         _navProgress = status.TotalManeuvers > 0
             ? Math.Clamp((double)(progressIndex + 1) / status.TotalManeuvers * 100, 0, 100)
             : 0;
-        InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
-    private void OnNavigationCompleted()
+    public async Task OnFinishAsync()
     {
         if (_disposed) return;
         Snackbar.Add(L["DestinationReached"], Severity.Success);
-
-        // GPS + Breadcloth nicht stoppen – User kann manuell Stoppen
-        // Aber NavService hat bereits StopNavigation() aufgerufen
-        // → UI schaltet via NavigationStateChanged zurück in Plan-Modus
-        InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
-    private void OnNavigationStateChanged(bool isNavigating)
+    public async Task OnStartAsync(NavigationStartInfo start)
     {
-        if (_disposed) return;
-        _isNavigating = isNavigating;
-        if (!isNavigating)
-        {
-            _navManeuver = null;
-            _navStatus = null;
-            _navProgress = 0;
-        }
-        InvokeAsync(StateHasChanged);
+        // UI does not need anything on start; maybe a short toast
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async Task OnOffRouteAsync(double latitude, double longitude, double distanceMeters)
+    {
+        if (_disposed || _destinationLocation == null || _isLoading) return;
+        if ((DateTime.UtcNow - _lastRerouteTime).TotalSeconds < 30) return;
+        _lastRerouteTime = DateTime.UtcNow;
+        Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
+        await RerouteAsync(latitude, longitude);
     }
     
     // ── Map Marker Helpers ──────────────────────────────────────────────
@@ -448,7 +441,10 @@ public partial class Map : ComponentBase, IAsyncDisposable
                         .ToList();
 
                     // Reset map center after waypoint list is ready (center on start)
-                    await _map?.SetCenter(new OpenLayers.Blazor.Coordinate(startCoord.Longitude, startCoord.Latitude));
+                    if (_map != null)
+                    {
+                        await _map.SetCenter(new OpenLayers.Blazor.Coordinate(startCoord.Longitude, startCoord.Latitude));
+                    }
 
                     Snackbar.Add(string.Format(L["RouteLoaded"], savedRoute.Name), Severity.Info);
 
@@ -810,7 +806,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
             L["SaveDialogTitle"],parameters);
         DialogResult? result = await dialog.Result;
 
-        if (result.Canceled || result.Data is not string routeName || string.IsNullOrWhiteSpace(routeName))
+        if (result is null || result.Canceled || result.Data is not string routeName || string.IsNullOrWhiteSpace(routeName))
             return;
 
         _isSaving = true;
@@ -952,19 +948,6 @@ public partial class Map : ComponentBase, IAsyncDisposable
         double lat = Gps.LastReading.Position.Latitude;
         double lon = Gps.LastReading.Position.Longitude;
         Snackbar.Add(L["WaypointSkip"], Severity.Warning);
-        await RerouteAsync(lat, lon);
-    }
-
-    private async void OnOffRouteDetected(double lat, double lon, double distanceMeters)
-    {
-        if (_disposed || _destinationLocation == null || _isLoading) return;
-
-        // Cooldown: max one reroute every 30 seconds to prevent thrashing
-        if ((DateTime.UtcNow - _lastRerouteTime).TotalSeconds < 30) return;
-        _lastRerouteTime = DateTime.UtcNow;
-
-        Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
-
         await RerouteAsync(lat, lon);
     }
 
@@ -1209,11 +1192,7 @@ public partial class Map : ComponentBase, IAsyncDisposable
         Gps.ReadingReceived -= OnGpsReading;
         Gps.TrackingChanged -= OnGpsTrackingChanged;
 
-        NavService.ManeuverChanged -= OnManeuverChanged;
-        NavService.StatusUpdated -= OnStatusUpdated;
-        NavService.NavigationCompleted -= OnNavigationCompleted;
-        NavService.NavigationStateChanged -= OnNavigationStateChanged;
-        NavService.OffRouteDetected -= OnOffRouteDetected;
+            NavService.RemoveSink(this);
 
         // Map-Referenz löschen – JS-Objekt existiert dann ggf. nicht mehr
         _map = null;

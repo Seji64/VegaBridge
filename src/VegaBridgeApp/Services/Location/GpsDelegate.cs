@@ -9,15 +9,8 @@ namespace VegaBridgeApp.Services.Location;
 /// static <see cref="ReadingReceived"/> event so the foreground-UI singleton can
 /// pick them up without tight coupling.
 /// </summary>
-public class GpsDelegate : IGpsDelegate
+public class GpsDelegate(ILogger<GpsDelegate> logger) : IGpsDelegate
 {
-    private readonly ILogger<GpsDelegate> _logger;
-
-    public GpsDelegate(ILogger<GpsDelegate> logger)
-    {
-        _logger = logger;
-    }
-
     /// <summary>
     /// Fired on the background delegate thread whenever a new GPS reading arrives.
     /// <see cref="GpsService"/> subscribes to this in its constructor.
@@ -27,7 +20,7 @@ public class GpsDelegate : IGpsDelegate
     /// <inheritdoc />
     public Task OnReading(GpsReading reading)
     {
-        _logger.LogDebug("Background GPS: {Lat:F5}, {Lon:F5} ±{Acc:F0}m",
+        logger.LogDebug("Background GPS: {Lat:F5}, {Lon:F5} ±{Acc:F0}m",
             reading.Position.Latitude,
             reading.Position.Longitude,
             reading.PositionAccuracy);

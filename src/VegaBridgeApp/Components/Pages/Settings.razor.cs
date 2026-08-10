@@ -2,12 +2,11 @@ using Microsoft.AspNetCore.Components;
 
 using MudBlazor;
 using Serilog;
-using System.IO;
 using System.Text;
 using CommunityToolkit.Maui.Storage;
-using VegaBridgeApp.Components.Dialogs;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
+using VegaBridgeApp.Services.BLE.Plugins;
 using VegaBridgeApp.Models.BLE.MvAgusta;
 
 namespace VegaBridgeApp.Components.Pages;
@@ -29,6 +28,18 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private string? StatusMessage { get; set; }
     private bool IsConnected => BleManager.IsAnyDeviceConnected;
     private bool IsScanning => ConnectionState == BleConnectionState.Scanning;
+
+    /// <summary>
+    /// A/B test switch for the GUI1-echo response (Settings page).
+    /// Default OFF – official capture shows the phone never writes GUI1.
+    /// Backed by the static MvAgustaBlePlugin.Gui1ResponseEnabled flag,
+    /// so it takes effect immediately, even mid-connection.
+    /// </summary>
+    private bool Gui1ResponseEnabled
+    {
+        get => MvAgustaBlePlugin.Gui1ResponseEnabled;
+        set => MvAgustaBlePlugin.Gui1ResponseEnabled = value;
+    }
 
     private double _offRouteThreshold = 10;
     private GeoResult? _homeLocation;
@@ -166,56 +177,61 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         StateHasChanged();
     }
 
-    /*
+    /// <summary>
+    /// Schneller Testsender für eine komplette Navigations-Sequenz.
+    /// Verwendet die capture-proven Frame-Formate (DEST/REM/NAVI/SM/SM1/FINISH).
+    /// Kein GUI1-Send nötig – die GUI1-Response erfolgt automatisch im Plugin
+    /// als Antwort auf jede Bike-Notification (Write mit Response).
+    /// Rapid-Fire: nur kurze Schreibpausen (150 ms), keine 5–10 s Wartezeiten.
+    /// </summary>
     private async Task SendNavigationTestSequenceAsync()
     {
         if (!IsConnected) return;
 
         BleCommandLogger.ClearLog();
-        BleCommandLogger.Log("=== TEST SEQUENCE START (Standard) ===");
+        BleCommandLogger.Log("=== TEST SEQUENCE START (Standard, rapid-fire) ===");
         StatusMessage = "Sending standard nav test sequence...";
         StateHasChanged();
 
-        await BleManager.SendCommandAsync(Commands.DEST, "Ziel", "0.000000", "0.000000");
-        await Task.Delay(200);
-        await BleManager.SendCommandAsync(Commands.REM, "", "10500");
-        await Task.Delay(200);
-        await BleManager.SendCommandAsync(Commands.NAVI, "turn-left", "Links abbiegen\\n", "Hauptstraße", "Hauptstraße");
-        await Task.Delay(200);
+        // Phase 1: Navigationsstart (DEST/REM – capture-proven Format)
+        // DEST|""|lon|lat – Feld 1 (Adresse) LEER!
+        await BleManager.SendCommandAsync(Commands.DEST, "", "9.258020", "48.775730");
+        await Task.Delay(150);
+        // REM|""|<meter>|"" – trailing empty field
+        await BleManager.SendCommandAsync(Commands.REM, "", "10500", "");
+        await Task.Delay(150);
+
+        // Phase 1: Links abbiegen – NAVI|icon|guide|intersectionName
+        await BleManager.SendCommandAsync(Commands.NAVI, "turn-left", "Links abbiegen\nHauptstraße", "Hauptstraße");
+        await Task.Delay(150);
+        // SM|0|<remaining>|<distToTurn>
         await BleManager.SendCommandAsync(Commands.SM, "0", "10500", "250");
-        await Task.Delay(200);
+        await Task.Delay(150);
+        // SM1|902|<countdown>| – Links-Countdown
         await BleManager.SendCommandAsync(Commands.SM1, "902", "7", "");
-        await Task.Delay(200);
-        await BleManager.SendCommandAsync(Commands.GUI1, GenerateSessionId());
+        await Task.Delay(150);
 
-        StatusMessage = "Phase 1: Links abbiegen (10s)...";
+        StatusMessage = "Test: Links abbiegen gesendet...";
         StateHasChanged();
-        await Task.Delay(5000);
-        await BleManager.SendCommandAsync(Commands.SM, "0", "10450", "230");
-        await BleManager.SendCommandAsync(Commands.GUI1, GenerateSessionId());
-        await Task.Delay(5000);
 
-        await BleManager.SendCommandAsync(Commands.NAVI, "turn-right", "Rechts abbiegen\\n", "Nebenstraße", "Nebenstraße");
-        await Task.Delay(200);
+        // Phase 2: Rechts abbiegen
+        await BleManager.SendCommandAsync(Commands.NAVI, "turn-right", "Rechts abbiegen\nNebenstraße", "Nebenstraße");
+        await Task.Delay(150);
         await BleManager.SendCommandAsync(Commands.SM, "0", "10200", "180");
-        await Task.Delay(200);
+        await Task.Delay(150);
+        // SM1|901|<countdown>| – Rechts-Countdown
         await BleManager.SendCommandAsync(Commands.SM1, "901", "6", "");
-        await Task.Delay(200);
-        await BleManager.SendCommandAsync(Commands.GUI1, GenerateSessionId());
+        await Task.Delay(150);
 
-        StatusMessage = "Phase 2: Rechts abbiegen (10s)...";
+        StatusMessage = "Test: Rechts abbiegen gesendet...";
         StateHasChanged();
-        await Task.Delay(5000);
-        await BleManager.SendCommandAsync(Commands.SM, "0", "9800", "150");
-        await BleManager.SendCommandAsync(Commands.GUI1, GenerateSessionId());
-        await Task.Delay(5000);
 
+        // Ende: Navigation beenden
         await BleManager.SendCommandAsync(Commands.FINISH, "", "", "");
         BleCommandLogger.Log("=== TEST SEQUENCE END (Standard) ===");
         StatusMessage = "Test sequence complete.";
         StateHasChanged();
     }
-    */
 
     private async Task ExportBleLogAsync()
     {
