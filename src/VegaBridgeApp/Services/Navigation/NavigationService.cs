@@ -70,6 +70,7 @@ public class NavigationService(GpsService gps)
 
     // ── Route data (set once per navigation session) ──────────────────────
     private List<Coordinate> _routeCoords = [];
+    private double[] _cumulativeDistances = [];
     private List<Maneuver> _maneuvers = [];
     private List<int> _relevantManeuverIndices = []; // Indizes der Nicht-Geradeaus-Manöver (vorab berechnet)
     private int _currentManeuverIndex;
@@ -109,6 +110,11 @@ public class NavigationService(GpsService gps)
         {
             if (!_isNavigating || _maneuvers.Count == 0)
                 return 0;
+
+            // Handle invalid index (e.g., -1 after off-route or reroute mismatch)
+            if (_currentManeuverIndex < 0)
+                return 0;
+
             if (_currentManeuverIndex >= _maneuvers.Count)
                 return _maneuvers.Count - 1;
 
@@ -123,7 +129,7 @@ public class NavigationService(GpsService gps)
             {
                 return candidateIndex;
             }
-            
+
             // Fallback: Wenn nichts mehr kommt, zeige das letzte Manöver
             return _maneuvers.Count - 1;
         }
@@ -138,10 +144,6 @@ public class NavigationService(GpsService gps)
     /// <summary>
     /// Start navigating along a Valhalla route.
     /// </summary>
-    /// <param name="mergedShape">Polyline6 of the complete route (all legs merged).</param>
-    /// <param name="maneuvers">All maneuvers across all legs.</param>
-    /// <param name="totalDistanceKm">Total route distance.</param>
-    /// <param name="totalTimeMin">Total estimated time.</param>
     public async Task StartNavigation(
         string mergedShape,
         List<Maneuver> maneuvers,
@@ -161,29 +163,7 @@ public class NavigationService(GpsService gps)
                 _maneuvers = [];
             }
 
-            _routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
-            _maneuvers = maneuvers;
-            
-            // 1. Vorab berechnete Liste der Indizes relevanter Manöver (Nicht-Geradeaus)
-            _relevantManeuverIndices = maneuvers
-                .Select((m, i) => (m, i))
-                .Where(x => !IsStraightManeuver(x.m))
-                .Select(x => x.i)
-                .ToList();
-            
-            // 2. Füge Indizes aller Geradeaus-Manöver am Ende hinzu, damit Look Ahead bei
-            //    langen Geraden das letzte Manöver (Ziel) anzeigt
-            _relevantManeuverIndices.AddRange(maneuvers
-                .Select((m, i) => (m, i))
-                .Where(x => IsStraightManeuver(x.m))
-                .Select(x => x.i));
-            
-            TotalDistanceKm = totalDistanceKm;
-            TotalTimeMin = totalTimeMin;
-            _currentManeuverIndex = 0;
-            _remainingDistanceKm = totalDistanceKm;
-            _remainingTimeMin = totalTimeMin;
-
+            InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
             _isNavigating = true;
         }
 
@@ -199,15 +179,12 @@ public class NavigationService(GpsService gps)
             ManeuverCount = maneuvers.Count
         }));
 
-        // Start GPS tracking and subscribe to readings
         await gps.StartTrackingAsync(backgroundMode: true);
         gps.ReadingReceived += OnGpsReading;
 
         Log.Information(
             "Navigation started: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers, {Points} route points",
             totalDistanceKm, totalTimeMin, maneuvers.Count, _routeCoords.Count);
-
-        // Fire initial state
         FireCurrentManeuver();
     }
 
@@ -243,13 +220,7 @@ public class NavigationService(GpsService gps)
     {
         lock (_lock)
         {
-            _routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
-            _maneuvers = maneuvers;
-            TotalDistanceKm = totalDistanceKm;
-            TotalTimeMin = totalTimeMin;
-            _currentManeuverIndex = 0;
-            _remainingDistanceKm = totalDistanceKm;
-            _remainingTimeMin = totalTimeMin;
+            InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
             _isOffRoute = false;
         }
 
@@ -258,6 +229,33 @@ public class NavigationService(GpsService gps)
             "Route rerouted: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers",
             totalDistanceKm, totalTimeMin, maneuvers.Count);
     }
+
+    private void InitializeRouteData(string mergedShape, List<Maneuver> maneuvers, double totalDistanceKm, double totalTimeMin)
+    {
+        _routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
+        _maneuvers = maneuvers;
+        UpdateCumulativeDistances();
+
+        // 1. Vorab berechnete Liste der Indizes relevanter Manöver (Nicht-Geradeaus)
+        _relevantManeuverIndices = maneuvers
+            .Select((m, i) => (m, i))
+            .Where(x => !IsStraightManeuver(x.m))
+            .Select(x => x.i)
+            .ToList();
+
+        // 2. Füge Indizes aller Geradeaus-Manöver am Ende hinzu
+        _relevantManeuverIndices.AddRange(maneuvers
+            .Select((m, i) => (m, i))
+            .Where(x => IsStraightManeuver(x.m))
+            .Select(x => x.i));
+
+        TotalDistanceKm = totalDistanceKm;
+        TotalTimeMin = totalTimeMin;
+        _currentManeuverIndex = 0;
+        _remainingDistanceKm = totalDistanceKm;
+        _remainingTimeMin = totalTimeMin;
+    }
+
 
     // ── GPS event handler (core loop) ────────────────────────────────────
 
@@ -378,12 +376,38 @@ public class NavigationService(GpsService gps)
             }
     }
 
+    private void UpdateCumulativeDistances()
+    {
+        if (_routeCoords.Count < 2)
+        {
+            _cumulativeDistances = [];
+            return;
+        }
+
+        _cumulativeDistances = new double[_routeCoords.Count];
+        double total = 0;
+        for (int i = 1; i < _routeCoords.Count; i++)
+        {
+            total += GeoMath.DistanceMeters(
+                _routeCoords[i - 1].Latitude, _routeCoords[i - 1].Longitude,
+                _routeCoords[i].Latitude, _routeCoords[i].Longitude);
+            _cumulativeDistances[i] = total;
+        }
+    }
+
     // ── Route matching ───────────────────────────────────────────────────
 
     /// <summary>
     /// Find the nearest point on the route polyline to the given lat/lon,
     /// but restrict the search to a local window around <paramref name="hintIndex"/>.
     /// This prevents jumps to parallel roads far away during normal navigation.
+    /// Falls back to a full-route scan if the local match is poor (>50m).
+    /// </summary>
+/// <summary>
+    /// Find the nearest point on the route polyline to the given lat/lon,
+    /// but restrict the search to a local window around <paramref name="hintIndex"/>.
+    /// This prevents jumps to parallel roads far away during normal navigation.
+    /// Falls back to a full-route scan if the local match is poor (>50m).
     /// </summary>
     private (int Index, double DistanceMeters) FindNearestRouteIndexWithLookahead(
         double lat, double lon, int hintIndex, int window)
@@ -397,6 +421,7 @@ public class NavigationService(GpsService gps)
         int bestIndex = start;
         double bestDistSq = double.MaxValue;
 
+        // Stage 1: Local window search (fast, prevents jumping to parallel roads)
         for (int i = start; i < end; i++)
         {
             double distSq = PointToSegmentDistanceSq(
@@ -410,9 +435,31 @@ public class NavigationService(GpsService gps)
             bestIndex = t >= 0.5 ? i + 1 : i;
         }
 
+        // Stage 2: Full-route fallback if local search distance is too high
+        // This handles cases where the user deviated far from the route (e.g., after reroute or U-turn)
+        const double FallbackThresholdSq = 50.0 * 50.0; // 50 meters squared
+        if (bestDistSq > FallbackThresholdSq)
+        {
+            bestDistSq = double.MaxValue;
+            bestIndex = 0;
+
+            for (int i = 0; i < _routeCoords.Count - 1; i++)
+            {
+                double distSq = PointToSegmentDistanceSq(
+                    lon, lat,
+                    _routeCoords[i].Longitude, _routeCoords[i].Latitude,
+                    _routeCoords[i + 1].Longitude, _routeCoords[i + 1].Latitude,
+                    out double t);
+
+                if (!(distSq < bestDistSq)) continue;
+                bestDistSq = distSq;
+                bestIndex = t >= 0.5 ? i + 1 : i;
+            }
+        }
+
         double distanceMeters = GeoMath.DistanceMeters(
-            lat, lon,
-            _routeCoords[bestIndex].Latitude, _routeCoords[bestIndex].Longitude);
+            _routeCoords[bestIndex].Latitude, _routeCoords[bestIndex].Longitude,
+            lat, lon);
         return (bestIndex, distanceMeters);
     }
 
@@ -450,7 +497,7 @@ public class NavigationService(GpsService gps)
         return exx * exx + eyy * eyy;
     }
 
-    private int FindManeuverForShapeIndex(int routeIndex)
+private int FindManeuverForShapeIndex(int routeIndex)
     {
         for (int i = 0; i < _maneuvers.Count; i++)
         {
@@ -461,7 +508,7 @@ public class NavigationService(GpsService gps)
             }
         }
 
-        return _maneuvers.Count;
+        return -1;
     }
 
     private double CalculateDistanceToNextTurn(int currentRouteIndex)
@@ -472,15 +519,9 @@ public class NavigationService(GpsService gps)
         if (targetIndex >= _routeCoords.Count)
             targetIndex = _routeCoords.Count - 1;
 
-        double totalM = 0;
-        for (int i = currentRouteIndex; i < targetIndex && i < _routeCoords.Count - 1; i++)
-        {
-            totalM += GeoMath.DistanceMeters(
-                _routeCoords[i].Latitude, _routeCoords[i].Longitude,
-                _routeCoords[i + 1].Latitude, _routeCoords[i + 1].Longitude);
-        }
+        if (currentRouteIndex >= _cumulativeDistances.Length - 1) return 0;
 
-        return totalM;
+        return _cumulativeDistances[targetIndex] - _cumulativeDistances[currentRouteIndex];
     }
 
     private (double RemainingKm, double RemainingMin) CalculateRemaining(int currentRouteIndex)
@@ -488,14 +529,7 @@ public class NavigationService(GpsService gps)
         if (currentRouteIndex >= _routeCoords.Count - 1)
             return (0, 0);
 
-        double remainingM = 0;
-        for (int i = currentRouteIndex; i < _routeCoords.Count - 1; i++)
-        {
-            remainingM += GeoMath.DistanceMeters(
-                _routeCoords[i].Latitude, _routeCoords[i].Longitude,
-                _routeCoords[i + 1].Latitude, _routeCoords[i + 1].Longitude);
-        }
-
+        double remainingM = _cumulativeDistances[_cumulativeDistances.Length - 1] - _cumulativeDistances[currentRouteIndex];
         double remainingKm = remainingM / 1000.0;
         double fractionRemaining = TotalDistanceKm > 0
             ? remainingKm / TotalDistanceKm

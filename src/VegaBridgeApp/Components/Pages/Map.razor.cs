@@ -92,36 +92,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     // ── GPS Tracking ─────────────────────────────────────────────────────
 
-    private async Task ToggleGpsTracking()
-    {
-        // Don't allow manual GPS toggle during active navigation
-        if (NavService.IsNavigating)
-        {
-            Snackbar.Add(L["GpsManagedByNavigation"], Severity.Info);
-            return;
-        }
-
-        try
-        {
-            if (Gps.IsTracking)
-            {
-                Gps.ClearBreadcrumb();
-                await Gps.StopTrackingAsync();
-                await ClearGpsMarkersAsync();
-                Snackbar.Add(L["GPSStopped"], Severity.Info);
-            }
-            else
-            {
-                await Gps.StartTrackingAsync(backgroundMode: true);
-                Snackbar.Add(L["GPSStarted"], Severity.Success);
-            }
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add(string.Format(L["GPSError"], ex.Message), Severity.Error);
-        }
-    }
-
     private async void OnGpsReading(GpsReading reading)
     {
         if (_disposed) return;
@@ -204,7 +174,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     
     // ── Map Marker Helpers ──────────────────────────────────────────────
 
-    private async Task UpdatePositionMarkerAsync(GpsReading reading)
+    private async Task UpdatePositionMarkerAsync(GpsReading reading, bool force = false)
     {
         if (_disposed) return;
         OpenStreetMap? map = _map;
@@ -221,15 +191,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             if (!_gpsMarkerInitialized)
             {
-                // Create the position marker (blue dot)
-                Marker marker = new()
-                {
-                    Coordinate = coord,
-                    Type = MarkerType.MarkerPin,
-                    PinColor = PinColor.Blue
-                };
-                map.MarkersList.Add(marker);
-
                 // Create a heading indicator (arrow marker)
                 double headingRad = reading.Heading * Math.PI / 180;
                 Marker headingMarker = new()
@@ -250,10 +211,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             {
                 // 1. Time-based throttle: every 2s max to avoid IPC flood
                 DateTime now = DateTime.UtcNow;
-                if ((now - _lastMarkerUpdate).TotalSeconds < 2) return;
+                if (!force && (now - _lastMarkerUpdate).TotalSeconds < 2) return;
 
                 // 2. Distance-based throttle: only update if moved > 1 meter
-                if (_hasLastMarkerCoord)
+                if (!force && _hasLastMarkerCoord)
                 {
                     double dist = GeoMath.DistanceMeters(
                         _lastMarkerLat, _lastMarkerLon,
@@ -268,19 +229,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 // Update markers in-place via MarkersList indexer (avoids Clear+Add JS flood)
                 if (map.MarkersList.Count > 0)
                 {
-                    map.MarkersList[0] = new Marker
-                    {
-                        Coordinate = coord,
-                        Type = MarkerType.MarkerPin,
-                        PinColor = PinColor.Blue
-                    };
-                }
-
-                if (map.MarkersList.Count >= 2)
-                {
                     double headingRad = reading.Heading * Math.PI / 180;
-                    MarkerType oldType = ((Marker)map.MarkersList[1]).Type;
-                    map.MarkersList[1] = new Marker
+                    MarkerType oldType = ((Marker)map.MarkersList[0]).Type;
+                    map.MarkersList[0] = new Marker
                     {
                         Coordinate = coord,
                         Type = oldType,
@@ -389,8 +340,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 Gps.LastReading.Position.Latitude,
                 Gps.LastReading.Position.Longitude,
                 "current");
-            StateHasChanged();
         }
+
+        await GetMyCurrentPosition();
+        StateHasChanged();
     }
 
     private async Task WaitForMapLoadedAsync(int timeoutMs = 5000)
@@ -525,11 +478,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         void Handler(GpsReading reading)
         {
-            if (result == null)
-            {
-                result = reading;
-                tcs.TrySetResult(reading);
-            }
+            if (result != null) return;
+            result = reading;
+            tcs.TrySetResult(reading);
         }
 
         Gps.ReadingReceived += Handler;
@@ -556,7 +507,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (_startLocation == null || _destinationLocation == null) return;
 
         _errorMessage = null;
-
+        
         // Valhalla-limit: max ~50 locations total → max 48 via + start + destination
         if (_waypoints is { Count: > MaxViaLocations })
         {
@@ -574,6 +525,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         double startLat, startLon;
         if (_startLocation?.Type == "current")
         {
+            await Gps.GetLastReadingOrCurrentAsync();
             if (Gps.LastReading != null)
             {
                 startLat = Gps.LastReading.Position.Latitude;
@@ -728,11 +680,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                     if (d < minDist) minDist = d;
                 }
 
-                if (minDist > maxMinDist)
-                {
-                    maxMinDist = minDist;
-                    bestIndex = idx;
-                }
+                if (!(minDist > maxMinDist)) continue;
+                maxMinDist = minDist;
+                bestIndex = idx;
             }
 
             if (bestIndex < 0) break;
@@ -866,27 +816,23 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             if (leg.Maneuvers != null)
             {
-                foreach (Maneuver m in leg.Maneuvers)
+                allManeuvers.AddRange(leg.Maneuvers.Select(m => new Maneuver()
                 {
-                    Maneuver clone = new()
-                    {
-                        Type = m.Type,
-                        Instruction = m.Instruction,
-                        BeginShapeIndex = m.BeginShapeIndex + shapeOffset,
-                        EndShapeIndex = m.EndShapeIndex + shapeOffset,
-                        Length = m.Length,
-                        Time = m.Time,
-                        TravelMode = m.TravelMode,
-                        TravelType = m.TravelType,
-                        TurnDegree = m.TurnDegree,
-                        RoundaboutExitCount = m.RoundaboutExitCount,
-                        RoundaboutExit = m.RoundaboutExit,
-                        StreetNames = m.StreetNames,
-                        VerbalSuccinctInstruction = m.VerbalSuccinctInstruction,
-                        Sign = m.Sign
-                    };
-                    allManeuvers.Add(clone);
-                }
+                    Type = m.Type,
+                    Instruction = m.Instruction,
+                    BeginShapeIndex = m.BeginShapeIndex + shapeOffset,
+                    EndShapeIndex = m.EndShapeIndex + shapeOffset,
+                    Length = m.Length,
+                    Time = m.Time,
+                    TravelMode = m.TravelMode,
+                    TravelType = m.TravelType,
+                    TurnDegree = m.TurnDegree,
+                    RoundaboutExitCount = m.RoundaboutExitCount,
+                    RoundaboutExit = m.RoundaboutExit,
+                    StreetNames = m.StreetNames,
+                    VerbalSuccinctInstruction = m.VerbalSuccinctInstruction,
+                    Sign = m.Sign
+                }));
             }
 
             // Reuse cached decode for shape offset calculation
@@ -1110,7 +1056,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             _errorMessage = L["RouteNoGeometry"];
             return;
         }
-        
+
         await ShowRouteOnMapFromPolyline(combinedShape);
 
         // ── Markers for Start, Waypoints and Destination ──
@@ -1118,39 +1064,39 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             // Keep the first two markers (GPS position and heading arrow)
             // Clear all markers from index 2 onwards to remove old route pins
-            if (map.MarkersList.Count > 2)
+            if (map.MarkersList.Count > 1)
             {
-                List<Shape> gpsMarkers = [.. map.MarkersList.Take(2)];
+                List<Shape> gpsMarkers = [.. map.MarkersList.Take(1)];
                 map.MarkersList.Clear();
                 StateHasChanged();
                 foreach (Shape m in gpsMarkers) map.MarkersList.Add(m);
-            }
 
-            List<Location> locations = response.Trip.Locations;
-            for (int i = 0; i < locations.Count; i++)
-            {
-                Location loc = locations[i];
-                OpenLayers.Blazor.Coordinate coord = new(loc.Lon, loc.Lat);
-                
-                // Color logic: Red for destination, Green for start/waypoints
-                PinColor color = PinColor.Green;
-                if (i == locations.Count - 1)
+                List<Location> locations = response.Trip.Locations;
+                for (int i = 0; i < locations.Count; i++)
                 {
-                    color = PinColor.Red;
+                    Location loc = locations[i];
+                    OpenLayers.Blazor.Coordinate coord = new(loc.Lon, loc.Lat);
+
+                    // Color logic: Red for destination, Green for start/waypoints
+                    PinColor color = PinColor.Green;
+                    if (i == locations.Count - 1)
+                    {
+                        color = PinColor.Red;
+                    }
+
+                    map.MarkersList.Add(new Marker(MarkerType.MarkerPin, coord, "", color));
                 }
-
-                map.MarkersList.Add(new Marker(MarkerType.MarkerPin, coord, "", color));
             }
-        }
 
-        Summary? summary = response.Trip?.Summary;
-        if (summary is { MinLat: not null, MaxLat: not null, MinLon: not null, MaxLon: not null })
-        {
-            Extent extent = new(
-                summary.MinLon.Value, summary.MinLat.Value,
-                summary.MaxLon.Value, summary.MaxLat.Value);
+            Summary? summary = response.Trip?.Summary;
+            if (summary is { MinLat: not null, MaxLat: not null, MinLon: not null, MaxLon: not null })
+            {
+                Extent extent = new(
+                    summary.MinLon.Value, summary.MinLat.Value,
+                    summary.MaxLon.Value, summary.MaxLat.Value);
 
-            await map.SetVisibleExtent(extent);
+                await map.SetVisibleExtent(extent);
+            }
         }
     }
 
@@ -1171,10 +1117,16 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         
         if (Gps.LastReading != null)
         {
+            var reading = Gps.LastReading;
             OpenLayers.Blazor.Coordinate coord = new(
-                Gps.LastReading.Position.Longitude,
-                Gps.LastReading.Position.Latitude);
+                reading.Position.Longitude,
+                reading.Position.Latitude);
+            
             await map.SetCenter(coord);
+            await map.SetZoom(16);
+            
+            // Force marker update to bypass the 2s throttle in UpdatePositionMarkerAsync
+            await UpdatePositionMarkerAsync(reading, force: true);
         }
         else
         {
