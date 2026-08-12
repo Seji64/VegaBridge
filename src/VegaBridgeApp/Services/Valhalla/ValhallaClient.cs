@@ -117,4 +117,71 @@ public class ValhallaClient : IValhallaClient
             return null;
         }
     }
+
+    /// <summary>
+    /// Map match raw GPS points to the Valhalla road network.
+    /// Returns the best matched position for each input point (confidence-weighted).
+    /// </summary>
+    public async Task<MapMatchResult> MapMatchAsync(
+        List<Coordinate> rawPoints,
+        string profile = "auto",
+        double radiusMeters = 50,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Log.Debug("Map matching {Count} GPS points (profile={Profile}, radius={Radius}m)",
+            rawPoints.Count, profile, radiusMeters);
+
+        try
+        {
+            // Build Valhalla map_match request
+            var request = new MapMatchRequest
+            {
+                Profile = profile,
+                Radius = radiusMeters,
+                Shape = rawPoints.Select(p => new TracePoint { Lat = p.Latitude, Lon = p.Longitude }).ToList(),
+                // Optional: Add detailed output (edge_index, confidence, etc.)
+                SearchRadius = radiusMeters,
+                // Use a small batch size to avoid overwhelming the API
+                BatchSize = Math.Min(rawPoints.Count, 50)
+            };
+
+            MapMatchResponse? response = await _flurlClient
+                .Request("map_match")
+                .PostJsonAsync(request, cancellationToken: cancellationToken)
+                .ReceiveJson<MapMatchResponse>();
+
+            if (response?.Matched == null || response.Matched.Count == 0)
+            {
+                Log.Warning("Valhalla map_match returned no matches for {Count} points", rawPoints.Count);
+                return new MapMatchResult(rawPoints); // Return raw points if no match
+            }
+
+            Log.Information(
+                "Map match succeeded: {Count} points → {Matched} matches, avg confidence={Conf:F2}",
+                rawPoints.Count,
+                response.Matched.Count,
+                response.Matched.Average(m => m.Confidence ?? 0));
+
+            return new MapMatchResult(response.Matched);
+        }
+        catch (FlurlHttpException ex) when (ex.StatusCode == (int)HttpStatusCode.BadRequest)
+        {
+            string? errorBody = await TryGetErrorBody(ex);
+            Log.Error(ex, "Valhalla map_match 400: {Error}", errorBody);
+            return new MapMatchResult(rawPoints);
+        }
+        catch (FlurlHttpException ex)
+        {
+            string? errorBody = await TryGetErrorBody(ex);
+            Log.Error(ex, "Valhalla map_match HTTP {Status}: {Error}", ex.StatusCode, errorBody);
+            return new MapMatchResult(rawPoints);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Unexpected error in map_match");
+            return new MapMatchResult(rawPoints);
+        }
+    }
 }

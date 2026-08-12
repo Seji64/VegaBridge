@@ -124,6 +124,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<IRouteStorageService, RouteStorageService>();
         builder.Services.AddSingleton<IGpxService, GpxService>();
 
+        // ── Valhalla Client ───────────────────────────────────────────────────
+        builder.Services.AddSingleton<IValhallaClient, ValhallaClient>();
+
         // ── Navigation State Machine ─────────────────────────────────────────
         builder.Services.AddSingleton<NavigationService>();
 

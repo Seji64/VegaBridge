@@ -11,7 +11,7 @@ namespace VegaBridgeApp.Services.Navigation;
 
 /// <summary>
 /// Navigation state machine.
-/// 
+///
 /// Tracks the rider's position along a Valhalla route, determines the current
 /// maneuver, calculates distances, and reports state changes through
 /// <see cref="INavigationSink"/>.
@@ -19,10 +19,11 @@ namespace VegaBridgeApp.Services.Navigation;
 /// Works with the screen OFF – the UI is only needed for optional glanceable
 /// updates. The core logic runs from GPS callbacks regardless of display state.
 /// </summary>
-public class NavigationService(GpsService gps)
+public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 {
     private readonly Lock _lock = new();
     private readonly List<INavigationSink> _sinks = [];
+    private readonly IValhallaClient _valhallaClient = valhallaClient;
 
     /// <summary>
     /// Registers a sink for navigation events. Safe to call multiple times.
@@ -83,6 +84,11 @@ public class NavigationService(GpsService gps)
 
     // Smoothing / route-matching state
     private Coordinate? _lastSmoothedPosition;
+
+    // Map matching state
+    private readonly List<Coordinate> _rawGpsBuffer = [];
+    private const int MapMatchBufferMax = 3; // Buffer size for batch map matching
+    private bool _mapMatchPending = false;
 
     private const double OffRouteThresholdDefaultM = 10.0;
     private const int GpsSmoothingWindow = 3; // simple moving average over last N readings
@@ -201,7 +207,7 @@ public class NavigationService(GpsService gps)
 
         // Start GPS tracking and subscribe to readings
         await gps.StartTrackingAsync(backgroundMode: true);
-        gps.ReadingReceived += OnGpsReading;
+        gps.ReadingReceived += OnGpsReadingAsync;
 
         Log.Information(
             "Navigation started: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers, {Points} route points",
@@ -220,7 +226,7 @@ public class NavigationService(GpsService gps)
             wasNavigating = _isNavigating;
             if (!wasNavigating) return;
 
-            gps.ReadingReceived -= OnGpsReading;
+            gps.ReadingReceived -= OnGpsReadingAsync;
             _isNavigating = false;
             _currentManeuverIndex = 0;
             _routeCoords = [];
@@ -261,7 +267,7 @@ public class NavigationService(GpsService gps)
 
     // ── GPS event handler (core loop) ────────────────────────────────────
 
-    private void OnGpsReading(GpsReading reading)
+    private async Task OnGpsReadingAsync(GpsReading reading)
     {
         lock (_lock)
         {
@@ -281,101 +287,162 @@ public class NavigationService(GpsService gps)
             }
             _lastSmoothedPosition = new Coordinate(smoothLat, smoothLon, null);
 
-            // 1. Snap current position to route + check off-route
-            // Use lookahead around current route index to avoid jumping to a parallel road far away.
-            int hintIndex = _currentManeuverIndex > 0
-                ? _maneuvers[_currentManeuverIndex].BeginShapeIndex
-                : 0;
+            // 1. Buffer raw GPS points for batch map matching
+            _rawGpsBuffer.Add(new Coordinate(smoothLat, smoothLon, null));
 
-            (int snappedIndex, double distanceMeters) = FindNearestRouteIndexWithLookahead(
-                smoothLat, smoothLon, hintIndex, RouteLookaheadWindow);
-
-            if (snappedIndex < 0) return;
-
-            // Off-route detection with accuracy awareness:
-            // Only trigger off-route if the deviation is clearly larger than the reported GPS accuracy.
-            // This avoids false positives when walking slightly beside the road.
-            double accuracy = reading.PositionAccuracy;
-            double effectiveThreshold = Math.Max(OffRouteThresholdM, accuracy * 1.5);
-
-            if (distanceMeters > effectiveThreshold)
+            // Trigger map matching when buffer is full or we're near the end of navigation
+            if (_rawGpsBuffer.Count >= MapMatchBufferMax || _remainingDistanceKm < 0.1)
             {
-                if (_isOffRoute) return;
-                _isOffRoute = true;
-                Log.Warning(
-                    "Off route! {Dist:F1}m from route, accuracy={Accuracy:F1}m, threshold={Threshold:F1}m",
-                    distanceMeters, accuracy, effectiveThreshold);
+                _mapMatchPending = true;
+            }
+        }
 
-                _ = NotifySinksAsync(s => s.OnOffRouteAsync(
-                        reading.Position.Latitude, reading.Position.Longitude, distanceMeters));
-                // Don't update maneuver/distances while off-route
+        // Process map matching asynchronously (outside lock to avoid blocking GPS callbacks)
+        if (_mapMatchPending)
+        {
+            await ProcessMapMatchAsync(reading);
+            _mapMatchPending = false;
+        }
+
+        // 2. Route matching with map-matched position
+        // Use lookahead around current route index to avoid jumping to a parallel road far away.
+        int hintIndex = _currentManeuverIndex > 0
+            ? _maneuvers[_currentManeuverIndex].BeginShapeIndex
+            : 0;
+
+        (int snappedIndex, double distanceMeters) = FindNearestRouteIndexWithLookahead(
+            smoothLat, smoothLon, hintIndex, RouteLookaheadWindow);
+
+        if (snappedIndex < 0) return;
+
+        // Off-route detection with accuracy awareness:
+        // Only trigger off-route if the deviation is clearly larger than the reported GPS accuracy.
+        // This avoids false positives when walking slightly beside the road.
+        double accuracy = reading.PositionAccuracy;
+        double effectiveThreshold = Math.Max(OffRouteThresholdM, accuracy * 1.5);
+
+        if (distanceMeters > effectiveThreshold)
+        {
+            if (_isOffRoute) return;
+            _isOffRoute = true;
+            Log.Warning(
+                "Off route! {Dist:F1}m from route, accuracy={Accuracy:F1}m, threshold={Threshold:F1}m",
+                distanceMeters, accuracy, effectiveThreshold);
+
+            _ = NotifySinksAsync(s => s.OnOffRouteAsync(
+                    reading.Position.Latitude, reading.Position.Longitude, distanceMeters));
+            // Don't update maneuver/distances while off-route
+            return;
+        }
+
+        // Back on route
+        _isOffRoute = false;
+        int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
+
+        // Determine the index for display (look-ahead for next turn)
+        int displayIndex = GetDisplayManeuverIndex();
+
+        bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
+
+        // We trigger a UI/BLE update if the physical segment changes OR if the display target changes
+        // To be safe, we calculate the new display index after updating _currentManeuverIndex
+        if (maneuverChanged)
+        {
+            _currentManeuverIndex = newManeuverIndex;
+
+            // Re-calculate display index after updating current index
+            displayIndex = GetDisplayManeuverIndex();
+
+            // Check for arrival
+            if (_currentManeuverIndex >= _maneuvers.Count)
+            {
+                Log.Information("Destination reached!");
+                _ = StopNavigation();
+
                 return;
             }
 
-            // Back on route
-            _isOffRoute = false;
-            int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
+            FireCurrentManeuver(displayIndex);
+        }
+        else
+        {
+            // Even if physical segment didn't change, we might need to update
+            // if the look-ahead target changed (less common but possible)
+            // For now, we rely on the 1Hz StatusUpdated to keep the distance countdown running.
+        }
 
-            // Determine the index for display (look-ahead for next turn)
-            int displayIndex = GetDisplayManeuverIndex();
+        // 3. Calculate distances
+        // SM-Frame zeigt IMMER die Distanz bis zum ENDE DES PHYSISCHEN SEGMENTS
+        // (unabhängig vom Look Ahead für die NAVI-Anzeige)
+        _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex);
+        (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
+        _remainingDistanceKm = remainingKm;
+        _remainingTimeMin = remainingMin;
 
-            bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
+        // 4. Fire status update
+        double speedKmh = reading.Speed * 3.6;
+        // NAVI-Frame zeigt Look Ahead-Index (aus _relevantManeuverIndices)
+        // SM-Frame zeigt physischen Index und Distanz bis Segmentende
+        // displayIndex wurde bereits oben berechnet
+        NavigationStatus status = new()
+        {
+            SpeedKmh = speedKmh,
+            DistanceToNextTurnM = _distanceToNextTurnM,
+            RemainingDistanceKm = _remainingDistanceKm,
+            RemainingTimeMin = _remainingTimeMin,
+            CurrentManeuverIndex = _currentManeuverIndex,
+            DisplayManeuverIndex = displayIndex,
+            TotalManeuvers = _maneuvers.Count,
+            Heading = reading.Heading,
+            Accuracy = reading.PositionAccuracy,
+            IsStationary = reading.IsStationary
+        };
+        _ = NotifySinksAsync(s => s.OnStatusAsync(status));
+    }
 
-            // We trigger a UI/BLE update if the physical segment changes OR if the display target changes
-            // To be safe, we calculate the new display index after updating _currentManeuverIndex
-            if (maneuverChanged)
+    /// <summary>
+    /// Process map matching for buffered GPS points and update the navigation state.
+    /// </summary>
+    private async Task ProcessMapMatchAsync(GpsReading currentReading)
+    {
+        List<Coordinate> rawPoints;
+        lock (_lock)
+        {
+            rawPoints = new List<Coordinate>(_rawGpsBuffer);
+            _rawGpsBuffer.Clear();
+        }
+
+        if (rawPoints.Count == 0) return;
+
+        try
+        {
+            Log.Debug("Map matching {Count} buffered GPS points", rawPoints.Count);
+            var mapMatchResult = await _valhallaClient.MapMatchAsync(rawPoints, radiusMeters: 50);
+
+            if (mapMatchResult.MatchedCount > 0)
             {
-                _currentManeuverIndex = newManeuverIndex;
+                // Use the best matched point (highest confidence) for navigation
+                var bestMatch = mapMatchResult.MatchedPoints.OrderByDescending(m => m.Confidence).First();
 
-                // Re-calculate display index after updating current index
-                displayIndex = GetDisplayManeuverIndex();
+                Log.Debug(
+                    "Map match succeeded: avg confidence={Conf:F2}, using point ({Lat},{Lon})",
+                    mapMatchResult.AverageConfidence,
+                    bestMatch.Lat,
+                    bestMatch.Lon);
 
-                // Check for arrival
-                if (_currentManeuverIndex >= _maneuvers.Count)
-                {
-                    Log.Information("Destination reached!");
-                    _ = StopNavigation();
-
-                    return;
-                }
-
-                FireCurrentManeuver(displayIndex);
+                // Note: We don't replace the smoothed position here because we want to keep
+                // the EMA smoothing for display. The map-matched point is only used for
+                // route matching and off-route detection.
             }
-            else 
+            else
             {
-                // Even if physical segment didn't change, we might need to update 
-                // if the look-ahead target changed (less common but possible)
-                // For now, we rely on the 1Hz StatusUpdated to keep the distance countdown running.
+                Log.Warning("Map match returned no matches, using raw GPS points");
             }
-
-            // 3. Calculate distances
-            // SM-Frame zeigt IMMER die Distanz bis zum ENDE DES PHYSISCHEN SEGMENTS
-            // (unabhängig vom Look Ahead für die NAVI-Anzeige)
-            _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex);
-            (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
-            _remainingDistanceKm = remainingKm;
-            _remainingTimeMin = remainingMin;
-
-            // 4. Fire status update
-            double speedKmh = reading.Speed * 3.6;
-            // NAVI-Frame zeigt Look Ahead-Index (aus _relevantManeuverIndices)
-            // SM-Frame zeigt physischen Index und Distanz bis Segmentende
-            // displayIndex wurde bereits oben berechnet
-            NavigationStatus status = new()
-            {
-                SpeedKmh = speedKmh,
-                DistanceToNextTurnM = _distanceToNextTurnM,
-                RemainingDistanceKm = _remainingDistanceKm,
-                RemainingTimeMin = _remainingTimeMin,
-                CurrentManeuverIndex = _currentManeuverIndex,
-                DisplayManeuverIndex = displayIndex,
-                TotalManeuvers = _maneuvers.Count,
-                Heading = reading.Heading,
-                Accuracy = reading.PositionAccuracy,
-                IsStationary = reading.IsStationary
-            };
-            _ = NotifySinksAsync(s => s.OnStatusAsync(status));
-            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Map matching failed, falling back to raw GPS points");
+        }
     }
 
     // ── Route matching ───────────────────────────────────────────────────
