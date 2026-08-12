@@ -170,6 +170,19 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         await StopPingAsync();
     }
 
+    public async Task SendNavigationStopAsync(IBleConnectedDevice device)
+    {
+        Log.Debug("MV Agusta: Navigation Stop (user cancelled)");
+        // For MV Agusta, there is no separate STOP command - FINISH is used for both
+        // destination reached and user-cancelled navigation (confirmed via BLE trace analysis)
+        byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
+        BleCommandLogger.Log($"SEND FINISH (STOP) frame: {BitConverter.ToString(frame)}");
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+        
+        // Stop keepalive when navigation ends
+        await StopPingAsync();
+    }
+
     public async Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input)
     {
         Log.Warning("MV Agusta: Off-Route Alert - {Dist:F1}m at {Lat},{Lon}", input.DistanceMeters, input.Latitude, input.Longitude);

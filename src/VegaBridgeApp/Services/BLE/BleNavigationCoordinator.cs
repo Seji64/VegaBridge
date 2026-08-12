@@ -127,6 +127,23 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         await _bleManager.ExecuteNavigationFinishAsync();
     }
 
+    /// <inheritdoc />
+    public async Task OnCancelAsync()
+    {
+        _isNavigating = false;
+        _currentManeuver = null;
+        _currentStatus = null;
+
+        await _bleManager.ExecuteNavigationStopAsync();
+    }
+
+    /// <inheritdoc />
+    public Task OnRouteUpdatedAsync(RouteResponse response)
+    {
+        // BLE braucht die Routengeometrie nicht; Maneuver/Status laufen über die anderen Sinks.
+        return Task.CompletedTask;
+    }
+
     // -- Helpers
 
     private async Task SendUpdateAsync()

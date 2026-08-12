@@ -314,6 +314,27 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
+    /// <summary>
+    /// Handles user-cancelled navigation via the active plugin.
+    /// </summary>
+    public async Task ExecuteNavigationStopAsync()
+    {
+        if (_activePeripheral == null || _activePlugin == null) return;
+
+        BleCommandLogger.Log("NAV ACTION: SendNavigationStopAsync");
+
+        try
+        {
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+            await _activePlugin.SendNavigationStopAsync(wrapper);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to send navigation stop");
+            UpdateError($"Navigation stop failed: {ex.Message}", isCritical: false);
+        }
+    }
+
     // ── Connection Monitoring & Retry ─────────────────────────────────────
 
     private void SetupConnectionMonitoring(IPeripheral peripheral)

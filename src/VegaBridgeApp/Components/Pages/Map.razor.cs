@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Components;
 using OpenLayers.Blazor;
-using System.Runtime.CompilerServices;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Models.Valhalla;
 using VegaBridgeApp.Models.Routes;
@@ -8,6 +7,7 @@ using VegaBridgeApp.Services.Routes;
 using VegaBridgeApp.Models.Navigation;
 using VegaBridgeApp.Components.Dialogs;
 using MudBlazor;
+using Serilog;
 using Shiny.Locations;
 using VegaBridgeApp.Models.Utils;
 using VegaBridgeApp.Services.Navigation;
@@ -34,7 +34,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private bool _isLoading;
     private bool _isSaving;
     private RouteResponse? _currentRouteResponse;
-    private bool _mapLoaded;
+    private bool _mapLoaded = false;
 
     // ── Track whether we've created the initial GPS marker ──
     private bool _gpsMarkerInitialized;
@@ -47,7 +47,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private DateTime _lastMarkerUpdate = DateTime.MinValue;
     private double _lastMarkerLon;
     private double _lastMarkerLat;
-    private bool _hasLastMarkerCoord;
 
     // ── Navigation state ──
     private NavigationManeuverInfo? _navManeuver;
@@ -64,14 +63,86 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         NavService.AddSink(this);
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Gps.RequestPermissionAsync();
+            await WaitForMapLoadedAsync();
+            await GetMyCurrentPosition();
+            
+            if (string.IsNullOrWhiteSpace(RouteId) && _startLocation == null && Gps.LastReading != null)
+            {
+                _startLocation = new GeoResult(
+                    L["CurrentPos"],
+                    Gps.LastReading.Position.Latitude,
+                    Gps.LastReading.Position.Longitude,
+                    "current");
+            }
+        }
+    }
+    
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(RouteId))
+        {
+            try
+            {
+                SavedRoute? savedRoute = await RouteStorage.GetRouteByIdAsync(RouteId);
+
+                if (savedRoute != null && !string.IsNullOrEmpty(savedRoute.Polyline6) && savedRoute.Waypoints is { Count: >= 2 })
+                {
+                    await ShowRouteOnMapFromPolyline(savedRoute.Polyline6);
+
+                    // Set start and destination based on first/last waypoints
+                    Coordinate startCoord = savedRoute.Waypoints.First();
+                    Coordinate endCoord = savedRoute.Waypoints.Last();
+
+                    _startLocation = new GeoResult(startCoord.Label ?? "Start", startCoord.Latitude, startCoord.Longitude);
+                    _destinationLocation = new GeoResult(endCoord.Label ?? "Ziel", endCoord.Latitude, endCoord.Longitude);
+
+                    // Populate intermediate waypoints for UI (excluding first and last)
+                    _waypoints = savedRoute.Waypoints
+                        .Skip(1)
+                        .Take(savedRoute.Waypoints.Count - 2)
+                        .Select((coord, idx) => new WaypointViewModel
+                        {
+                            Location = new GeoResult(coord.Label ?? $"Waypoint {idx + 1}", coord.Latitude, coord.Longitude)
+                        })
+                        .ToList();
+
+                    // Reset map center after waypoint list is ready (center on start)
+                    if (_map != null)
+                    {
+                        await _map.SetCenter(new OpenLayers.Blazor.Coordinate(startCoord.Longitude, startCoord.Latitude));
+                    }
+
+                    Snackbar.Add(string.Format(L["RouteLoaded"], savedRoute.Name), Severity.Info);
+
+                    // Automatisch Route via Valhalla berechnen (für Navigation starten + Turn-by-Turn)
+                    await CalculateRoute();
+                }
+                else
+                {
+                    Snackbar.Add(L["RouteLoadFailed"], Severity.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add(L["RouteLoadFailed"], Severity.Error);
+                Log.Error(ex.Message);
+            }
+        }
+    }
+
+    #region "Waypoint-Helpers"
+    
     private void AddWaypoint()
     {
         _waypoints.Add(new WaypointViewModel());
         StateHasChanged();
     }
-
-    // ── Waypoint-Helpers ──
-
+    
     private void RemoveWaypoint(int index)
     {
         if (index < 0 || index >= _waypoints.Count) return;
@@ -89,8 +160,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         _waypoints.Insert(newIndex, waypoint);
         StateHasChanged();
     }
+    
+    #endregion
 
-    // ── GPS Tracking ─────────────────────────────────────────────────────
+    #region "GPS-Tracking"
 
     private async void OnGpsReading(GpsReading reading)
     {
@@ -108,17 +181,15 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
 
         // Update position marker & breadcrumb on the map (via JS interop, no Blazor re-render)
-        if (_map != null && _mapLoaded && !_disposed)
+        if (_map != null && !_disposed)
             await UpdatePositionMarkerAsync(reading);
 
         // Throttled UI refresh: re-render at most every 500ms to avoid map re-creation
         if (_disposed) return;
         DateTime now = DateTime.UtcNow;
-        if ((now - _lastUiRefresh).TotalMilliseconds >= 500)
-        {
-            _lastUiRefresh = now;
-            try { await InvokeAsync(StateHasChanged); } catch { /* component disposed */ }
-        }
+        if (!((now - _lastUiRefresh).TotalMilliseconds >= 500)) return;
+        _lastUiRefresh = now;
+        try { await InvokeAsync(StateHasChanged); } catch { /* component disposed */ }
     }
 
     private async void OnGpsTrackingChanged(bool isTracking)
@@ -126,8 +197,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (_disposed) return;
         try {  await InvokeAsync(StateHasChanged); } catch { /* component disposed */ }
     }
+    
+    #endregion
 
-    // ── Navigation Event Handlers ───────────────────────────────────────
+    #region "Navigation Event Handlers
 
     public async Task OnManeuverAsync(NavigationManeuverInfo maneuver)
     {
@@ -157,6 +230,13 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         await InvokeAsync(StateHasChanged);
     }
 
+    public async Task OnCancelAsync()
+    {
+        if (_disposed) return;
+        Snackbar.Add(L["NavigationStopped"], Severity.Info);
+        await InvokeAsync(StateHasChanged);
+    }
+
     public async Task OnStartAsync(NavigationStartInfo start)
     {
         // UI does not need anything on start; maybe a short toast
@@ -171,78 +251,50 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
         await RerouteAsync(latitude, longitude);
     }
-    
-    // ── Map Marker Helpers ──────────────────────────────────────────────
 
-    private async Task UpdatePositionMarkerAsync(GpsReading reading, bool force = false)
+    public async Task OnRouteUpdatedAsync(RouteResponse response)
     {
         if (_disposed) return;
-        OpenStreetMap? map = _map;
-        if (map == null) return;
+        _currentRouteResponse = response;
+        await ShowRouteOnMap(response);
+    }
 
-        // Prevent reentrancy (ObservableCollection mutation during CollectionChanged)
+    #endregion
+    
+    #region "Map Marker Helpers"
+    
+    private async Task UpdatePositionMarkerAsync(GpsReading reading, bool force = false)
+    {
+        if (_disposed || _map == null) return;
         if (Interlocked.CompareExchange(ref _markerUpdating, 1, 0) != 0) return;
 
         try
         {
             double lon = reading.Position.Longitude;
             double lat = reading.Position.Latitude;
-            OpenLayers.Blazor.Coordinate coord = new(lon, lat);
+            OpenLayers.Blazor.Coordinate coord = new OpenLayers.Blazor.Coordinate(lon, lat);
 
             if (!_gpsMarkerInitialized)
             {
-                // Create a heading indicator (arrow marker)
-                double headingRad = reading.Heading * Math.PI / 180;
-                Marker headingMarker = new()
-                {
-                    Coordinate = coord,
-                    Type = MarkerType.MarkerAwesome,
-                    PinColor = PinColor.Green,
-                    Rotation = headingRad
-                };
-                map.MarkersList.Add(headingMarker);
-
-                _lastMarkerLon = lon;
-                _lastMarkerLat = lat;
-                _hasLastMarkerCoord = true;
+                _map.MarkersList.Add(new Marker { Coordinate = coord, Type = MarkerType.MarkerPin, PinColor = PinColor.Green });
                 _gpsMarkerInitialized = true;
             }
-            else
+            else if (!force && (DateTime.UtcNow - _lastMarkerUpdate).TotalSeconds < 2 && 
+                     GeoMath.DistanceMeters(_lastMarkerLat, _lastMarkerLon, lat, lon) < 1.0)
             {
-                // 1. Time-based throttle: every 2s max to avoid IPC flood
-                DateTime now = DateTime.UtcNow;
-                if (!force && (now - _lastMarkerUpdate).TotalSeconds < 2) return;
-
-                // 2. Distance-based throttle: only update if moved > 1 meter
-                if (!force && _hasLastMarkerCoord)
-                {
-                    double dist = GeoMath.DistanceMeters(
-                        _lastMarkerLat, _lastMarkerLon,
-                        lat, lon);
-                    if (dist < 1.0) return;
-                }
-
-                _lastMarkerUpdate = now;
-                _lastMarkerLon = lon;
-                _lastMarkerLat = lat;
-
-                // Update markers in-place via MarkersList indexer (avoids Clear+Add JS flood)
-                if (map.MarkersList.Count > 0)
-                {
-                    double headingRad = reading.Heading * Math.PI / 180;
-                    MarkerType oldType = ((Marker)map.MarkersList[0]).Type;
-                    map.MarkersList[0] = new Marker
-                    {
-                        Coordinate = coord,
-                        Type = oldType,
-                        PinColor = PinColor.Green,
-                        Rotation = headingRad,
-                        Text = "➤"
-                    };
-                }
+                return;
             }
 
-            // Update breadcrumb
+            _lastMarkerUpdate = DateTime.UtcNow;
+            _lastMarkerLon = lon;
+            _lastMarkerLat = lat;
+
+            if (_map.MarkersList.Count > 0)
+            {
+                Marker old = (Marker)_map.MarkersList[0];
+                _map.MarkersList[0] = new Marker { Coordinate = coord, Type = old.Type, PinColor = PinColor.Green, Text = "➤" };
+            }
+
             await UpdateBreadcrumbAsync();
         }
         finally
@@ -324,28 +376,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             Interlocked.Exchange(ref _breadcrumbUpdating, 0);
         }
     }
-
-    private async Task SetMapLoaded()
-    {
-        _mapLoaded = true;
-        OpenStreetMap? map = _map;
-
-        await Gps.RequestPermissionAsync();
-
-        // Default-Start auf "Aktuelle Position" wenn keine Route geladen
-        if (string.IsNullOrWhiteSpace(RouteId) && _startLocation == null && Gps.LastReading != null)
-        {
-            _startLocation = new GeoResult(
-                L["CurrentPos"],
-                Gps.LastReading.Position.Latitude,
-                Gps.LastReading.Position.Longitude,
-                "current");
-        }
-
-        await GetMyCurrentPosition();
-        StateHasChanged();
-    }
-
+    
+    #endregion
+    
+    
     private async Task WaitForMapLoadedAsync(int timeoutMs = 5000)
     {
         using CancellationTokenSource cts = new(timeoutMs);
@@ -361,63 +395,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             throw new TimeoutException("The map failed to render within the expected timeframe.");
         }
     }
-
-    protected override async Task OnParametersSetAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(RouteId))
-        {
-            try
-            {
-                SavedRoute? savedRoute = await RouteStorage.GetRouteByIdAsync(RouteId);
-
-                if (savedRoute != null && !string.IsNullOrEmpty(savedRoute.Polyline6) && savedRoute.Waypoints is { Count: >= 2 })
-                {
-                    await WaitForMapLoadedAsync();
-                    
-                    await ShowRouteOnMapFromPolyline(savedRoute.Polyline6);
-
-                    // Set start and destination based on first/last waypoints
-                    Coordinate startCoord = savedRoute.Waypoints.First();
-                    Coordinate endCoord = savedRoute.Waypoints.Last();
-
-                    _startLocation = new GeoResult(startCoord.Label ?? "Start", startCoord.Latitude, startCoord.Longitude);
-                    _destinationLocation = new GeoResult(endCoord.Label ?? "Ziel", endCoord.Latitude, endCoord.Longitude);
-
-                    // Populate intermediate waypoints for UI (excluding first and last)
-                    _waypoints = savedRoute.Waypoints
-                        .Skip(1)
-                        .Take(savedRoute.Waypoints.Count - 2)
-                        .Select((coord, idx) => new WaypointViewModel
-                        {
-                            Location = new GeoResult(coord.Label ?? $"Waypoint {idx + 1}", coord.Latitude, coord.Longitude)
-                        })
-                        .ToList();
-
-                    // Reset map center after waypoint list is ready (center on start)
-                    if (_map != null)
-                    {
-                        await _map.SetCenter(new OpenLayers.Blazor.Coordinate(startCoord.Longitude, startCoord.Latitude));
-                    }
-
-                    Snackbar.Add(string.Format(L["RouteLoaded"], savedRoute.Name), Severity.Info);
-
-                    // Automatisch Route via Valhalla berechnen (für Navigation starten + Turn-by-Turn)
-                    await CalculateRoute();
-                }
-                else
-                {
-                    Snackbar.Add(L["RouteLoadFailed"], Severity.Error);
-                }
-            }
-            catch (Exception e)
-            {
-                Snackbar.Add(L["RouteLoadFailed"], Severity.Error);
-                Console.WriteLine(e);
-            }
-        }
-    }
-    
-
     private List<GeoResult> GetPinnedStartLocations()
     {
         List<GeoResult> items = [];
@@ -467,385 +444,174 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         return new Location { Lat = location!.Latitude, Lon = location.Longitude, Type = type };
     }
 
-    /// <summary>
-    /// Wartet auf den ersten GPS-Fix, indem es den ReadingReceived-Event in
-    /// einen IAsyncEnumerable verpackt.
-    /// </summary>
-    private async IAsyncEnumerable<GpsReading> WaitForGpsFixAsync([EnumeratorCancellation] CancellationToken ct)
-    {
-        GpsReading? result = null;
-        TaskCompletionSource<GpsReading> tcs = new();
-
-        void Handler(GpsReading reading)
-        {
-            if (result != null) return;
-            result = reading;
-            tcs.TrySetResult(reading);
-        }
-
-        Gps.ReadingReceived += Handler;
-        try
-        {
-            await using (ct.Register(() => tcs.TrySetCanceled()))
-            {
-                GpsReading reading = await tcs.Task;
-                yield return reading;
-            }
-        }
-        finally
-        {
-            Gps.ReadingReceived -= Handler;
-        }
-    }
-
     private const int MaxViaLocations = 48;
 
     // ── Route Calculation ──
 
     private async Task CalculateRoute()
     {
-        if (_startLocation == null || _destinationLocation == null) return;
-
-        _errorMessage = null;
-        
-        // Valhalla-limit: max ~50 locations total → max 48 via + start + destination
-        if (_waypoints is { Count: > MaxViaLocations })
+        try
         {
-            int originalCount = _waypoints.Count;
-            ReduceWaypointsToMax(MaxViaLocations);
-            Snackbar.Add(
-                string.Format(L["WaypointsReduced"], originalCount, _waypoints.Count, MaxViaLocations),
-                Severity.Warning);
-        }
 
-        _isLoading = true;
-        StateHasChanged();
+            if (_startLocation == null || _destinationLocation == null) return;
 
-        // Start-Position: bei "Aktuelle Position" frische GPS-Daten nehmen
-        double startLat, startLon;
-        if (_startLocation?.Type == "current")
-        {
-            await Gps.GetLastReadingOrCurrentAsync();
-            if (Gps.LastReading != null)
+            _errorMessage = null;
+
+            // Valhalla-limit: max ~50 locations total → max 48 via + start + destination
+            if (_waypoints is { Count: > MaxViaLocations })
             {
-                startLat = Gps.LastReading.Position.Latitude;
-                startLon = Gps.LastReading.Position.Longitude;
+                int originalCount = _waypoints.Count;
+                ReduceWaypointsToMax(MaxViaLocations);
+                Snackbar.Add(
+                    string.Format(L["WaypointsReduced"], originalCount, _waypoints.Count, MaxViaLocations),
+                    Severity.Warning);
+            }
+
+            _isLoading = true;
+            StateHasChanged();
+
+            // Start-Position: bei "Aktuelle Position" frische GPS-Daten nehmen
+            double startLat = 0, startLon = 0;
+            if (_startLocation?.Type == "current")
+            {
+                await Gps.GetLastReadingOrCurrentAsync();
+                if (Gps.LastReading != null)
+                {
+                    startLat = Gps.LastReading.Position.Latitude;
+                    startLon = Gps.LastReading.Position.Longitude;
+                }
+            }
+            else if (_startLocation != null)
+            {
+                startLat = _startLocation.Latitude;
+                startLon = _startLocation.Longitude;
+            }
+
+            if (startLat == 0 && startLon == 0)
+            {
+                throw new Exception("StartLocationNotDetermined");
+            }
+
+            List<Location> locs = [new() { Lat = startLat, Lon = startLon, Type = "break" }];
+
+            if (_waypoints is { Count: > 0 })
+            {
+                locs.AddRange(
+                    from waypoint in _waypoints
+                    where waypoint.Location != null
+                    select CreateLocation(waypoint.Location, "break"));
+            }
+
+            locs.Add(CreateLocation(_destinationLocation));
+
+            RouteRequest request = new()
+            {
+                Locations = locs,
+                Costing = "motorcycle",
+                DirectionsOptions = new DirectionsOptions { Units = "kilometers", Language = "de" }
+            };
+
+            Result result = await ValhallaClient.GetRouteAsync(request);
+
+            if (result is { IsSuccess: true, Response: not null })
+            {
+                _currentRouteResponse = result.Response;
+                await ShowRouteOnMap(result.Response);
             }
             else
             {
-                // GPS starten und auf ersten Fix warten
-                if (!Gps.IsTracking)
-                {
-                    try { await Gps.StartTrackingAsync(backgroundMode: true); }
-                    catch (Exception ex)
-                    {
-                        Snackbar.Add(string.Format(L["GPSStartFailed"], ex.Message), Severity.Error);
-                        _isLoading = false;
-                        return;
-                    }
-                }
-
-                // Warten auf ersten GPS-Fix (max 10s)
-                GpsReading? firstFix = null;
-                using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
-                try
-                {
-                    await foreach (GpsReading reading in WaitForGpsFixAsync(cts.Token))
-                    {
-                        firstFix = reading;
-                        break;
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    Snackbar.Add(L["GPSNoFixTimeout"], Severity.Error);
-                    _isLoading = false;
-                    return;
-                }
-
-                if (firstFix == null)
-                {
-                    Snackbar.Add(L["GPSNoSignal"], Severity.Error);
-                    _isLoading = false;
-                    return;
-                }
-
-                startLat = firstFix.Position.Latitude;
-                startLon = firstFix.Position.Longitude;
+                _currentRouteResponse = null;
+                _errorMessage = result.ErrorMessage ?? "Unbekannter Fehler bei der Routenberechnung";
             }
         }
-        else if (_startLocation != null)
+        catch (Exception e)
         {
-            startLat = _startLocation.Latitude;
-            startLon = _startLocation.Longitude;
+            Snackbar.Add("Error: " + e.Message, Severity.Error);
         }
-        else
+        finally
         {
-            Snackbar.Add(L["NoStartSelected"], Severity.Error);
             _isLoading = false;
-            return;
+            StateHasChanged();
         }
-
-        List<Location> locs = [new() { Lat = startLat, Lon = startLon, Type = "break" }];
-
-        if (_waypoints is { Count: > 0 })
-        {
-            locs.AddRange(
-                from waypoint in _waypoints
-                where waypoint.Location != null
-                select CreateLocation(waypoint.Location, "break"));
-        }
-
-        locs.Add(CreateLocation(_destinationLocation));
-        
-        RouteRequest request = new()
-        {
-            Locations = locs,
-            Costing = "motorcycle",
-            DirectionsOptions = new DirectionsOptions { Units = "kilometers", Language = "de" }
-        };
-
-        Result result = await ValhallaClient.GetRouteAsync(request);
-
-        if (result is { IsSuccess: true, Response: not null })
-        {
-            _currentRouteResponse = result.Response;
-            await ShowRouteOnMap(result.Response);
-        }
-        else
-        {
-            _currentRouteResponse = null;
-            _errorMessage = result.ErrorMessage ?? "Unbekannter Fehler bei der Routenberechnung";
-        }
-
-        _isLoading = false;
-        StateHasChanged();
     }
 
-    /// <summary>
-    /// Reduces <see cref="_waypoints"/> to at most <paramref name="maxCount"/>
-    /// using greedy farthest-point sampling (preserves first &amp; last).
-    /// </summary>
     private void ReduceWaypointsToMax(int maxCount)
     {
         if (_waypoints.Count <= maxCount) return;
 
-        List<WaypointViewModel> kept =
-        [
-            _waypoints[0]
-        ];
+        // Keep first, last, and sample the middle
+        WaypointViewModel first = _waypoints[0];
+        WaypointViewModel last = _waypoints[^1];
+        List<WaypointViewModel> middle = _waypoints.Skip(1).Take(_waypoints.Count - 2).ToList();
 
-        // Build list of (index, location) for simplification
-        List<(int Index, GeoResult Location)> points = [];
-        for (int i = 1; i < _waypoints.Count; i++)
-        {
-            if (_waypoints[i].Location is { } loc)
-            {
-                points.Add((i, loc));
-            }
-        }
+        // Simple sampling: take every Nth point
+        int step = (int)Math.Ceiling((double)middle.Count / (maxCount - 2));
+        List<WaypointViewModel> sampled = middle.Where((item, index) => index % step == 0).Take(maxCount - 2).ToList();
 
-        // Simple farthest-point-sampling: iteratively pick the point farthest
-        // from the nearest already-selected point until we have maxCount.
-        int pointsToKeep = maxCount - 1; // -1 for first already kept
-        if (points.Count <= pointsToKeep)
-        {
-            kept.AddRange(
-                points.Select(p => _waypoints[p.Index]));
-            kept.Add(_waypoints[^1]);
-            _waypoints = kept;
-            return;
-        }
-
-        // Greedy farthest-point sampling
-        List<(int Index, GeoResult Location)> selected = [points[0], points[^1]];
-        HashSet<int> selectedIndices = [points[0].Index, points[^1].Index];
-
-        while (selected.Count < pointsToKeep)
-        {
-            // Find farthest point from any selected point
-            double maxMinDist = -1;
-            int bestIndex = -1;
-
-            foreach ((int idx, GeoResult loc) in points)
-            {
-                if (selectedIndices.Contains(idx)) continue;
-
-                double minDist = double.MaxValue;
-                foreach ((int _, GeoResult selLoc) in selected)
-                {
-                    double d = GeoMath.DistanceKm(
-                        loc.Latitude, loc.Longitude,
-                        selLoc.Latitude, selLoc.Longitude);
-                    if (d < minDist) minDist = d;
-                }
-
-                if (!(minDist > maxMinDist)) continue;
-                maxMinDist = minDist;
-                bestIndex = idx;
-            }
-
-            if (bestIndex < 0) break;
-
-            selectedIndices.Add(bestIndex);
-            selected.Add(points.First(p => p.Index == bestIndex));
-        }
-
-        // Rebuild _waypoints with only the selected indices
-        kept.Clear();
-        kept.Add(_waypoints[0]);
-        foreach ((int idx, _) in selected.OrderBy(s => s.Index))
-        {
-            kept.Add(_waypoints[idx]);
-        }
-        if (kept[^1] != _waypoints[^1])
-        {
-            kept.Add(_waypoints[^1]);
-        }
-
-        _waypoints = kept;
+        _waypoints = [first, .. sampled, last];
     }
 
     private async Task SaveCurrentRoute()
     {
-        if (_currentRouteResponse?.Trip == null || _currentRouteResponse?.Trip?.Locations?.Count == 0) return;
+        if (_currentRouteResponse?.Trip?.Legs == null || _currentRouteResponse.Trip.Legs.Count == 0) return;
 
-        // Dialog: Name für die Route abfragen
-        // Bestehende Route aktualisieren → kein Dialog nötig
-        if (!string.IsNullOrWhiteSpace(RouteId))
+        string? routeName = RouteId;
+        if (string.IsNullOrWhiteSpace(routeName))
         {
-            _isSaving = true;
-            try
+            // New route: get name from dialog
+            DialogParameters<RenameDialog> parameters = new()
             {
-                List<Leg> legs = _currentRouteResponse!.Trip!.Legs ?? [];
-                (string combinedShape, _, double totalDistanceKm, double totalTimeMinutes) = PrepareNavigationData(legs);
-
-                SavedRoute? existing = await RouteStorage.GetRouteByIdAsync(RouteId);
-                if (existing != null)
-                {
-                    existing.Polyline6 = combinedShape;
-                    existing.DistanceKm = Math.Round(totalDistanceKm, 2);
-                    existing.TimeMinutes = Math.Round(totalTimeMinutes, 2);
-                    existing.Waypoints ??= [];
-                    existing.Waypoints.Clear();
-                    foreach (Location wp in _currentRouteResponse.Trip!.Locations!)
-                    {
-                        List<GeoResult> reverseGeo = await GeocodingService.GetReverseGeocodingAsync(wp.Lon, wp.Lat);
-                        existing.Waypoints.Add(new Models.Valhalla.Coordinate(wp.Lat, wp.Lon, reverseGeo.FirstOrDefault()?.Label ?? "Waypoint"));
-                    }
-                    await RouteStorage.SaveRouteAsync(existing);
-                    Snackbar.Add(L["RouteSaved"], Severity.Success);
-                }
-                else
-                {
-                    Snackbar.Add(L["RouteLoadFailed"], Severity.Error);
-                }
-            }
-            finally { _isSaving = false; }
-            return;
+                { nameof(RenameDialog.ContentText), (string)L["SaveDialogPrompt"] },
+                { nameof(RenameDialog.ButtonText), (string)L["Save"] },
+                { "Color", MudBlazor.Color.Primary }
+            };
+            IDialogReference dialog = await DialogService.ShowAsync<RenameDialog>(L["SaveDialogTitle"], parameters);
+            DialogResult? result = await dialog.Result;
+            if (result is null || result.Canceled || result.Data is not string name || string.IsNullOrWhiteSpace(name))
+                return;
+            
+            routeName = name;
         }
-
-        // Neue Route → Dialog nach Namen fragen
-        DialogParameters<RenameDialog> parameters = new()
-        {
-            { nameof(RenameDialog.ContentText), (string)L["SaveDialogPrompt"] },
-            { nameof(RenameDialog.ButtonText), (string)L["Save"] },
-            { "Color", MudBlazor.Color.Primary }
-        };
-        IDialogReference dialog = await DialogService.ShowAsync<RenameDialog>(
-            L["SaveDialogTitle"],parameters);
-        DialogResult? result = await dialog.Result;
-
-        if (result is null || result.Canceled || result.Data is not string routeName || string.IsNullOrWhiteSpace(routeName))
-            return;
 
         _isSaving = true;
         try
         {
-            List<Leg> legs = _currentRouteResponse!.Trip!.Legs ?? [];
-            (string combinedShape, _, double totalDistanceKm, double totalTimeMinutes) = PrepareNavigationData(legs);
+            (string combinedShape, _, double totalDistanceKm, double totalTimeMinutes) = 
+                NavService.PrepareNavigationData(_currentRouteResponse!.Trip!.Legs);
 
-            SavedRoute savedRoute = new()
+            SavedRoute? route = !string.IsNullOrWhiteSpace(RouteId) 
+                ? await RouteStorage.GetRouteByIdAsync(RouteId) 
+                : new SavedRoute();
+
+            if (route == null)
             {
-                Name = routeName,
-                Polyline6 = combinedShape,
-                DistanceKm = Math.Round(totalDistanceKm, 2),
-                TimeMinutes = Math.Round(totalTimeMinutes, 2),
-                Waypoints = []
-            };
+                Snackbar.Add(L["RouteLoadFailed"], Severity.Error);
+                return;
+            }
+
+            route.Name = routeName;
+            route.Polyline6 = combinedShape;
+            route.DistanceKm = Math.Round(totalDistanceKm, 2);
+            route.TimeMinutes = Math.Round(totalTimeMinutes, 2);
+            route.Waypoints = [];
 
             foreach (Location wp in _currentRouteResponse.Trip!.Locations!)
             {
                 List<GeoResult> reverseGeo = await GeocodingService.GetReverseGeocodingAsync(wp.Lon, wp.Lat);
-                savedRoute.Waypoints.Add(new Models.Valhalla.Coordinate(wp.Lat, wp.Lon, reverseGeo.FirstOrDefault()?.Label ?? "Waypoint"));
+                route.Waypoints.Add(new Models.Valhalla.Coordinate(wp.Lat, wp.Lon, reverseGeo.FirstOrDefault()?.Label ?? "Waypoint"));
             }
 
-            await RouteStorage.SaveRouteAsync(savedRoute);
+            await RouteStorage.SaveRouteAsync(route);
             Snackbar.Add(L["RouteSaved"], Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(string.Format(L["RouteSaveError"], ex.Message), Severity.Error);
         }
         finally { _isSaving = false; }
     }
 
     // ── Start Navigation ────────────────────────────────────────────────
-
-    /// <summary>
-    /// Merges all leg shapes into a single polyline6 string, collecting all maneuvers
-    /// with adjusted shape indices.
-    /// </summary>
-    private static (string MergedShape, List<Maneuver> Maneuvers, double TotalKm, double TotalMin)
-        PrepareNavigationData(IReadOnlyList<Leg> legs)
-    {
-        List<Coordinate> allCoords = [];
-        List<Maneuver> allManeuvers = [];
-        int shapeOffset = 0;
-
-        foreach (Leg leg in legs)
-        {
-            List<Coordinate>? legCoords = null;
-            if (!string.IsNullOrEmpty(leg.Shape))
-            {
-                legCoords = PolylineEncoder.DecodePolyline6(leg.Shape);
-                if (legCoords.Count > 0)
-                {
-                    if (allCoords.Count > 0)
-                        allCoords.AddRange(legCoords.Skip(1));
-                    else
-                        allCoords.AddRange(legCoords);
-                }
-            }
-
-            if (leg.Maneuvers != null)
-            {
-                allManeuvers.AddRange(leg.Maneuvers.Select(m => new Maneuver()
-                {
-                    Type = m.Type,
-                    Instruction = m.Instruction,
-                    BeginShapeIndex = m.BeginShapeIndex + shapeOffset,
-                    EndShapeIndex = m.EndShapeIndex + shapeOffset,
-                    Length = m.Length,
-                    Time = m.Time,
-                    TravelMode = m.TravelMode,
-                    TravelType = m.TravelType,
-                    TurnDegree = m.TurnDegree,
-                    RoundaboutExitCount = m.RoundaboutExitCount,
-                    RoundaboutExit = m.RoundaboutExit,
-                    StreetNames = m.StreetNames,
-                    VerbalSuccinctInstruction = m.VerbalSuccinctInstruction,
-                    Sign = m.Sign
-                }));
-            }
-
-            // Reuse cached decode for shape offset calculation
-            if (legCoords is { Count: > 0 })
-                shapeOffset += legCoords.Count - 1;
-        }
-
-        string mergedShape = PolylineEncoder.EncodePolyline6(allCoords);
-        double totalKm = legs.Sum(l => l.Summary?.Length ?? 0);
-        double totalMin = legs.Sum(l => l.Summary?.Time ?? 0) / 60.0;
-
-        return (mergedShape, allManeuvers, totalKm, totalMin);
-    }
 
     private async Task StartNavigation()
     {
@@ -858,8 +624,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         try
         {
             (string mergedShape, List<Maneuver> allManeuvers, double totalKm, double totalMin) =
-                PrepareNavigationData(_currentRouteResponse.Trip.Legs);
-            await NavService.StartNavigation(mergedShape, allManeuvers, totalKm, totalMin);
+                NavService.PrepareNavigationData(_currentRouteResponse.Trip.Legs);
+            await NavService.StartNavigation(mergedShape, allManeuvers, totalKm, totalMin, CreateLocation(_destinationLocation));
 
             Snackbar.Add(L["NavigationStarted"], Severity.Success);
         }
@@ -872,7 +638,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private async Task ExitNavigation()
     {
         await NavService.StopNavigation();
-        // NavService.StopNavigation() handles GPS stop internally
         await ClearGpsMarkersAsync();
         Snackbar.Add(L["NavigationStopped"], Severity.Info);
     }
@@ -904,44 +669,13 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         try
         {
-            // Valhalla-Request: aktuelle Position → Ziel
-            List<Location> locs =
-            [
-                new() { Lat = currentLat, Lon = currentLon, Type = "break" },
-                CreateLocation(_destinationLocation)
-            ];
+            // Reroute-Berechnung liegt im NavigationService (State + Sink-Notify).
+            // Karten-Update erfolgt über OnRouteUpdatedAsync.
+            bool rerouted = await NavService.PerformRerouteAsync(currentLat, currentLon);
 
-            RouteRequest request = new()
-            {
-                Locations = locs,
-                Costing = "motorcycle",
-                DirectionsOptions = new DirectionsOptions { Units = "km" }
-            };
-
-            Result result = await ValhallaClient.GetRouteAsync(request);
-            if (!result.IsSuccess)
-            {
-                Snackbar.Add(string.Format(L["RerouteFailed"], result.ErrorMessage), Severity.Error);
-                return;
-            }
-
-            RouteResponse response = result.Response!;
-            if (response.Trip?.Legs == null || response.Trip.Legs.Count == 0)
-            {
-                Snackbar.Add(L["RerouteNoRoute"], Severity.Error);
-                return;
-            }
-
-            // Neue Route auf Karte anzeigen
-            _currentRouteResponse = response;
-            await ShowRouteOnMap(response);
-
-            // NavService mit neuer Route updaten
-            (string mergedShape, List<Maneuver> allManeuvers, double totalKm, double totalMin) =
-                PrepareNavigationData(response.Trip.Legs);
-            NavService.Reroute(mergedShape, allManeuvers, totalKm, totalMin);
-
-            Snackbar.Add(L["RouteRecalculated"], Severity.Success);
+            Snackbar.Add(
+                rerouted ? L["RouteRecalculated"] : L["RerouteNoRoute"],
+                rerouted ? Severity.Success : Severity.Error);
         }
         catch (Exception ex)
         {
@@ -1049,7 +783,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         OpenStreetMap? map = _map;
         if (map == null) return;
 
-        (string combinedShape, _, _, _) = PrepareNavigationData(response.Trip.Legs);
+        (string combinedShape, _, _, _) = NavService.PrepareNavigationData(response.Trip.Legs);
 
         if (string.IsNullOrEmpty(combinedShape))
         {
@@ -1117,13 +851,13 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         
         if (Gps.LastReading != null)
         {
-            var reading = Gps.LastReading;
+            GpsReading reading = Gps.LastReading;
             OpenLayers.Blazor.Coordinate coord = new(
                 reading.Position.Longitude,
                 reading.Position.Latitude);
             
             await map.SetCenter(coord);
-            await map.SetZoom(16);
+            await map.SetZoom(8);
             
             // Force marker update to bypass the 2s throttle in UpdatePositionMarkerAsync
             await UpdatePositionMarkerAsync(reading, force: true);

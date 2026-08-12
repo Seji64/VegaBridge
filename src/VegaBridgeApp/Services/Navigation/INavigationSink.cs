@@ -1,18 +1,19 @@
 using VegaBridgeApp.Models.Navigation;
+using VegaBridgeApp.Models.Valhalla;
 
 namespace VegaBridgeApp.Services.Navigation;
 
 /// <summary>
 /// Sink für Navigation-Events.
-///
+/// 
 /// Statt öffentlicher .NET-Events kann der <see cref="NavigationService"/>
 /// alle externen Zustandsänderungen über diese Schnittstelle melden.
 /// Das macht die Aufrufkette explizit: Aufrufer → Interface → Implementierung.
-///
+/// 
 /// Aktuelle Implementierungen:
 /// - <see cref="Components.Pages.Map"/> (UI)
 /// - <see cref="Services.BLE.BleNavigationCoordinator"/> (BLE)
-///
+/// 
 /// Bei Bedarf können weitere Sinks hinzukommen, z.B. Logging/Replay.
 /// </summary>
 public interface INavigationSink
@@ -38,7 +39,17 @@ public interface INavigationSink
     Task OnOffRouteAsync(double latitude, double longitude, double distanceMeters);
 
     /// <summary>
-    /// Navigation wurde beendet (Ziel erreicht oder manuell gestoppt).
+    /// Navigation beendet – Ziel erreicht.
     /// </summary>
     Task OnFinishAsync();
+
+    /// <summary>
+    /// Navigation abgebrochen – Benutzer hat manuell gestoppt.
+    /// </summary>
+    Task OnCancelAsync();
+
+    /// <summary>
+    /// Eine neue Route wurde berechnet (z.B. durch Rerouting).
+    /// </summary>
+    Task OnRouteUpdatedAsync(RouteResponse response);
 }

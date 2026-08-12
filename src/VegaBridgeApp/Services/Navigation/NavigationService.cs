@@ -5,6 +5,7 @@ using VegaBridgeApp.Services.Location;
 using VegaBridgeApp.Services.Routes;
 using VegaBridgeApp.Utils;
 using Shiny.Locations;
+using VegaBridgeApp.Services.Valhalla;
 using Coordinate = VegaBridgeApp.Models.Valhalla.Coordinate;
 
 namespace VegaBridgeApp.Services.Navigation;
@@ -14,15 +15,16 @@ namespace VegaBridgeApp.Services.Navigation;
 /// 
 /// Tracks the rider's position along a Valhalla route, determines the current
 /// maneuver, calculates distances, and reports state changes through
-/// <see cref="INavigationSink"/>.
-///
+/// a <see cref="INavigationSink"/>.
+/// 
 /// Works with the screen OFF – the UI is only needed for optional glanceable
 /// updates. The core logic runs from GPS callbacks regardless of display state.
 /// </summary>
-public class NavigationService(GpsService gps)
+public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 {
     private readonly Lock _lock = new();
     private readonly List<INavigationSink> _sinks = [];
+    private Models.Valhalla.Location? _destination;
 
     /// <summary>
     /// Registers a sink for navigation events. Safe to call multiple times.
@@ -55,7 +57,7 @@ public class NavigationService(GpsService gps)
         {
             snapshot = _sinks.ToList();
         }
-        foreach (var sink in snapshot)
+        foreach (INavigationSink sink in snapshot)
         {
             try
             {
@@ -92,14 +94,12 @@ public class NavigationService(GpsService gps)
     private double OffRouteThresholdM => Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
 
     // ── Properties ───────────────────────────────────────────────────────
-
     public bool IsNavigating => _isNavigating;
     public int CurrentManeuverIndex => _currentManeuverIndex;
     public int TotalManeuvers => _maneuvers.Count;
     public Maneuver? CurrentManeuver =>
         _maneuvers.Count > _currentManeuverIndex ? _maneuvers[_currentManeuverIndex] : null;
     public double TotalDistanceKm { get; private set; }
-
     public double TotalTimeMin { get; private set; }
 
     // ── Public API ───────────────────────────────────────────────────────
@@ -148,7 +148,8 @@ public class NavigationService(GpsService gps)
         string mergedShape,
         List<Maneuver> maneuvers,
         double totalDistanceKm,
-        double totalTimeMin)
+        double totalTimeMin,
+        Models.Valhalla.Location destination)
     {
         bool wasNavigating;
         lock (_lock)
@@ -164,6 +165,7 @@ public class NavigationService(GpsService gps)
             }
 
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
+            _destination = destination;
             _isNavigating = true;
         }
 
@@ -188,7 +190,7 @@ public class NavigationService(GpsService gps)
         FireCurrentManeuver();
     }
 
-    /// <summary>Stop the current navigation session.</summary>
+    /// <summary>Stop the current navigation session (user cancelled).</summary>
     public async Task StopNavigation()
     {
         bool wasNavigating;
@@ -202,19 +204,75 @@ public class NavigationService(GpsService gps)
             _currentManeuverIndex = 0;
             _routeCoords = [];
             _maneuvers = [];
+            _destination = null;
         }
 
         if (wasNavigating)
         {
             await gps.StopTrackingAsync();
-            Log.Information("Navigation stopped");
-            _ = NotifySinksAsync(s => s.OnFinishAsync());
+            Log.Information("Navigation cancelled by user");
+            _ = NotifySinksAsync(s => s.OnCancelAsync());
+        }
+    }
+
+    /// <summary>
+    /// Performs a reroute calculation from the current position to the destination.
+    /// </summary>
+    public async Task<bool> PerformRerouteAsync(double currentLat, double currentLon)
+    {
+        if (!_isNavigating || _destination == null) return false;
+
+        try
+        {
+            // 1. Build Request
+            List<Models.Valhalla.Location> locs = [
+                new() { Lat = currentLat, Lon = currentLon, Type = "break" },
+                _destination
+            ];
+
+            RouteRequest request = new()
+            {
+                Locations = locs,
+                Costing = "motorcycle",
+                DirectionsOptions = new DirectionsOptions { Units = "kilometers", Language = "de" }
+            };
+
+            // 2. Call Valhalla
+            Result result = await valhallaClient.GetRouteAsync(request);
+
+            if (!result.IsSuccess || result.Response == null)
+            {
+                Log.Warning("Reroute failed: {Error}", result.ErrorMessage);
+                return false;
+            }
+
+            RouteResponse response = result.Response;
+
+            // 3. Update state
+            (string mergedShape, List<Maneuver> maneuvers, double totalKm, double totalMin) =
+                PrepareNavigationData(response.Trip?.Legs ?? []);
+            if (string.IsNullOrEmpty(mergedShape)) return false;
+
+            lock (_lock)
+            {
+                Reroute(mergedShape, maneuvers, totalKm, totalMin);
+            }
+
+            // 4. Notify sinks
+            _ = NotifySinksAsync(s => s.OnRouteUpdatedAsync(response));
+
+            Log.Information("Reroute successful.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Reroute calculation error");
+            return false;
         }
     }
 
     /// <summary>
     /// Replace the route mid-navigation after a reroute.
-    /// Call this from the UI after getting a new route from Valhalla.
     /// </summary>
     public void Reroute(string mergedShape, List<Maneuver> maneuvers, double totalDistanceKm, double totalTimeMin)
     {
@@ -228,6 +286,65 @@ public class NavigationService(GpsService gps)
         Log.Information(
             "Route rerouted: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers",
             totalDistanceKm, totalTimeMin, maneuvers.Count);
+    }
+
+    /// <summary>
+    /// Merges all leg shapes into a single polyline6 string, collecting all maneuvers
+    /// with adjusted shape indices.
+    /// </summary>
+    public (string MergedShape, List<Maneuver> Maneuvers, double TotalKm, double TotalMin)
+        PrepareNavigationData(IReadOnlyList<Leg> legs)
+    {
+        List<Coordinate> allCoords = [];
+        List<Maneuver> allManeuvers = [];
+        int shapeOffset = 0;
+
+        foreach (Leg leg in legs)
+        {
+            List<Coordinate>? legCoords = null;
+            if (!string.IsNullOrEmpty(leg.Shape))
+            {
+                legCoords = PolylineEncoder.DecodePolyline6(leg.Shape);
+                if (legCoords.Count > 0)
+                {
+                    if (allCoords.Count > 0)
+                        allCoords.AddRange(legCoords.Skip(1));
+                    else
+                        allCoords.AddRange(legCoords);
+                }
+            }
+
+            if (leg.Maneuvers != null)
+            {
+                allManeuvers.AddRange(leg.Maneuvers.Select(m => new Maneuver()
+                {
+                    Type = m.Type,
+                    Instruction = m.Instruction,
+                    BeginShapeIndex = m.BeginShapeIndex + shapeOffset,
+                    EndShapeIndex = m.EndShapeIndex + shapeOffset,
+                    Length = m.Length,
+                    Time = m.Time,
+                    TravelMode = m.TravelMode,
+                    TravelType = m.TravelType,
+                    TurnDegree = m.TurnDegree,
+                    RoundaboutExitCount = m.RoundaboutExitCount,
+                    RoundaboutExit = m.RoundaboutExit,
+                    StreetNames = m.StreetNames,
+                    VerbalSuccinctInstruction = m.VerbalSuccinctInstruction,
+                    Sign = m.Sign
+                }));
+            }
+
+            // Reuse cached decode for shape offset calculation
+            if (legCoords is { Count: > 0 })
+                shapeOffset += legCoords.Count - 1;
+        }
+
+        string mergedShape = PolylineEncoder.EncodePolyline6(allCoords);
+        double totalKm = legs.Sum(l => l.Summary?.Length ?? 0);
+        double totalMin = legs.Sum(l => l.Summary?.Time ?? 0) / 60.0;
+
+        return (mergedShape, allManeuvers, totalKm, totalMin);
     }
 
     private void InitializeRouteData(string mergedShape, List<Maneuver> maneuvers, double totalDistanceKm, double totalTimeMin)
@@ -256,9 +373,7 @@ public class NavigationService(GpsService gps)
         _remainingTimeMin = totalTimeMin;
     }
 
-
     // ── GPS event handler (core loop) ────────────────────────────────────
-
     private void OnGpsReading(GpsReading reading)
     {
         lock (_lock)
@@ -266,21 +381,17 @@ public class NavigationService(GpsService gps)
             if (!_isNavigating || _routeCoords.Count < 2) return;
 
             // 0. Simple moving average smoothing over the last few raw readings.
-            // This reduces GPS jitter / outlier jumps, especially when walking beside a road.
-            // The smoothed point is used only for route matching, not for display.
             double smoothLat = reading.Position.Latitude;
             double smoothLon = reading.Position.Longitude;
             if (_lastSmoothedPosition != null)
             {
-                // Pull toward previous smoothed position (simple EMA-like smoothing)
-                const double alpha = 0.4; // lower = smoother, higher = faster response
+                const double alpha = 0.4;
                 smoothLat = alpha * reading.Position.Latitude + (1.0 - alpha) * _lastSmoothedPosition.Value.Latitude;
                 smoothLon = alpha * reading.Position.Longitude + (1.0 - alpha) * _lastSmoothedPosition.Value.Longitude;
             }
             _lastSmoothedPosition = new Coordinate(smoothLat, smoothLon, null);
 
             // 1. Snap current position to route + check off-route
-            // Use lookahead around current route index to avoid jumping to a parallel road far away.
             int hintIndex = _currentManeuverIndex > 0
                 ? _maneuvers[_currentManeuverIndex].BeginShapeIndex
                 : 0;
@@ -290,9 +401,6 @@ public class NavigationService(GpsService gps)
 
             if (snappedIndex < 0) return;
 
-            // Off-route detection with accuracy awareness:
-            // Only trigger off-route if the deviation is clearly larger than the reported GPS accuracy.
-            // This avoids false positives when walking slightly beside the road.
             double accuracy = reading.PositionAccuracy;
             double effectiveThreshold = Math.Max(OffRouteThresholdM, accuracy * 1.5);
 
@@ -305,60 +413,45 @@ public class NavigationService(GpsService gps)
                     distanceMeters, accuracy, effectiveThreshold);
 
                 _ = NotifySinksAsync(s => s.OnOffRouteAsync(
-                        reading.Position.Latitude, reading.Position.Longitude, distanceMeters));
-                // Don't update maneuver/distances while off-route
+                    reading.Position.Latitude, reading.Position.Longitude, distanceMeters));
                 return;
             }
 
-            // Back on route
             _isOffRoute = false;
             int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
 
-            // Determine the index for display (look-ahead for next turn)
             int displayIndex = GetDisplayManeuverIndex();
 
             bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
 
-            // We trigger a UI/BLE update if the physical segment changes OR if the display target changes
-            // To be safe, we calculate the new display index after updating _currentManeuverIndex
             if (maneuverChanged)
             {
                 _currentManeuverIndex = newManeuverIndex;
-
-                // Re-calculate display index after updating current index
                 displayIndex = GetDisplayManeuverIndex();
 
-                // Check for arrival
                 if (_currentManeuverIndex >= _maneuvers.Count)
                 {
                     Log.Information("Destination reached!");
-                    _ = StopNavigation();
-
+                    gps.ReadingReceived -= OnGpsReading;
+                    _isNavigating = false;
+                    // Fire-and-forget: stop GPS and notify sinks outside the lock
+                    _ = Task.Run(async () =>
+                    {
+                        await gps.StopTrackingAsync();
+                        _ = NotifySinksAsync(s => s.OnFinishAsync());
+                    });
                     return;
                 }
-
                 FireCurrentManeuver(displayIndex);
             }
-            else 
-            {
-                // Even if physical segment didn't change, we might need to update 
-                // if the look-ahead target changed (less common but possible)
-                // For now, we rely on the 1Hz StatusUpdated to keep the distance countdown running.
-            }
 
-            // 3. Calculate distances
-            // SM-Frame zeigt IMMER die Distanz bis zum ENDE DES PHYSISCHEN SEGMENTS
-            // (unabhängig vom Look Ahead für die NAVI-Anzeige)
             _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex);
             (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
             _remainingDistanceKm = remainingKm;
             _remainingTimeMin = remainingMin;
 
-            // 4. Fire status update
             double speedKmh = reading.Speed * 3.6;
-            // NAVI-Frame zeigt Look Ahead-Index (aus _relevantManeuverIndices)
-            // SM-Frame zeigt physischen Index und Distanz bis Segmentende
-            // displayIndex wurde bereits oben berechnet
+
             NavigationStatus status = new()
             {
                 SpeedKmh = speedKmh,
@@ -373,7 +466,7 @@ public class NavigationService(GpsService gps)
                 IsStationary = reading.IsStationary
             };
             _ = NotifySinksAsync(s => s.OnStatusAsync(status));
-            }
+        }
     }
 
     private void UpdateCumulativeDistances()
@@ -396,19 +489,6 @@ public class NavigationService(GpsService gps)
     }
 
     // ── Route matching ───────────────────────────────────────────────────
-
-    /// <summary>
-    /// Find the nearest point on the route polyline to the given lat/lon,
-    /// but restrict the search to a local window around <paramref name="hintIndex"/>.
-    /// This prevents jumps to parallel roads far away during normal navigation.
-    /// Falls back to a full-route scan if the local match is poor (>50m).
-    /// </summary>
-/// <summary>
-    /// Find the nearest point on the route polyline to the given lat/lon,
-    /// but restrict the search to a local window around <paramref name="hintIndex"/>.
-    /// This prevents jumps to parallel roads far away during normal navigation.
-    /// Falls back to a full-route scan if the local match is poor (>50m).
-    /// </summary>
     private (int Index, double DistanceMeters) FindNearestRouteIndexWithLookahead(
         double lat, double lon, int hintIndex, int window)
     {
@@ -421,7 +501,6 @@ public class NavigationService(GpsService gps)
         int bestIndex = start;
         double bestDistSq = double.MaxValue;
 
-        // Stage 1: Local window search (fast, prevents jumping to parallel roads)
         for (int i = start; i < end; i++)
         {
             double distSq = PointToSegmentDistanceSq(
@@ -435,9 +514,7 @@ public class NavigationService(GpsService gps)
             bestIndex = t >= 0.5 ? i + 1 : i;
         }
 
-        // Stage 2: Full-route fallback if local search distance is too high
-        // This handles cases where the user deviated far from the route (e.g., after reroute or U-turn)
-        const double FallbackThresholdSq = 50.0 * 50.0; // 50 meters squared
+        const double FallbackThresholdSq = 50.0 * 50.0;
         if (bestDistSq > FallbackThresholdSq)
         {
             bestDistSq = double.MaxValue;
@@ -463,12 +540,6 @@ public class NavigationService(GpsService gps)
         return (bestIndex, distanceMeters);
     }
 
-    /// <summary>
-    /// Find the nearest point on the route polyline to the given lat/lon.
-    /// Returns the index into <see cref="_routeCoords"/> and the distance in meters.
-    /// </summary>
-
-    /// <summary>Squared distance from point (px,py) to segment (ax,ay)-(bx,by).</summary>
     private static double PointToSegmentDistanceSq(
         double px, double py,
         double ax, double ay,
@@ -485,10 +556,8 @@ public class NavigationService(GpsService gps)
             double ey = py - ay;
             return ex * ex + ey * ey;
         }
-
         t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
         t = Math.Clamp(t, 0, 1);
-
         double closestX = ax + t * dx;
         double closestY = ay + t * dy;
         double exx = px - closestX;
@@ -497,7 +566,7 @@ public class NavigationService(GpsService gps)
         return exx * exx + eyy * eyy;
     }
 
-private int FindManeuverForShapeIndex(int routeIndex)
+    private int FindManeuverForShapeIndex(int routeIndex)
     {
         for (int i = 0; i < _maneuvers.Count; i++)
         {
@@ -507,7 +576,6 @@ private int FindManeuverForShapeIndex(int routeIndex)
                 return i;
             }
         }
-
         return -1;
     }
 
@@ -520,7 +588,6 @@ private int FindManeuverForShapeIndex(int routeIndex)
             targetIndex = _routeCoords.Count - 1;
 
         if (currentRouteIndex >= _cumulativeDistances.Length - 1) return 0;
-
         return _cumulativeDistances[targetIndex] - _cumulativeDistances[currentRouteIndex];
     }
 
@@ -529,7 +596,7 @@ private int FindManeuverForShapeIndex(int routeIndex)
         if (currentRouteIndex >= _routeCoords.Count - 1)
             return (0, 0);
 
-        double remainingM = _cumulativeDistances[_cumulativeDistances.Length - 1] - _cumulativeDistances[currentRouteIndex];
+        double remainingM = _cumulativeDistances[^1] - _cumulativeDistances[currentRouteIndex];
         double remainingKm = remainingM / 1000.0;
         double fractionRemaining = TotalDistanceKm > 0
             ? remainingKm / TotalDistanceKm
@@ -540,7 +607,6 @@ private int FindManeuverForShapeIndex(int routeIndex)
     }
 
     // ── Maneuver change notification ─────────────────────────────────────
-
     private void FireCurrentManeuver(int index = -1)
     {
         int targetIndex = index != -1 ? index : GetDisplayManeuverIndex();
@@ -570,6 +636,7 @@ private int FindManeuverForShapeIndex(int routeIndex)
             "Maneuver Display {I}/{T}: {Instr} (ValhallaType={Type})",
             targetIndex + 1, _maneuvers.Count,
             m.Instruction, m.Type);
+
+        _ = NotifySinksAsync(s => s.OnManeuverAsync(info));
     }
 }
-

@@ -80,6 +80,13 @@ public interface IBleDevicePlugin
     Task SendNavigationFinishAsync(IBleConnectedDevice device);
 
     /// <summary>
+    /// Sends navigation stop command to the device.
+    /// Called when user manually stops/cancels navigation.
+    /// For MV Agusta, this is the same as FINISH (no separate STOP command exists).
+    /// </summary>
+    Task SendNavigationStopAsync(IBleConnectedDevice device);
+
+    /// <summary>
     /// Sends an off-route alert to the device.
     /// </summary>
     Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input);

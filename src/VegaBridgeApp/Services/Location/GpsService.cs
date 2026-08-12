@@ -93,42 +93,38 @@ public class GpsService : IDisposable
     public async Task<bool> RequestPermissionAsync()
     {
         Log.Debug("Checking GPS permission…");
-
-        // Shiny-first: nutzt moderne iOS-Authorization-API statt deprecated CLLocationManager
+        
         try
         {
-            AccessState shinyAccess = await Task.Run(() =>
-                _gpsManager.RequestAccess(new GpsRequest()));
+            #if DEBUG
+                GpsRequest request = new() {AutoRestart = true, BackgroundMode = GpsBackgroundMode.None, RequestPreciseAccuracy = true};
+            #else
+                GpsRequest request = new() {AutoRestart = true, BackgroundMode = GpsBackgroundMode.Realtime, RequestPreciseAccuracy = true};
+            #endif
+            AccessState shinyAccess = _gpsManager.GetCurrentStatus(request);
+
+            if (shinyAccess == AccessState.Available)
+            {
+                return true;
+            }
+            
+            shinyAccess = await _gpsManager.RequestAccess(request);
             Log.Debug("Shiny GPS access: {Access}", shinyAccess);
 
-            switch (shinyAccess)
+            return shinyAccess switch
             {
-                case AccessState.Available:
-                    return true;
-                case AccessState.Denied or AccessState.Restricted:
-                    return false;
-            }
+                AccessState.Available => true,
+                AccessState.Denied or AccessState.Restricted => false,
+                _ => throw new ArgumentOutOfRangeException()
+            };
+            
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "Shiny GPS access failed, falling back to MAUI Permissions");
+            Log.Debug(ex, "Shiny GPS access failed");
         }
 
-        // MAUI Permissions fallback
-        try
-        {
-            PermissionStatus status = await Permissions.CheckStatusAsync<Permissions.LocationWhenInUse>();
-            if (status == PermissionStatus.Granted)
-                return true;
-
-            status = await Permissions.RequestAsync<Permissions.LocationWhenInUse>();
-            return status == PermissionStatus.Granted;
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "GPS permission request failed");
-            return false;
-        }
+        return  false;
     }
 
     /// <summary>
@@ -146,11 +142,13 @@ public class GpsService : IDisposable
             return;
         }
 
+        
+        
         bool granted = await RequestPermissionAsync();
         if (!granted)
         {
             throw new InvalidOperationException(
-                "GPS permission not granted. Call RequestPermissionAsync() first.");
+                "GPS permission not granted");
         }
 
         GpsRequest request = backgroundMode
