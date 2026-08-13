@@ -89,13 +89,14 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private Coordinate? _lastMapMatchedPosition;
     private readonly List<Coordinate> _gpsBuffer = [];
     private int _gpsTickCount;
+    private bool _verifyInFlight;
 
     private const double OffRouteThresholdDefaultM = 10.0;
-    private const int GpsSmoothingWindow = 3;
     private const int RouteLookaheadWindow = 20;
     private const int MapMatchBufferLimit = 5;
     private const int MapMatchTickInterval = 3;
     private const int OffRouteHysteresisCount = 3;
+    private const double GpsSmoothingAlpha = 0.4; // EMA: neueste Messung gewinnt 40% Gewicht
     private int _offRouteCounter;
 
     private double OffRouteThresholdM => Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
@@ -177,6 +178,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _offRouteCounter = 0;
             _lastMapMatchedPosition = null;
             _gpsTickCount = 0;
+            _verifyInFlight = false;
             _gpsBuffer.Clear();
         }
 
@@ -218,6 +220,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _destination = null;
             _lastMapMatchedPosition = null;
             _offRouteCounter = 0;
+            _verifyInFlight = false;
         }
 
         if (wasNavigating)
@@ -295,6 +298,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isOffRoute = false;
             _offRouteCounter = 0;
             _lastMapMatchedPosition = null;
+            _verifyInFlight = false;
         }
 
         FireCurrentManeuver();
@@ -400,9 +404,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             double smoothLon = reading.Position.Longitude;
             if (_lastSmoothedPosition != null)
             {
-                const double alpha = 0.4;
-                smoothLat = alpha * reading.Position.Latitude + (1.0 - alpha) * _lastSmoothedPosition.Value.Latitude;
-                smoothLon = alpha * reading.Position.Longitude + (1.0 - alpha) * _lastSmoothedPosition.Value.Longitude;
+                smoothLat = GpsSmoothingAlpha * reading.Position.Latitude + (1.0 - GpsSmoothingAlpha) * _lastSmoothedPosition.Value.Latitude;
+                smoothLon = GpsSmoothingAlpha * reading.Position.Longitude + (1.0 - GpsSmoothingAlpha) * _lastSmoothedPosition.Value.Longitude;
             }
             _lastSmoothedPosition = new Coordinate(smoothLat, smoothLon, null);
 
@@ -425,10 +428,11 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             if (snappedIndex < 0) return;
 
-            // Periodic Off-Route Verification via API
-            if (_gpsTickCount % MapMatchTickInterval == 0)
+            // Periodic Off-Route Verification via API (one in-flight at a time)
+            if (_gpsTickCount % MapMatchTickInterval == 0 && !_verifyInFlight)
             {
-                _ = VerifyRouteAsync();
+                _verifyInFlight = true;
+                _ = VerifyRouteAsync(snappedIndex);
             }
 
             int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
@@ -619,19 +623,19 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         return (remainingKm, remainingMin);
     }
 
-    private async Task VerifyRouteAsync()
+    private async Task VerifyRouteAsync(int hintIndex)
     {
-        List<Coordinate> bufferSnapshot;
-        lock (_lock)
-        {
-            if (!_isNavigating) return;
-            bufferSnapshot = _gpsBuffer.ToList();
-        }
-
-        if (bufferSnapshot.Count < 2) return;
-
         try
         {
+            List<Coordinate> bufferSnapshot;
+            lock (_lock)
+            {
+                if (!_isNavigating) return;
+                bufferSnapshot = _gpsBuffer.ToList();
+            }
+
+            if (bufferSnapshot.Count < 2) return;
+
             TraceRequest request = new()
             {
                 Locations = bufferSnapshot.Select(p => new double[] { p.Latitude, p.Longitude }).ToList(),
@@ -651,7 +655,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             Coordinate lastSnapped = PolylineEncoder.DecodePolyline6(snappedTrip.Legs[0].Shape).Last();
 
             (int _, double distToRoute) = FindNearestRouteIndexWithLookahead(
-                lastSnapped.Latitude, lastSnapped.Longitude, 0, RouteLookaheadWindow);
+                lastSnapped.Latitude, lastSnapped.Longitude, hintIndex, RouteLookaheadWindow);
 
             lock (_lock)
             {
@@ -673,7 +677,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                         _isOffRoute = false;
                         Log.Information("Back on route (verified by Map-Matching)");
                     }
-                    
+
                     // Store map-matched position for navigation
                     _lastMapMatchedPosition = lastSnapped;
                     Log.Debug("Map-matched position updated: {Lat}, {Lon}", lastSnapped.Latitude, lastSnapped.Longitude);
@@ -683,6 +687,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         catch (Exception ex)
         {
             Log.Error(ex, "Error during route verification");
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                _verifyInFlight = false;
+            }
         }
     }
 
