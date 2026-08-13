@@ -1,0 +1,18 @@
+@* Reusable "pinned" rows (Current Position / Home) shown above autocomplete search results. *@
+@foreach (GeoResult pin in Pins)
+{
+    <MudListItem T="GeoResult" OnClick="@(() => OnPinnedSelected.InvokeAsync(pin))">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIcon Size="Size.Small"
+                     Icon="@(pin.Type == "current" ? Icons.Material.Filled.MyLocation : Icons.Material.Filled.Home)"
+                     Color="Color.Primary"/>
+            <MudText Typo="Typo.body2">@pin.Label</MudText>
+        </MudStack>
+    </MudListItem>
+}
+
+@code {
+    [Parameter] public IEnumerable<GeoResult> Pins { get; set; } = [];
+
+    [Parameter] public EventCallback<GeoResult> OnPinnedSelected { get; set; }
+}

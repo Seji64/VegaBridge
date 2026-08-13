@@ -1,0 +1,33 @@
+<MudAutocomplete @ref="_auto" T="GeoResult"
+                 Label="@L["Waypoint"]"
+                 Variant="Variant.Outlined"
+                 Margin="Margin.Dense"
+                 Adornment="Adornment.Start"
+                 AdornmentIcon="@Icons.Material.Filled.WrongLocation"
+                 AdornmentColor="Color.Error"
+                 OnAdornmentClick="OnAdornmentClick"
+                 Class="mb-3"
+                 Value="Location"
+                 ValueChanged="OnLocationChanged"
+                 SearchFunc="SearchFunc"
+                 DebounceInterval="300"
+                 MinCharacters="3"
+                 Clearable="true"
+                 ItemDisabledFunc="@(loc => loc?.Type == "separator")">
+    <BeforeItemsTemplate>
+        <PinnedLocations Pins="Pins" OnPinnedSelected="SelectPinAsync"/>
+    </BeforeItemsTemplate>
+    <NoItemsTemplate>
+        <PinnedLocations Pins="Pins" OnPinnedSelected="SelectPinAsync"/>
+    </NoItemsTemplate>
+    <ItemTemplate>
+        @if (context?.Type == "separator")
+        {
+            <MudDivider Class="my-1"/>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2">@context?.Label</MudText>
+        }
+    </ItemTemplate>
+</MudAutocomplete>

@@ -26,6 +26,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private const string BreadcrumbLayerId = "breadcrumb-layer";
 
     private OpenStreetMap? _map;
+    private MudAutocomplete<GeoResult> _startAuto = null!;
+    private MudAutocomplete<GeoResult> _destAuto = null!;
 
     private GeoResult? _startLocation;
     private GeoResult? _destinationLocation;
@@ -617,20 +619,20 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     private async Task<IEnumerable<GeoResult>> SearchAsync(string? query, CancellationToken ct)
     {
-        List<GeoResult> pins = GetPinnedStartLocations();
-
+        // Pins (Current Position / Home) are rendered via BeforeItemsTemplate/NoItemsTemplate.
         if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
-            return pins;
+            return [];
 
-        List<GeoResult> results = await GeocodingService.SuggestAsync(query, ct: ct);
+        return await GeocodingService.SuggestAsync(query, ct: ct);
+    }
 
-        if (results.Count == 0)
-            return pins;
-
-        // Pins + Trenner + Suchergebnisse
-        return pins
-            .Append(new GeoResult("———", 0, 0, "separator"))
-            .Concat(results);
+    /// <summary>
+    /// Selects a pinned location via the autocomplete – sets the value and closes the menu.
+    /// </summary>
+    private async Task SelectPinAsync(MudAutocomplete<GeoResult> auto, GeoResult pin)
+    {
+        if (auto == null) return;
+        await auto.SelectOptionAsync(pin);
     }
 
     private static Location CreateLocation(GeoResult? location, string type = "break")
