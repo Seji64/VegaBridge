@@ -16,4 +16,12 @@ public class TraceRequest
 
     [JsonPropertyName("costing_options")]
     public Dictionary<string, object>? CostingOptions { get; set; }
+
+    /// <summary>
+    /// Top-level trace matching algorithm. Must be set on the request root,
+    /// NOT under costing_options (Valhalla ignores it there). "map_snap" is
+    /// the right choice for imprecise GPS tracks.
+    /// </summary>
+    [JsonPropertyName("shape_match")]
+    public string? ShapeMatch { get; set; }
 }

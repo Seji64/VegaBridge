@@ -85,18 +85,18 @@ public class GpxService : IGpxService
     }
 
     /// <inheritdoc />
-    public Task<SavedRoute?> ImportGpxAsync(Stream gpxStream)
+    public async Task<SavedRoute?> ImportGpxAsync(Stream gpxStream)
     {
         // For simple import without UI decision, prefer track over route
-        GpxParseResult parsed = ParseGpxAsync(gpxStream).Result;
+        GpxParseResult parsed = await ParseGpxAsync(gpxStream);
 
         List<Coordinate>? points = parsed.TrackPoints ?? parsed.RoutePoints;
         string name = parsed.HasTrack ? parsed.TrackName : parsed.RouteName;
 
         if (points == null || points.Count < 2)
-            return Task.FromResult<SavedRoute?>(null);
+            return null;
 
-        return Task.FromResult<SavedRoute?>(BuildSavedRoute(name, points));
+        return BuildSavedRoute(name, points);
     }
 
     // ── Export ──────────────────────────────────────────────────────────
@@ -164,14 +164,22 @@ public class GpxService : IGpxService
 
     private static Coordinate? ParsePoint(XElement pt, XNamespace ns)
     {
-        double? lat = (double?)pt.Attribute("lat");
-        double? lon = (double?)pt.Attribute("lon");
-        if (lat == null || lon == null) return null;
+        try
+        {
+            double? lat = (double?)pt.Attribute("lat");
+            double? lon = (double?)pt.Attribute("lon");
+            if (lat == null || lon == null) return null;
 
-        string? label = pt.Element(ns + "name")?.Value
-                     ?? pt.Element(ns + "desc")?.Value;
+            string? label = pt.Element(ns + "name")?.Value
+                         ?? pt.Element(ns + "desc")?.Value;
 
-        return new Coordinate(lat.Value, lon.Value, label);
+            return new Coordinate(lat.Value, lon.Value, label);
+        }
+        catch (FormatException)
+        {
+            // A single malformed point must not discard the whole file.
+            return null;
+        }
     }
 
     private static SavedRoute BuildSavedRoute(string name, List<Coordinate> points)

@@ -99,7 +99,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private const double GpsSmoothingAlpha = 0.4; // EMA: neueste Messung gewinnt 40% Gewicht
     private int _offRouteCounter;
 
-    private double OffRouteThresholdM => Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
+    private double OffRouteThresholdM => _offRouteThresholdM;
+    private double _offRouteThresholdM = OffRouteThresholdDefaultM;
 
     // ── Properties ───────────────────────────────────────────────────────
     public bool IsNavigating => _isNavigating;
@@ -177,6 +178,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isNavigating = true;
             _offRouteCounter = 0;
             _lastMapMatchedPosition = null;
+            _lastSmoothedPosition = null;
             _gpsTickCount = 0;
             _verifyInFlight = false;
             _gpsBuffer.Clear();
@@ -195,6 +197,21 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         }));
 
         await gps.StartTrackingAsync(backgroundMode: true);
+
+        // Guard: navigation may have been stopped while GPS was starting.
+        bool stillNavigating;
+        lock (_lock)
+        {
+            stillNavigating = _isNavigating;
+        }
+        if (!stillNavigating)
+        {
+            await gps.StopTrackingAsync();
+            return;
+        }
+
+        // Unsubscribe first to prevent duplicate subscriptions on restarts.
+        gps.ReadingReceived -= OnGpsReading;
         gps.ReadingReceived += OnGpsReading;
 
         Log.Information(
@@ -298,6 +315,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isOffRoute = false;
             _offRouteCounter = 0;
             _lastMapMatchedPosition = null;
+            _lastSmoothedPosition = null;
             _verifyInFlight = false;
         }
 
@@ -371,6 +389,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         _routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
         _maneuvers = maneuvers;
         UpdateCumulativeDistances();
+        // Cache the threshold once per route instead of reading Preferences per GPS tick.
+        _offRouteThresholdM = Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
 
         // 1. Precomputed list of indices of relevant maneuvers (non-straight)
         _relevantManeuverIndices = maneuvers
@@ -437,6 +457,23 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
 
+            // Arrival: the snapped index is past the last maneuver's end
+            // (Valhalla "Arrive" has begin == end == last shape index, which
+            // never satisfies the routeIndex < end condition). Treat -1 as
+            // destination reached instead of corrupting the maneuver index.
+            if (newManeuverIndex < 0 && _maneuvers.Count > 0)
+            {
+                Log.Information("Destination reached!");
+                gps.ReadingReceived -= OnGpsReading;
+                _isNavigating = false;
+                _ = Task.Run(async () =>
+                {
+                    await gps.StopTrackingAsync();
+                    _ = NotifySinksAsync(s => s.OnFinishAsync());
+                });
+                return;
+            }
+
             int displayIndex = GetDisplayManeuverIndex();
 
             bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
@@ -446,18 +483,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 _currentManeuverIndex = newManeuverIndex;
                 displayIndex = GetDisplayManeuverIndex();
 
-                if (_currentManeuverIndex >= _maneuvers.Count)
-                {
-                    Log.Information("Destination reached!");
-                    gps.ReadingReceived -= OnGpsReading;
-                    _isNavigating = false;
-                    _ = Task.Run(async () =>
-                    {
-                        await gps.StopTrackingAsync();
-                        _ = NotifySinksAsync(s => s.OnFinishAsync());
-                    });
-                    return;
-                }
                 FireCurrentManeuver(displayIndex);
             }
 
@@ -658,6 +683,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             lock (_lock)
             {
+                if (!_isNavigating) return;
+
                 if (distToRoute > OffRouteThresholdM)
                 {
                     _offRouteCounter++;
