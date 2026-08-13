@@ -27,8 +27,9 @@ public class ValhallaClient : IValhallaClient
     /// <inheritdoc />
     public async Task<Result> GetMapMatchAsync(TraceRequest request, CancellationToken cancellationToken = default)
     {
-        request.CostingOptions ??= new Dictionary<string, object>();
-        request.CostingOptions["shape_match"] = "map_snap";
+        // shape_match is a top-level trace_route parameter; setting it under
+        // costing_options would be silently ignored by Valhalla.
+        request.ShapeMatch = "map_snap";
         return await PostAsync("trace_route", request, cancellationToken);
     }
 

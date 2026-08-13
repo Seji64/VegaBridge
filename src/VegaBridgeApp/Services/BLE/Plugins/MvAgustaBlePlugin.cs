@@ -46,8 +46,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     public bool IsCompatible(BleDeviceInfo device)
     {
         // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
-        return device.Name.Contains("MV", StringComparison.OrdinalIgnoreCase) || 
-               device.Name.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase);
+        return device.Name?.Contains("MV", StringComparison.OrdinalIgnoreCase) == true ||
+               device.Name?.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     public async Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)
@@ -205,6 +205,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         await StopPingAsync();
         
         _pingCts = new CancellationTokenSource();
+        CancellationToken token = _pingCts.Token; // capture once – StopPingAsync disposes/nullifies the CTS
         _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // Official app sends PING once in capture, but keepalive every ~15s
         
         // Start the ping loop and store the task for proper disposal
@@ -212,7 +213,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         {
             try
             {
-                while (await _pingTimer.WaitForNextTickAsync(_pingCts.Token))
+                while (await _pingTimer.WaitForNextTickAsync(token))
                 {
                     if (_isDisposed) break;
                     await SendPingAsync(device);
@@ -226,7 +227,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
             {
                 Log.Error(ex, "MV Agusta: PING keepalive error");
             }
-        }, _pingCts.Token);
+        }, token);
     }
 
     /// <summary>

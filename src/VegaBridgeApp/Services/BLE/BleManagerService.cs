@@ -158,6 +158,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         catch (Exception ex)
         {
             Log.Error(ex, "Connection failed for {Uuid}", deviceUuid);
+            _state.OnNext(BleConnectionState.Idle);
             UpdateError($"Connection failed: {ex.Message}");
             return false;
         }

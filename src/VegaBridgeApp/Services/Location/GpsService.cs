@@ -18,6 +18,8 @@ public class GpsService : IDisposable
     private readonly IGpsManager _gpsManager;
 
     private readonly List<GpsReading> _breadcrumb = [];
+    private readonly object _breadcrumbLock = new();
+    private const int BreadcrumbMaxPoints = 1000;
 
     public GpsService(IGpsManager gpsManager)
     {
@@ -62,7 +64,16 @@ public class GpsService : IDisposable
     public double CurrentAccuracy => LastReading?.PositionAccuracy ?? 0;
 
     /// <summary>Read-only snapshot of the breadcrumb trail.</summary>
-    public IReadOnlyList<GpsReading> Breadcrumb => _breadcrumb.AsReadOnly();
+    public IReadOnlyList<GpsReading> Breadcrumb
+    {
+        get
+        {
+            lock (_breadcrumbLock)
+            {
+                return _breadcrumb.ToList();
+            }
+        }
+    }
 
     // ── Last known position ─────────────────────────────────────────────
 
@@ -142,8 +153,6 @@ public class GpsService : IDisposable
             return;
         }
 
-        
-        
         bool granted = await RequestPermissionAsync();
         if (!granted)
         {
@@ -155,11 +164,8 @@ public class GpsService : IDisposable
             ? GpsRequest.Realtime(true)
             : GpsRequest.Foreground;
 
-        if (!IsTracking)
-        {
-            await _gpsManager.StartListener(request);
-        }
-        
+        await _gpsManager.StartListener(request);
+
         TrackingChanged?.Invoke(true);
 
         Log.Information("GPS tracking started (background: {Bg})", backgroundMode);
@@ -189,14 +195,24 @@ public class GpsService : IDisposable
     private void OnForegroundReading(object? sender, GpsReading reading)
     {
         LastReading = reading;
-        _breadcrumb.Add(reading);
+        lock (_breadcrumbLock)
+        {
+            _breadcrumb.Add(reading);
+            if (_breadcrumb.Count > BreadcrumbMaxPoints)
+                _breadcrumb.RemoveRange(0, _breadcrumb.Count - BreadcrumbMaxPoints);
+        }
         ReadingReceived?.Invoke(reading);
     }
 
     private void OnBackgroundReading(GpsReading reading)
-    { ;
+    {
         LastReading = reading;
-        _breadcrumb.Add(reading);
+        lock (_breadcrumbLock)
+        {
+            _breadcrumb.Add(reading);
+            if (_breadcrumb.Count > BreadcrumbMaxPoints)
+                _breadcrumb.RemoveRange(0, _breadcrumb.Count - BreadcrumbMaxPoints);
+        }
         ReadingReceived?.Invoke(reading);
     }
 

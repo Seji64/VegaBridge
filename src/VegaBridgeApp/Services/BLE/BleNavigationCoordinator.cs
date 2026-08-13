@@ -21,6 +21,9 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     private DateTimeOffset _lastStatusSent = DateTimeOffset.MinValue;
     private readonly TimeSpan _statusThrottleInterval = TimeSpan.FromMilliseconds(500);
 
+    // Serializes BLE frame writes so concurrent update chains cannot interleave.
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+
     // Current context
     private NavigationManeuverInfo? _currentManeuver;
     private NavigationStatus? _currentStatus;
@@ -54,6 +57,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
+        _sendGate.Dispose();
     }
 
     // ─── INavigationSink ─────────────────────────────────────────────────
@@ -174,8 +178,16 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         BleCommandLogger.Log($"NAV UPDATE INPUT: icon={input.ManeuverIcon}, instr={input.InstructionText}, street={input.StreetName}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h, remDist={input.RemainingDistanceKm:F1}km, idx={input.CurrentManeuverIndex}/{input.TotalManeuvers}");
 
-        await _bleManager.ExecuteNavigationActionAsync(
-            "SendNavigationUpdateAsync", input);
+        await _sendGate.WaitAsync();
+        try
+        {
+            await _bleManager.ExecuteNavigationActionAsync(
+                "SendNavigationUpdateAsync", input);
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
     }
 
     // -- Helpers
