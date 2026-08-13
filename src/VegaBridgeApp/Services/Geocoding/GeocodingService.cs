@@ -145,11 +145,11 @@ public class GeocodingService : IGeocodingService
                 parts.Add(address);
         }
 
-        // Fallback: nur Name vorhanden (z.B. POI ohne Straße)
+        // Fallback: only the name is present (e.g. POI without a street)
         if (parts.Count == 0 && !string.IsNullOrWhiteSpace(p.Name))
             parts.Add(p.Name);
 
-        // Stadt (falls nicht identisch mit Name/Straße)
+        // City (if not identical to name/street)
         string? lastPart = parts.LastOrDefault();
         if (!string.IsNullOrWhiteSpace(p.City)
             && !string.Equals(p.City, lastPart, StringComparison.OrdinalIgnoreCase))

@@ -74,7 +74,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private List<Coordinate> _routeCoords = [];
     private double[] _cumulativeDistances = [];
     private List<Maneuver> _maneuvers = [];
-    private List<int> _relevantManeuverIndices = []; // Indizes der Nicht-Geradeaus-Manöver (vorab berechnet)
+    private List<int> _relevantManeuverIndices = []; // indices of non-straight maneuvers (precomputed)
     private int _currentManeuverIndex;
     private bool _isNavigating;
 
@@ -126,19 +126,19 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (_currentManeuverIndex >= _maneuvers.Count)
                 return _maneuvers.Count - 1;
 
-            // Wenn das aktuelle Manöver NICHT 'Geradeaus' ist, zeigen wir es an.
+            // If the current maneuver is NOT 'straight', show it.
             if (!IsStraightManeuver(_maneuvers[_currentManeuverIndex]))
             {
                 return _currentManeuverIndex;
             }
 
-            // Wenn es 'Geradeaus' ist, suchen wir das nächste relevante (Nicht-Geradeaus) Manöver.
+            // If it is 'straight', find the next relevant (non-straight) maneuver.
             foreach (int candidateIndex in _relevantManeuverIndices.Where(candidateIndex => candidateIndex > _currentManeuverIndex))
             {
                 return candidateIndex;
             }
 
-            // Fallback: Wenn nichts mehr kommt, zeige das letzte Manöver
+            // Fallback: if nothing is left, show the last maneuver
             return _maneuvers.Count - 1;
         }
     }
@@ -372,14 +372,14 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         _maneuvers = maneuvers;
         UpdateCumulativeDistances();
 
-        // 1. Vorab berechnete Liste der Indizes relevanter Manöver (Nicht-Geradeaus)
+        // 1. Precomputed list of indices of relevant maneuvers (non-straight)
         _relevantManeuverIndices = maneuvers
             .Select((m, i) => (m, i))
             .Where(x => !IsStraightManeuver(x.m))
             .Select(x => x.i)
             .ToList();
 
-        // 2. Füge Indizes aller Geradeaus-Manöver am Ende hinzu
+        // 2. Append the indices of all straight maneuvers at the end
         _relevantManeuverIndices.AddRange(maneuvers
             .Select((m, i) => (m, i))
             .Where(x => IsStraightManeuver(x.m))

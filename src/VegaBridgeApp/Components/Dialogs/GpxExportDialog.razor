@@ -1,33 +1,33 @@
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">GPX exportieren</MudText>
+        <MudText Typo="Typo.h6">@L["GpxExportTitle"]</MudText>
     </TitleContent>
     <DialogContent>
         <MudText Typo="Typo.body2" Class="mb-4">
-            In welchem Format möchtest du die Route exportieren?
+            @L["GpxExportPrompt"]
         </MudText>
 
         <MudRadioGroup T="string" @bind-Value="_choice">
             <MudStack Spacing="2">
                 <MudRadio Value="@("track")" Color="Color.Primary">
                     <MudStack Spacing="0">
-                        <MudText Typo="Typo.subtitle2">Track (&lt;trk&gt;)</MudText>
-                        <MudText Typo="Typo.caption">Standard-Format – Waypoints als aufgezeichnete Spur</MudText>
+                        <MudText Typo="Typo.subtitle2">@L["GpxExportTrackTag"]</MudText>
+                        <MudText Typo="Typo.caption">@L["GpxExportTrackDesc"]</MudText>
                     </MudStack>
                 </MudRadio>
                 <MudRadio Value="@("route")" Color="Color.Primary">
                     <MudStack Spacing="0">
-                        <MudText Typo="Typo.subtitle2">Route (&lt;rte&gt;)</MudText>
-                        <MudText Typo="Typo.caption">Geplante Route – Waypoints als Routenpunkte</MudText>
+                        <MudText Typo="Typo.subtitle2">@L["GpxExportRouteTag"]</MudText>
+                        <MudText Typo="Typo.caption">@L["GpxExportRouteDesc"]</MudText>
                     </MudStack>
                 </MudRadio>
             </MudStack>
         </MudRadioGroup>
     </DialogContent>
     <DialogActions>
-        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel">Abbrechen</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel">@L["Cancel"]</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit">
-            Exportieren
+            @L["Export"]
         </MudButton>
     </DialogActions>
 </MudDialog>

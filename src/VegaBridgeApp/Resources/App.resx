@@ -92,6 +92,8 @@
   <data name="GpxImportAmbiguous" xml:space="preserve"><value>The GPX file contains both a track and a route. What would you like to import?</value></data>
   <data name="GpxExportTitle" xml:space="preserve"><value>Export GPX</value></data>
   <data name="GpxExportPrompt" xml:space="preserve"><value>Which format would you like to export the route as?</value></data>
+  <data name="GpxExportTrackTag" xml:space="preserve"><value>Track (&lt;trk&gt;)</value></data>
+  <data name="GpxExportRouteTag" xml:space="preserve"><value>Route (&lt;rte&gt;)</value></data>
   <data name="GpxExportTrackDesc" xml:space="preserve"><value>Standard format – waypoints as recorded track</value></data>
   <data name="GpxExportRouteDesc" xml:space="preserve"><value>Planned route – waypoints as route points</value></data>
   <data name="GpxTrackLabel" xml:space="preserve"><value>Track ({0} points)</value></data>
@@ -182,4 +184,8 @@
   <data name="BLEScanning" xml:space="preserve"><value>Scanning for devices…</value></data>
   <data name="GpsManagedByNavigation" xml:space="preserve"><value>GPS is managed by active navigation</value></data>
   <data name="NoGpsFix" xml:space="preserve"><value>No GPS fix available</value></data>
+
+  <!-- Not Found -->
+  <data name="NotFoundTitle" xml:space="preserve"><value>Not Found</value></data>
+  <data name="NotFoundBody" xml:space="preserve"><value>Sorry, the content you are looking for does not exist.</value></data>
 </root>

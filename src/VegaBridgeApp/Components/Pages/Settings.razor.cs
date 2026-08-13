@@ -178,11 +178,11 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     }
 
     /// <summary>
-    /// Schneller Testsender für eine komplette Navigations-Sequenz.
-    /// Verwendet die capture-proven Frame-Formate (DEST/REM/NAVI/SM/SM1/FINISH).
-    /// Kein GUI1-Send nötig – die GUI1-Response erfolgt automatisch im Plugin
-    /// als Antwort auf jede Bike-Notification (Write mit Response).
-    /// Rapid-Fire: nur kurze Schreibpausen (150 ms), keine 5–10 s Wartezeiten.
+    /// Quick test sender for a complete navigation sequence.
+    /// Uses the capture-proven frame formats (DEST/REM/NAVI/SM/SM1/FINISH).
+    /// No GUI1 send needed – the GUI1 response happens automatically in the plugin
+    /// as a reply to every bike notification (write with response).
+    /// Rapid-fire: only short write pauses (150 ms), no 5–10 s wait times.
     /// </summary>
     private async Task SendNavigationTestSequenceAsync()
     {

@@ -140,7 +140,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     /// <inheritdoc />
     public Task OnRouteUpdatedAsync(RouteResponse response)
     {
-        // BLE braucht die Routengeometrie nicht; Maneuver/Status laufen über die anderen Sinks.
+        // BLE does not need the route geometry; maneuvers/status flow through the other sinks.
         return Task.CompletedTask;
     }
 

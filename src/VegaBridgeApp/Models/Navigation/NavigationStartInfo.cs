@@ -1,7 +1,7 @@
 namespace VegaBridgeApp.Models.Navigation;
 
 /// <summary>
-/// Informationen über den Start einer Navigation.
+/// Information about the start of a navigation.
 /// </summary>
 public sealed class NavigationStartInfo
 {

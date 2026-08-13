@@ -107,7 +107,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 
         // NAVI format: NAVI|icon|navigationGuide|intersectionName
         // Per BluetoothService.java (mvride v1.4.3):
-        // - navigationGuide = direction.getDescription() (e.g., "Links abbiegen\nRosenstraße")
+        // - navigationGuide = direction.getDescription() (e.g., "Turn left\nRosenstraße" in the bike's locale)
         // - intersectionName = direction.getRoadName() (e.g., "Rosenstraße")
         // - Both strings truncated to 60 chars by the official app
         // - Instruction ends with newline separator

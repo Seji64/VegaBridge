@@ -126,7 +126,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
                     Snackbar.Add(string.Format(L["RouteLoaded"], savedRoute.Name), Severity.Info);
 
-                    // Automatisch Route via Valhalla berechnen (für Navigation starten + Turn-by-Turn)
+                    // Automatically calculate the route via Valhalla (for starting navigation + turn-by-turn)
                     await CalculateRoute();
                 }
                 else
@@ -896,8 +896,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         try
         {
-            // Reroute-Berechnung liegt im NavigationService (State + Sink-Notify).
-            // Karten-Update erfolgt über OnRouteUpdatedAsync.
+            // Reroute calculation lives in the NavigationService (state + sink notify).
+            // Map update happens via OnRouteUpdatedAsync.
             bool rerouted = await NavService.PerformRerouteAsync(currentLat, currentLon);
 
             Snackbar.Add(
@@ -980,7 +980,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (existingLayer != null)
             await map.RemoveLayer(existingLayer);
 
-        // 3. Neuen Layer mit VectorPolyline hinzufügen
+        // 3. Add a new layer with the vector polyline
         Layer layer = new()
         {
             Id = RouteLayerId,
@@ -1120,7 +1120,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             NavService.RemoveSink(this);
 
-        // Map-Referenz löschen – JS-Objekt existiert dann ggf. nicht mehr
+        // Clear the map reference – the JS object may no longer exist
         _map = null;
 
         if (Gps.IsTracking)

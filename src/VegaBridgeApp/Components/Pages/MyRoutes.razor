@@ -11,7 +11,7 @@
 <MudContainer MaxWidth="MaxWidth.Medium">
 
 <div class="d-flex flex-grow-1 align-center gap-4 mb-3">
-        <MudText Typo="Typo.h4" Class="flex-grow-1">Meine Routen</MudText>
+        <MudText Typo="Typo.h4" Class="flex-grow-1">@L["MyRoutesTitle"]</MudText>
         <MudIconButton Icon="@Icons.Material.Filled.Add" Edge="Edge.End" Color="Color.Secondary" OnClick="@CreateNewRoute"/>
         <MudIconButton Icon="@Icons.Material.Filled.FileUpload" Edge="Edge.End" Color="Color.Primary" OnClick="@ImportGpx"/>
     </div>
@@ -24,7 +24,7 @@
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-18" Elevation="4">
             <MudText Typo="Typo.body1">
-                Noch keine Routen gespeichert. Erstelle eine neue Route oder importiere eine GPX-Datei.
+                @L["NoRoutes"]
             </MudText>
             
         </MudAlert>
@@ -39,7 +39,7 @@
                         <MudCardHeader>
                             <CardHeaderContent>
                                 <MudText Typo="Typo.h6">@route.Name</MudText>
-                                <MudText Typo="Typo.caption">Erstellt: @route.CreatedAt.ToShortDateString()</MudText>
+                                <MudText Typo="Typo.caption">@L["Created", route.CreatedAt.ToShortDateString()]</MudText>
                             </CardHeaderContent>
                             <CardHeaderActions>
                                 <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Default" OnClick="() => RenameRoute(route)"/>
@@ -48,8 +48,8 @@
                         </MudCardHeader>
                         <MudCardContent>
                             <MudStack Spacing="1">
-                                <MudText Typo="Typo.body2"><b>Distanz:</b> @route.DistanceKm.ToString("F2") km</MudText>
-                                <MudText Typo="Typo.body2"><b>Zeit:</b> @route.TimeMinutes.ToString("F0") Min</MudText>
+                                <MudText Typo="Typo.body2">@L["DistanceKm", route.DistanceKm]</MudText>
+                                <MudText Typo="Typo.body2">@L["TimeMin", route.TimeMinutes]</MudText>
                             </MudStack>
                         </MudCardContent>
                         <MudCardActions>
@@ -58,14 +58,14 @@
                                        FullWidth="true"
                                        StartIcon="@Icons.Material.Filled.Map"
                                        OnClick="() => NavigateToMap(route)">
-                                Starten
+                                @L["StartRoute"]
                             </MudButton>
                             <MudButton Variant="Variant.Text"
                                        Color="Color.Default"
                                        FullWidth="true"
                                        StartIcon="@Icons.Material.Filled.Download"
                                        OnClick="() => ExportGpx(route)">
-                                Export GPX
+                                @L["ExportGPX"]
                             </MudButton>
                         </MudCardActions>
                     </MudCard>
