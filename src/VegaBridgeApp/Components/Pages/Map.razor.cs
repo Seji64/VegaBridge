@@ -32,6 +32,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private List<WaypointViewModel> _waypoints = [];
     private readonly List<(WaypointViewModel Waypoint, Marker Marker)> _waypointPins = [];
     private WaypointViewModel? _pendingMoveWaypoint;
+    private DateTime _lastMarkerClickUtc = DateTime.MinValue;
+    private bool _actionsDialogOpen;
     private string? _errorMessage;
     private bool _isLoading;
     private bool _isSaving;
@@ -208,8 +210,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     /// </summary>
     private async Task OnMarkerClick(Marker marker)
     {
-        if (_disposed || NavService.IsNavigating || _pendingMoveWaypoint != null) return;
+        // Claim this tap so OnMapClick (which also fires on marker taps) backs off.
+        _lastMarkerClickUtc = DateTime.UtcNow;
 
+        if (_disposed || NavService.IsNavigating || _pendingMoveWaypoint != null) return;
+        // Overlapping pins (e.g. added twice at the same spot) fire this twice.
+        if (_actionsDialogOpen) return;
         (WaypointViewModel Waypoint, Marker Marker)? pin = _waypointPins.FirstOrDefault(p => p.Marker == marker);
         if (pin == null || pin.Value.Waypoint.Location == null) return;
 
@@ -228,8 +234,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             CloseButton = true
         };
 
-        IDialogReference dialog = await DialogService.ShowAsync<WaypointActionsDialog>(L["Waypoint"], parameters, options);
-        DialogResult? result = await dialog.Result;
+        _actionsDialogOpen = true;
+        try
+        {
+            IDialogReference dialog = await DialogService.ShowAsync<WaypointActionsDialog>(L["Waypoint"], parameters, options);
+            DialogResult? result = await dialog.Result;
         if (result is { Canceled: false } && result.Data is string action)
         {
             switch (action)
@@ -242,6 +251,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                     await DeleteWaypointAsync(index);
                     break;
             }
+        }
+        }
+        finally
+        {
+            _actionsDialogOpen = false;
         }
     }
 
@@ -271,6 +285,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                     GeoMath.DistanceMeters(lat, lon, p.Waypoint.Location.Latitude, p.Waypoint.Location.Longitude) < WaypointTapRadiusM))
                 return;
 
+            // OnMarkerClick claims marker taps – back off if it fired for this tap
+            // (marker taps raise OnClick too; the distance guard above may miss on
+            // rounded coordinates, this one cannot).
+            await Task.Delay(150);
+            if ((DateTime.UtcNow - _lastMarkerClickUtc).TotalMilliseconds < 500)
+                return;
             // A pending "move" consumes the next map tap.
             if (_pendingMoveWaypoint != null)
             {
