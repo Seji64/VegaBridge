@@ -1,4 +1,3 @@
-using System.Net;
 using Flurl.Http;
 using Serilog;
 using VegaBridgeApp.Models.Valhalla;
@@ -75,18 +74,6 @@ public class ValhallaClient : IValhallaClient
         {
             Log.Error(ex, "Valhalla map‑matching error");
             return Result.Failure($"Map‑matching error: {ex.Message}", ex);
-        }
-    }
-
-    private static async Task<string?> TryGetErrorBody(FlurlHttpException ex)
-    {
-        try
-        {
-            return await ex.GetResponseStringAsync();
-        }
-        catch
-        {
-            return null;
         }
     }
 }
