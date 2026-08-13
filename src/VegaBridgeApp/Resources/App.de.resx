@@ -15,6 +15,12 @@
   <data name="Destination" xml:space="preserve"><value>Ziel</value></data>
   <data name="Waypoint" xml:space="preserve"><value>Wegpunkt</value></data>
   <data name="AddWaypoint" xml:space="preserve"><value>Wegpunkt hinzufügen</value></data>
+  <data name="WaypointAdded" xml:space="preserve"><value>Wegpunkt hinzugefügt</value></data>
+  <data name="MoveWaypoint" xml:space="preserve"><value>Wegpunkt verschieben</value></data>
+  <data name="DeleteWaypoint" xml:space="preserve"><value>Wegpunkt löschen</value></data>
+  <data name="WaypointRemoved" xml:space="preserve"><value>Wegpunkt entfernt</value></data>
+  <data name="WaypointMoved" xml:space="preserve"><value>Wegpunkt verschoben</value></data>
+  <data name="MapClickMoveHint" xml:space="preserve"><value>Tippe auf die Karte, um die neue Position zu wählen</value></data>
   <data name="CalculateRoute" xml:space="preserve"><value>Route berechnen</value></data>
   <data name="SaveRoute" xml:space="preserve"><value>Route speichern</value></data>
   <data name="StartNavigation" xml:space="preserve"><value>Navigation starten</value></data>
