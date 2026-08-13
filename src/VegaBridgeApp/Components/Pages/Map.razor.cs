@@ -144,19 +144,18 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private void AddWaypoint()
     {
         _waypoints.Add(new WaypointViewModel());
-        _ = RefreshWaypointMarkersAsync();
         StateHasChanged();
     }
 
-    private void RemoveWaypoint(int index)
+    private async Task RemoveWaypointAsync(int index)
     {
         if (index < 0 || index >= _waypoints.Count) return;
         _waypoints.RemoveAt(index);
-        _ = RefreshWaypointMarkersAsync();
+        await SyncWaypointsAfterChangeAsync();
         StateHasChanged();
     }
 
-    private void MoveWaypoint(WaypointViewModel waypoint, int direction)
+    private async Task MoveWaypointAsync(WaypointViewModel waypoint, int direction)
     {
         int index = _waypoints.IndexOf(waypoint);
         int newIndex = index + direction;
@@ -164,24 +163,36 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (newIndex < 0 || newIndex >= _waypoints.Count) return;
         _waypoints.RemoveAt(index);
         _waypoints.Insert(newIndex, waypoint);
-        _ = RefreshWaypointMarkersAsync();
+        await SyncWaypointsAfterChangeAsync();
         StateHasChanged();
     }
 
     private void OnWaypointChanged(WaypointViewModel waypoint, GeoResult? value)
     {
         waypoint.Location = value;
-        _ = RefreshWaypointMarkersAsync();
+        _ = SyncWaypointsAfterChangeAsync();
+    }
+
+    /// <summary>
+    /// Waypoint list changed: route shown → recalculate so pins/route reflect it,
+    /// otherwise just refresh the pins.
+    /// </summary>
+    private async Task SyncWaypointsAfterChangeAsync()
+    {
+        if (_currentRouteResponse != null)
+            await CalculateRoute();
+        else
+            await RefreshWaypointMarkersAsync();
     }
 
     /// <summary>
     /// Shows one green pin per waypoint. Skipped while a route is shown –
     /// route markers (green waypoint pins) are rebuilt by ShowRouteOnMap.
     /// </summary>
-    private async Task RefreshWaypointMarkersAsync()
+    private async Task RefreshWaypointMarkersAsync(bool force = false)
     {
         OpenStreetMap? map = _map;
-        if (map == null || _disposed || _currentRouteResponse != null) return;
+        if (map == null || _disposed || (!force && _currentRouteResponse != null)) return;
 
         try
         {
@@ -210,18 +221,18 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     /// </summary>
     private async Task OnMarkerClick(Marker marker)
     {
-        // Claim this tap so OnMapClick (which also fires on marker taps) backs off.
-        _lastMarkerClickUtc = DateTime.UtcNow;
-
         if (_disposed || NavService.IsNavigating || _pendingMoveWaypoint != null) return;
         // Overlapping pins (e.g. added twice at the same spot) fire this twice.
         if (_actionsDialogOpen) return;
+
         (WaypointViewModel Waypoint, Marker Marker)? pin = _waypointPins.FirstOrDefault(p => p.Marker == marker);
         if (pin == null || pin.Value.Waypoint.Location == null) return;
 
         int index = _waypoints.IndexOf(pin.Value.Waypoint);
         if (index < 0) return;
 
+        // Claim this tap so OnMapClick (which also fires on marker taps) backs off.
+        _lastMarkerClickUtc = DateTime.UtcNow;
         DialogParameters<WaypointActionsDialog> parameters = new()
         {
             { nameof(WaypointActionsDialog.Location), pin.Value.Waypoint.Location }
@@ -261,9 +272,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     private async Task DeleteWaypointAsync(int index)
     {
-        RemoveWaypoint(index);
-        if (_currentRouteResponse != null)
-            await CalculateRoute();
+        await RemoveWaypointAsync(index);
         Snackbar.Add(L["WaypointRemoved"], Severity.Info);
     }
 
@@ -495,6 +504,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         map.MarkersList.Clear();
         _gpsMarkerInitialized = false;
+
+        // Waypoint pins were cleared too – restore them (planning state after navigation exit).
+        await RefreshWaypointMarkersAsync(force: true);
 
         // Also remove breadcrumb layer if present
         Layer? breadcrumbLayer = map.LayersList?

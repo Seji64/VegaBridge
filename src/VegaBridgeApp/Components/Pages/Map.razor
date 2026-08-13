@@ -202,7 +202,7 @@
                                                  Adornment="Adornment.Start"
                                                  AdornmentIcon="@Icons.Material.Filled.WrongLocation"
                                                  AdornmentColor="Color.Error"
-                                                 OnAdornmentClick="@(() => RemoveWaypoint(index))"
+                                                 OnAdornmentClick="@(() => RemoveWaypointAsync(index))"
                                                  Class="mb-3"
                                                  Value="waypoint.Location"
                                                  ValueChanged="@(val => OnWaypointChanged(waypoint, val))"
@@ -213,12 +213,12 @@
 
                                 <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
                                                Size="Size.Small"
-                                               OnClick="() => MoveWaypoint(waypoint, -1)"
+                                               OnClick="() => MoveWaypointAsync(waypoint, -1)"
                                                Disabled="@(index == 0)"/>
 
                                 <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
                                                Size="Size.Small"
-                                               OnClick="() => MoveWaypoint(waypoint, 1)"
+                                               OnClick="() => MoveWaypointAsync(waypoint, 1)"
                                                Disabled="@(index == _waypoints.Count - 1)"/>
 
                             </MudStack>
