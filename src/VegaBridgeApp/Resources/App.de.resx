@@ -15,6 +15,7 @@
   <data name="Destination" xml:space="preserve"><value>Ziel</value></data>
   <data name="Waypoint" xml:space="preserve"><value>Wegpunkt</value></data>
   <data name="AddWaypoint" xml:space="preserve"><value>Wegpunkt hinzufügen</value></data>
+  <data name="WaypointAdded" xml:space="preserve"><value>Wegpunkt hinzugefügt</value></data>
   <data name="CalculateRoute" xml:space="preserve"><value>Route berechnen</value></data>
   <data name="SaveRoute" xml:space="preserve"><value>Route speichern</value></data>
   <data name="StartNavigation" xml:space="preserve"><value>Navigation starten</value></data>

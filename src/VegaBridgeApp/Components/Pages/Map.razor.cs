@@ -30,6 +30,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private GeoResult? _startLocation;
     private GeoResult? _destinationLocation;
     private List<WaypointViewModel> _waypoints = [];
+    private readonly List<Marker> _waypointMarkers = [];
     private string? _errorMessage;
     private bool _isLoading;
     private bool _isSaving;
@@ -140,13 +141,15 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private void AddWaypoint()
     {
         _waypoints.Add(new WaypointViewModel());
+        _ = RefreshWaypointMarkersAsync();
         StateHasChanged();
     }
-    
+
     private void RemoveWaypoint(int index)
     {
         if (index < 0 || index >= _waypoints.Count) return;
         _waypoints.RemoveAt(index);
+        _ = RefreshWaypointMarkersAsync();
         StateHasChanged();
     }
 
@@ -158,9 +161,95 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (newIndex < 0 || newIndex >= _waypoints.Count) return;
         _waypoints.RemoveAt(index);
         _waypoints.Insert(newIndex, waypoint);
+        _ = RefreshWaypointMarkersAsync();
         StateHasChanged();
     }
-    
+
+    private void OnWaypointChanged(WaypointViewModel waypoint, GeoResult? value)
+    {
+        waypoint.Location = value;
+        _ = RefreshWaypointMarkersAsync();
+    }
+
+    /// <summary>
+    /// Shows one green pin per waypoint. Skipped while a route is shown –
+    /// route markers (green waypoint pins) are rebuilt by ShowRouteOnMap.
+    /// </summary>
+    private async Task RefreshWaypointMarkersAsync()
+    {
+        OpenStreetMap? map = _map;
+        if (map == null || _disposed || _currentRouteResponse != null) return;
+
+        try
+        {
+            foreach (Marker marker in _waypointMarkers)
+                map.MarkersList.Remove(marker);
+            _waypointMarkers.Clear();
+
+            foreach (WaypointViewModel waypoint in _waypoints)
+            {
+                if (waypoint.Location == null) continue;
+                Marker marker = new(MarkerType.MarkerPin,
+                    new OpenLayers.Blazor.Coordinate(waypoint.Location.Longitude, waypoint.Location.Latitude),
+                    "", PinColor.Green);
+                map.MarkersList.Add(marker);
+                _waypointMarkers.Add(marker);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to refresh waypoint markers");
+        }
+    }
+
+    /// <summary>
+    /// Map tap: reverse-geocode the position and offer to add it as a waypoint.
+    /// </summary>
+    private async Task OnMapClick(OpenLayers.Blazor.Coordinate coordinate)
+    {
+        if (!_mapLoaded || NavService.IsNavigating || _isLoading || _disposed) return;
+
+        try
+        {
+            double lon = coordinate.X;
+            double lat = coordinate.Y;
+
+            List<GeoResult> reverse = await GeocodingService.GetReverseGeocodingAsync(lon, lat);
+            GeoResult location = new(reverse.FirstOrDefault()?.Label ?? L["Waypoint"], lat, lon);
+
+            DialogParameters<AddWaypointDialog> parameters = new()
+            {
+                { nameof(AddWaypointDialog.Location), location }
+            };
+            DialogOptions options = new()
+            {
+                Position = DialogPosition.BottomCenter,
+                MaxWidth = MaxWidth.Small,
+                FullWidth = true,
+                CloseButton = true
+            };
+
+            IDialogReference dialog = await DialogService.ShowAsync<AddWaypointDialog>(L["AddWaypoint"], parameters, options);
+            DialogResult? result = await dialog.Result;
+            if (result is { Canceled: false } && result.Data is true)
+            {
+                _waypoints.Add(new WaypointViewModel { Location = location });
+
+                // Route shown → recalculate so the new waypoint is included and marked.
+                if (_currentRouteResponse != null)
+                    await CalculateRoute();
+                else
+                    await RefreshWaypointMarkersAsync();
+
+                Snackbar.Add(L["WaypointAdded"], Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to add waypoint from map click");
+        }
+    }
+
     #endregion
 
     #region "GPS-Tracking"
