@@ -633,6 +633,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             // Nearest to current viewport first, fallback: current GPS position.
             Extent? extent = _map?.VisibleExtent;
+            Log.Information("SearchSort: extent={Extent} gps={Lat},{Lon} results={Count}",
+                extent != null ? $"{extent.X1:F4},{extent.Y1:F4}-{extent.X2:F4},{extent.Y2:F4}" : "null",
+                Gps.LastReading?.Position.Latitude, Gps.LastReading?.Position.Longitude, results.Count);
             double centerLat = 0, centerLon = 0;
             if (extent != null && extent.X2 > extent.X1 && extent.Y2 > extent.Y1)
             {
