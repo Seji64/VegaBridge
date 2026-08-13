@@ -624,43 +624,25 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
             return [];
 
-        // More results than shown, so local matches can surface before sorting
-        // (Photon's default 5 are globally popular, e.g. US fast-food chains).
-        List<GeoResult> results = await GeocodingService.SuggestAsync(query, limit: 15, ct: ct);
-        if (results.Count <= 1) return results;
+        // More results than shown, so the spatial bias has candidates to work with.
 
-        try
+        // Bias Photon towards the current viewport (fallback: GPS position) so
+        // local results are returned and ranked first (global queries like
+        // "Mc Donalds" otherwise surface US/other-country matches).
+        Extent? extent = _map?.VisibleExtent;
+        double? biasLon = null, biasLat = null;
+        if (extent != null && extent.X2 > extent.X1 && extent.Y2 > extent.Y1)
         {
-            // Nearest to current viewport first, fallback: current GPS position.
-            Extent? extent = _map?.VisibleExtent;
-            Log.Information("SearchSort: extent={Extent} gps={Lat},{Lon} results={Count}",
-                extent != null ? $"{extent.X1:F4},{extent.Y1:F4}-{extent.X2:F4},{extent.Y2:F4}" : "null",
-                Gps.LastReading?.Position.Latitude, Gps.LastReading?.Position.Longitude, results.Count);
-            double centerLat = 0, centerLon = 0;
-            if (extent != null && extent.X2 > extent.X1 && extent.Y2 > extent.Y1)
-            {
-                centerLon = (extent.X1 + extent.X2) / 2;
-                centerLat = (extent.Y1 + extent.Y2) / 2;
-            }
-            else if (Gps.LastReading != null)
-            {
-                centerLat = Gps.LastReading.Position.Latitude;
-                centerLon = Gps.LastReading.Position.Longitude;
-            }
-            else
-            {
-                return results;
-            }
+            biasLon = (extent.X1 + extent.X2) / 2;
+            biasLat = (extent.Y1 + extent.Y2) / 2;
+        }
+        else if (Gps.LastReading != null)
+        {
+            biasLon = Gps.LastReading.Position.Longitude;
+            biasLat = Gps.LastReading.Position.Latitude;
+        }
 
-            return results
-                .OrderBy(r => GeoMath.DistanceMeters(centerLat, centerLon, r.Latitude, r.Longitude))
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Search sorting failed – returning unsorted results");
-            return results;
-        }
+        return await GeocodingService.SuggestAsync(query, limit: 15, lon: biasLon, lat: biasLat, ct: ct);
     }
 
     /// <summary>
