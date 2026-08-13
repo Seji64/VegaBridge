@@ -1,0 +1,19 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Title</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="1">
+            <MudText Typo="Typo.subtitle1">@Location?.Label</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@FormatCoordinate(Location?.Latitude, Location?.Longitude)</MudText>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel">@L["Cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                   StartIcon="@Icons.Material.Filled.AddLocation"
+                   OnClick="Add">
+            @L["AddWaypoint"]
+        </MudButton>
+    </DialogActions>
+</MudDialog>
