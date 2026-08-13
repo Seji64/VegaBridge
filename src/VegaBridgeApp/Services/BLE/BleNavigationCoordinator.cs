@@ -9,8 +9,8 @@ namespace VegaBridgeApp.Services.BLE;
 /// <summary>
 /// Mediator bridging NavigationService (domain) → BleManagerService (transport).
 ///
-/// Implementiert <see cref="INavigationSink"/>, damit der <see cref="NavigationService"/>
-/// Navigation-Events direkt an die BLE-Schicht melden kann.
+/// Implements <see cref="INavigationSink"/> so the <see cref="NavigationService"/>
+/// can report navigation events directly to the BLE layer.
 /// </summary>
 public class BleNavigationCoordinator : INavigationSink, IDisposable
 {

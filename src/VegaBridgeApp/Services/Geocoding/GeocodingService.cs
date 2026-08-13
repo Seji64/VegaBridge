@@ -6,7 +6,7 @@ using VegaBridgeApp.Models.Geocoding;
 namespace VegaBridgeApp.Services.Geocoding;
 
 /// <summary>
-/// Photon (Komoot)‑basiertes Geocoding mit Autocomplete – nutzt Flurl.
+/// Photon (Komoot)-based geocoding with autocomplete – uses Flurl.
 /// </summary>
 public class GeocodingService : IGeocodingService
 {
@@ -155,7 +155,7 @@ public class GeocodingService : IGeocodingService
             && !string.Equals(p.City, lastPart, StringComparison.OrdinalIgnoreCase))
             parts.Add(p.City);
 
-        // Bundesland (falls abweichend von Stadt)
+        // Federal state (if it differs from the city)
         lastPart = parts.LastOrDefault();
         if (!string.IsNullOrWhiteSpace(p.State)
             && !string.Equals(p.State, lastPart, StringComparison.OrdinalIgnoreCase))

@@ -365,7 +365,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     {
         if (_disposed) return;
 
-        // Default-Start auf "Aktuelle Position" beim ersten GPS-Fix
+        // Default start = "Current position" on first GPS fix
         if (_startLocation == null && string.IsNullOrWhiteSpace(RouteId))
         {
             _startLocation = new GeoResult(
@@ -605,7 +605,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
         else
         {
-            // Platzhalter – beim Start wird live GPS geholt
+            // Placeholder – live GPS is fetched at start
             items.Add(new GeoResult(L["CurrentPos"], 0, 0, "current"));
         }
 
@@ -686,7 +686,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             _isLoading = true;
             StateHasChanged();
 
-            // Start-Position: bei "Aktuelle Position" frische GPS-Daten nehmen
+            // Start position: take fresh GPS data when "current position" is selected
             double startLat = 0, startLon = 0;
             if (_startLocation?.Type == "current")
             {
