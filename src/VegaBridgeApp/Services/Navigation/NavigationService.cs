@@ -15,7 +15,7 @@ namespace VegaBridgeApp.Services.Navigation;
 /// 
 /// Tracks the rider's position along a Valhalla route, determines the current
 /// maneuver, calculates distances, and reports state changes through
-/// a <see cref="INavigationSink"/>.
+/// a <see cref="INavigationSink" />.
 /// 
 /// Works with the screen OFF – the UI is only needed for optional glanceable
 /// updates. The core logic runs from GPS callbacks regardless of display state.
@@ -40,7 +40,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     }
 
     /// <summary>
-    /// Unregisters a sink. No-op if sink was not registered.
+    /// of a sink. No-op if sink was not registered.
     /// </summary>
     public void RemoveSink(INavigationSink sink)
     {
@@ -86,10 +86,16 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
     // Smoothing / route-matching state
     private Coordinate? _lastSmoothedPosition;
+    private readonly List<Coordinate> _gpsBuffer = [];
+    private int _gpsTickCount;
 
     private const double OffRouteThresholdDefaultM = 10.0;
     private const int GpsSmoothingWindow = 3; // simple moving average over last N readings
     private const int RouteLookaheadWindow = 20; // search only near current route index
+    private const int MapMatchBufferLimit = 5;
+    private const int MapMatchTickInterval = 3;
+    private const int OffRouteHysteresisCount = 3; // consecutive outliers before flagging
+    private int _offRouteCounter;
 
     private double OffRouteThresholdM => Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
 
@@ -226,7 +232,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             // 1. Build Request
             List<Models.Valhalla.Location> locs = [
-                new() { Lat = currentLat, Lon = currentLon, Type = "break" },
+                new() { Lat = currentLat, Lon = currentLon, Type = "break"},
                 _destination
             ];
 
@@ -234,7 +240,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             {
                 Locations = locs,
                 Costing = "motorcycle",
-                DirectionsOptions = new DirectionsOptions { Units = "kilometers", Language = "de" }
+                DirectionsOptions = new DirectionsOptions { Units = "kilometers", Language = "de"}
             };
 
             // 2. Call Valhalla
@@ -391,7 +397,12 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             }
             _lastSmoothedPosition = new Coordinate(smoothLat, smoothLon, null);
 
-            // 1. Snap current position to route + check off-route
+            // Update buffer for map-matching
+            _gpsTickCount++;
+            _gpsBuffer.Add(new Coordinate(smoothLat, smoothLon, null));
+            if (_gpsBuffer.Count > MapMatchBufferLimit) _gpsBuffer.RemoveAt(0);
+
+            // 1. Snap current position to route (still needed for UI/Maneuvers)
             int hintIndex = _currentManeuverIndex > 0
                 ? _maneuvers[_currentManeuverIndex].BeginShapeIndex
                 : 0;
@@ -401,23 +412,12 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             if (snappedIndex < 0) return;
 
-            double accuracy = reading.PositionAccuracy;
-            double effectiveThreshold = Math.Max(OffRouteThresholdM, accuracy * 1.5);
-
-            if (distanceMeters > effectiveThreshold)
+            // Periodic Off-Route Verification via API
+            if (_gpsTickCount % MapMatchTickInterval == 0)
             {
-                if (_isOffRoute) return;
-                _isOffRoute = true;
-                Log.Warning(
-                    "Off route! {Dist:F1}m from route, accuracy={Accuracy:F1}m, threshold={Threshold:F1}m",
-                    distanceMeters, accuracy, effectiveThreshold);
-
-                _ = NotifySinksAsync(s => s.OnOffRouteAsync(
-                    reading.Position.Latitude, reading.Position.Longitude, distanceMeters));
-                return;
+                _ = VerifyRouteAsync();
             }
 
-            _isOffRoute = false;
             int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
 
             int displayIndex = GetDisplayManeuverIndex();
@@ -570,8 +570,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     {
         for (int i = 0; i < _maneuvers.Count; i++)
         {
-            if (routeIndex >= _maneuvers[i].BeginShapeIndex &&
-                routeIndex < _maneuvers[i].EndShapeIndex)
+                if (routeIndex >= _maneuvers[i].BeginShapeIndex &&
+                    routeIndex < _maneuvers[i].EndShapeIndex)
             {
                 return i;
             }
@@ -579,6 +579,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         return -1;
     }
 
+    // TODO: integrate Valhalla map‑matching confidence weighting
     private double CalculateDistanceToNextTurn(int currentRouteIndex)
     {
         if (_currentManeuverIndex >= _maneuvers.Count) return 0;
@@ -606,7 +607,71 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         return (remainingKm, remainingMin);
     }
 
+    private async Task VerifyRouteAsync()
+    {
+        List<Coordinate> bufferSnapshot;
+        lock (_lock)
+        {
+            if (!_isNavigating) return;
+            bufferSnapshot = _gpsBuffer.ToList();
+        }
+
+        if (bufferSnapshot.Count < 2) return;
+
+        try
+        {
+            TraceRequest request = new()
+            {
+                Locations = bufferSnapshot.Select(p => new double[] { p.Latitude, p.Longitude }).ToList(),
+                Costing = "motorcycle"
+            };
+            request.CostingOptions ??= new();
+            request.CostingOptions["shape_match"] = "map_snap";
+
+            Result result = await valhallaClient.GetMapMatchAsync(request);
+
+            if (!result.IsSuccess || result.Response == null) return;
+
+            RouteResponse response = result.Response;
+            var snappedTrip = response.Trip;
+            if (snappedTrip == null || snappedTrip.Legs == null || snappedTrip.Legs.Count == 0) return;
+
+            Coordinate lastSnapped = PolylineEncoder.DecodePolyline6(snappedTrip.Legs[0].Shape).Last();
+            
+            (int _, double distToRoute) = FindNearestRouteIndexWithLookahead(
+                lastSnapped.Latitude, lastSnapped.Longitude, 0, RouteLookaheadWindow);
+
+            lock (_lock)
+            {
+                if (distToRoute > OffRouteThresholdM)
+                {
+                    _offRouteCounter++;
+                    if (_offRouteCounter >= OffRouteHysteresisCount && !_isOffRoute)
+                    {
+                        _isOffRoute = true;
+                        Log.Warning("Off-Route verified by Map-Matching: {Dist:F1}m", distToRoute);
+                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lastSnapped.Latitude, lastSnapped.Longitude, distToRoute));
+                    }
+                }
+                else
+                {
+                    _offRouteCounter = 0;
+                    if (_isOffRoute)
+                    {
+                        _isOffRoute = false;
+                        Log.Information("Back on route (verified by Map-Matching)");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error during route verification");
+        }
+    }
+
     // ── Maneuver change notification ─────────────────────────────────────
+    // Note: map‑matching could be used here to refine upcoming maneuver info
     private void FireCurrentManeuver(int index = -1)
     {
         int targetIndex = index != -1 ? index : GetDisplayManeuverIndex();
