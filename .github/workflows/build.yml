@@ -18,4 +18,6 @@ jobs:
         run: dotnet workload install maui
 
       - name: Build
-        run: dotnet build src/VegaBridgeApp/VegaBridgeApp.csproj -c Debug
+        # EnableCodeSigning=false: CI runners have no Apple signing certs;
+        # compile-only check, signing happens on the dev machine / release pipeline.
+        run: dotnet build src/VegaBridgeApp/VegaBridgeApp.csproj -c Debug -p:EnableCodeSigning=false
