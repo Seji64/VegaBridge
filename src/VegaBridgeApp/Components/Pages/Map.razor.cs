@@ -630,7 +630,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         // Results near the current map viewport (fallback: current position) first.
         Extent? extent = _map?.VisibleExtent;
         double centerLat = 0, centerLon = 0;
-        if (extent is { X2: > 0 } && extent.X2 > extent.X1 && extent.Y2 > extent.Y1)
+        if (extent != null && extent.X2 > extent.X1 && extent.Y2 > extent.Y1)
         {
             centerLon = (extent.X1 + extent.X2) / 2;
             centerLat = (extent.Y1 + extent.Y2) / 2;
