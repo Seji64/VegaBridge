@@ -1,3 +1,4 @@
+using System.Globalization;
 using Flurl.Http;
 using Serilog;
 using VegaBridgeApp.Models.Geocoding;
@@ -26,10 +27,11 @@ public class GeocodingService : IGeocodingService
 
         try
         {
-            
+            string lang = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+
             var request = _flurlClient
                 .Request("api")
-                .SetQueryParams(new { q = query, limit, lang = "de" });
+                .SetQueryParams(new { q = query, limit, lang });
             if (lon.HasValue && lat.HasValue)
                 request = request.SetQueryParams(new { lon = lon.Value, lat = lat.Value });
 
@@ -55,15 +57,22 @@ public class GeocodingService : IGeocodingService
         {
             return [];
         }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Photon request failed unexpectedly for query '{Query}'", query);
+            return [];
+        }
     }
 
     public async Task<List<GeoResult>> GetReverseGeocodingAsync(double lon, double lat, CancellationToken ct = default)
     {
         try
         {
+            string lang = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+
             PhotonResponse? response = await _flurlClient
                 .Request("reverse")
-                .SetQueryParams(new { lon, lat, lang = "de" })
+                .SetQueryParams(new { lon, lat, lang })
                 .GetJsonAsync<PhotonResponse>(cancellationToken: ct);
             
             if (response?.Features == null || response.Features.Count == 0)
@@ -83,6 +92,11 @@ public class GeocodingService : IGeocodingService
         {
             return [];
         }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Photon request failed unexpectedly");
+            return [];
+        }
     }
 
     private static GeoResult? MapToGeoResult(PhotonFeature feature)
@@ -98,10 +112,14 @@ public class GeocodingService : IGeocodingService
             double lat = coords[1];
             string label = BuildLabel(p);
 
+            // Empty label → blank dropdown row (and DistinctBy("") would collapse them).
+            if (string.IsNullOrWhiteSpace(label)) return null;
+
             return new GeoResult(label, lat, lon, p.Type ?? p.OsmValue);
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Debug(ex, "Failed to map Photon feature");
             return null;
         }
     }
