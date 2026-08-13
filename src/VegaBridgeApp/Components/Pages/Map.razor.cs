@@ -295,7 +295,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 _map.MarkersList[0] = new Marker { Coordinate = coord, Type = old.Type, PinColor = PinColor.Green, Text = "➤" };
             }
 
-            await UpdateBreadcrumbAsync();
+            await UpdateBreadcrumbAsync(force: force);
+
         }
         finally
         {
@@ -318,15 +319,14 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             await map.RemoveLayer(breadcrumbLayer);
     }
 
-    private async Task UpdateBreadcrumbAsync()
+    private async Task UpdateBreadcrumbAsync(bool force = false)
     {
         if (_disposed || Gps.Breadcrumb.Count < 2) return;
         OpenStreetMap? map = _map;
         if (map == null) return;
 
-        // Throttle: nur alle 10 Sekunden updaten, nicht bei jedem GPS-Tick
         DateTime now = DateTime.UtcNow;
-        if ((now - _lastBreadcrumbUpdate).TotalSeconds < 10)
+        if (!force && (now - _lastBreadcrumbUpdate).TotalSeconds < 10)
             return;
         _lastBreadcrumbUpdate = now;
 
@@ -334,42 +334,40 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         try
         {
-            Layer? existing = map.LayersList?
-                .FirstOrDefault(l => l.Id == BreadcrumbLayerId);
-
-            if (existing == null)
+            Layer? existing = map.LayersList?.FirstOrDefault(l => l.Id == BreadcrumbLayerId);
+            if (existing != null)
             {
-                // Layer einmalig anlegen
-                List<Coordinate> coords = Gps.Breadcrumb
-                    .Select(r => new Coordinate(r.Position.Latitude, r.Position.Longitude, null))
-                    .ToList();
-                string polyline6 = PolylineEncoder.EncodePolyline6(coords);
-                if (string.IsNullOrEmpty(polyline6)) return;
-
-                Layer layer = new()
-                {
-                    Id = BreadcrumbLayerId,
-                    LayerType = LayerType.Vector,
-                    SourceType = SourceType.VectorPolyline,
-                    Projection = "EPSG:4326",
-                    Data = polyline6,
-                    FormatOptions = new { factor = 1e6 },
-                    Style = new StyleOptions
-                    {
-                        Stroke = new StyleOptions.StrokeOptions
-                        {
-                            Color = "#2196F3", Width = 3, LineDash = [8, 4],
-                            LineCap = "round", LineJoin = "round"
-                        }
-                    }
-                };
-                if (_map != null)
-                {
-                    await _map.AddLayer(layer);
-                }
+                await map.RemoveLayer(existing);
             }
-            // else: Layer existiert bereits – nicht updaten!
-            // Kein RemoveLayer/AddLayer -> Karte bleibt interaktiv
+
+            List<Coordinate> coords = Gps.Breadcrumb
+                .Select(r => new Coordinate(r.Position.Latitude, r.Position.Longitude, null))
+                .ToList();
+            string polyline6 = PolylineEncoder.EncodePolyline6(coords);
+            if (string.IsNullOrEmpty(polyline6)) return;
+
+            Layer layer = new()
+            {
+                Id = BreadcrumbLayerId,
+                LayerType = LayerType.Vector,
+                SourceType = SourceType.VectorPolyline,
+                Projection = "EPSG:4326",
+                Data = polyline6,
+                FormatOptions = new { factor = 1e6 },
+                Style = new StyleOptions
+                {
+                    Stroke = new StyleOptions.StrokeOptions
+                    {
+                        Color = "#2196F3", Width = 3, LineDash = [8, 4],
+                        LineCap = "round", LineJoin = "round"
+                    }
+                }
+            };
+
+            if (_map != null)
+            {
+                await _map.AddLayer(layer);
+            }
         }
         finally
         {
@@ -615,6 +613,20 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     private async Task StartNavigation()
     {
+        if (Gps.LastReading == null)
+        {
+            await Gps.GetLastReadingOrCurrentAsync();
+            if (Gps.LastReading == null)
+            {
+                Snackbar.Add(L["NoGPS"], Severity.Error);
+                return;
+            }
+        }
+
+        // Always start from current position to avoid "planning from far away" bug
+        _startLocation = new GeoResult(L["CurrentPos"], Gps.LastReading!.Position.Latitude, Gps.LastReading!.Position.Longitude, "current");
+        await CalculateRoute();
+
         if (_currentRouteResponse?.Trip?.Legs == null || _currentRouteResponse.Trip.Legs.Count == 0)
         {
             Snackbar.Add(L["NoRoute"], Severity.Error);
@@ -626,7 +638,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             (string mergedShape, List<Maneuver> allManeuvers, double totalKm, double totalMin) =
                 NavService.PrepareNavigationData(_currentRouteResponse.Trip.Legs);
             await NavService.StartNavigation(mergedShape, allManeuvers, totalKm, totalMin, CreateLocation(_destinationLocation));
-
             Snackbar.Add(L["NavigationStarted"], Severity.Success);
         }
         catch (Exception ex)
@@ -775,8 +786,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         };
 
         await map.AddLayer(layer);
+        await UpdateBreadcrumbAsync(force: true);
     }
-
     private async Task ShowRouteOnMap(RouteResponse response)
     {
         if (response.Trip?.Legs == null) return;
