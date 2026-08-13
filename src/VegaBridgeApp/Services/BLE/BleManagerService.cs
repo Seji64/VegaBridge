@@ -356,8 +356,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         // Signature: NotifyCharacteristic(serviceUuid, characteristicUuid, autoSubscribe)
         _notificationSubscription = peripheral.NotifyCharacteristic(
                 _activePlugin.ServiceUuid.ToString(), 
-                _activePlugin.ReadCharacteristicUuid, 
-                true)
+                _activePlugin.ReadCharacteristicUuid)
             .Subscribe(result =>
             {
                 if (result.Data != null) _activePlugin.OnDataReceived(result.Data);
