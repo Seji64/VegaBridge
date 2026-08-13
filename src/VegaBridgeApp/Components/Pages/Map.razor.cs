@@ -40,6 +40,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private bool _isLoading;
     private bool _isSaving;
     private RouteResponse? _currentRouteResponse;
+    private string? _savedRouteId;
     private bool _mapLoaded = false;
 
     // ── Track whether we've created the initial GPS marker ──
@@ -752,7 +753,13 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     {
         if (_currentRouteResponse?.Trip?.Legs == null || _currentRouteResponse.Trip.Legs.Count == 0) return;
 
-        string? routeName = RouteId;
+        // Already saved this session (or loaded via URL) → update, no name dialog.
+        string existingId = RouteId ?? _savedRouteId ?? "";
+        SavedRoute? route = !string.IsNullOrWhiteSpace(existingId)
+            ? await RouteStorage.GetRouteByIdAsync(existingId)
+            : null;
+
+        string? routeName = route?.Name;
         if (string.IsNullOrWhiteSpace(routeName))
         {
             // New route: get name from dialog
@@ -766,25 +773,16 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             DialogResult? result = await dialog.Result;
             if (result is null || result.Canceled || result.Data is not string name || string.IsNullOrWhiteSpace(name))
                 return;
-            
             routeName = name;
         }
+
+        route ??= new SavedRoute();
 
         _isSaving = true;
         try
         {
-            (string combinedShape, _, double totalDistanceKm, double totalTimeMinutes) = 
+            (string combinedShape, _, double totalDistanceKm, double totalTimeMinutes) =
                 NavService.PrepareNavigationData(_currentRouteResponse!.Trip!.Legs);
-
-            SavedRoute? route = !string.IsNullOrWhiteSpace(RouteId) 
-                ? await RouteStorage.GetRouteByIdAsync(RouteId) 
-                : new SavedRoute();
-
-            if (route == null)
-            {
-                Snackbar.Add(L["RouteLoadFailed"], Severity.Error);
-                return;
-            }
 
             route.Name = routeName;
             route.Polyline6 = combinedShape;
@@ -799,6 +797,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             }
 
             await RouteStorage.SaveRouteAsync(route);
+            _savedRouteId = route.Id;
             Snackbar.Add(L["RouteSaved"], Severity.Success);
         }
         catch (Exception ex)
