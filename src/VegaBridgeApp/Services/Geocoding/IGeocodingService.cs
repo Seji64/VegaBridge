@@ -11,7 +11,7 @@ public interface IGeocodingService
     /// Suggests locations matching <paramref name="query"/> (autocomplete).
     /// Leeres oder zu kurzes Query → leere Liste.
     /// </summary>
-    Task<List<GeoResult>> SuggestAsync(string query, int limit = 5, CancellationToken ct = default);
+    Task<List<GeoResult>> SuggestAsync(string query, int limit = 5, double? lon = null, double? lat = null, CancellationToken ct = default);
     
     Task<List<GeoResult>> GetReverseGeocodingAsync(double lon, double lat, CancellationToken ct = default);
 }

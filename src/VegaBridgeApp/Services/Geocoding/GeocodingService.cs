@@ -19,7 +19,7 @@ public class GeocodingService : IGeocodingService
         _flurlClient = new FlurlClient(httpClient);
     }
 
-    public async Task<List<GeoResult>> SuggestAsync(string query, int limit = 5, CancellationToken ct = default)
+    public async Task<List<GeoResult>> SuggestAsync(string query, int limit = 5, double? lon = null, double? lat = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
             return [];
@@ -27,10 +27,13 @@ public class GeocodingService : IGeocodingService
         try
         {
             
-            PhotonResponse? response = await _flurlClient
+            var request = _flurlClient
                 .Request("api")
-                .SetQueryParams(new { q = query, limit, lang = "de" })
-                .GetJsonAsync<PhotonResponse>(cancellationToken: ct);
+                .SetQueryParams(new { q = query, limit, lang = "de" });
+            if (lon.HasValue && lat.HasValue)
+                request = request.SetQueryParams(new { lon = lon.Value, lat = lat.Value });
+
+            PhotonResponse? response = await request.GetJsonAsync<PhotonResponse>(cancellationToken: ct);
 
             if (response?.Features == null || response.Features.Count == 0)
                 return [];
