@@ -641,8 +641,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 Locations = bufferSnapshot.Select(p => new double[] { p.Latitude, p.Longitude }).ToList(),
                 Costing = "motorcycle"
             };
-            request.CostingOptions ??= new();
-            request.CostingOptions["shape_match"] = "map_snap";
+            // shape_match=map_snap set by ValhallaClient.GetMapMatchAsync
 
             Result result = await valhallaClient.GetMapMatchAsync(request);
 

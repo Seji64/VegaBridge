@@ -12,25 +12,34 @@ namespace VegaBridgeApp.Services.Valhalla;
 /// </summary>
 public class ValhallaClient : IValhallaClient
 {
-    private const string HttpClientName = "Valhalla";
-
     private readonly FlurlClient _flurlClient;
 
     public ValhallaClient(IHttpClientFactory httpClientFactory)
     {
-        HttpClient httpClient = httpClientFactory.CreateClient(HttpClientName);
+        HttpClient httpClient = httpClientFactory.CreateClient(ValhallaOptions.HttpClientName);
         _flurlClient = new FlurlClient(httpClient);
     }
 
     /// <inheritdoc />
-    public async Task<Result> GetRouteAsync(RouteRequest request, CancellationToken cancellationToken = default)
+    public Task<Result> GetRouteAsync(RouteRequest request, CancellationToken cancellationToken = default) =>
+        PostAsync("route", request, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<Result> GetMapMatchAsync(TraceRequest request, CancellationToken cancellationToken = default)
+    {
+        request.CostingOptions ??= new Dictionary<string, object>();
+        request.CostingOptions["shape_match"] = "map_snap";
+        return await PostAsync("trace_route", request, cancellationToken);
+    }
+
+    private async Task<Result> PostAsync<TRequest>(string endpoint, TRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Log.Debug("Requesting route from Valhalla");
+        Log.Debug("Requesting {Endpoint} from Valhalla", endpoint);
         try
         {
             RouteResponse? response = await _flurlClient
-                .Request("route")
+                .Request(endpoint)
                 .PostJsonAsync(request, cancellationToken: cancellationToken)
                 .ReceiveJson<RouteResponse>();
 
@@ -39,41 +48,14 @@ public class ValhallaClient : IValhallaClient
                 Log.Warning("Valhalla returned OK but no trip data");
                 return Result.Failure("Valhalla returned an empty response (no trip)");
             }
-            Log.Information("Route received: {Distance} km, {Time} s", response.Trip.Summary?.Length, response.Trip.Summary?.Time);
-            return Result.Success(response);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Error calling Valhalla route API");
-            return Result.Failure($"Error: {ex.Message}", ex);
-        }
-    }
 
-    /// <inheritdoc />
-    public async Task<Result> GetMapMatchAsync(TraceRequest request, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        Log.Debug("Requesting map‑matching from Valhalla");
-        try
-        {
-            request.CostingOptions ??= new Dictionary<string, object>();
-            request.CostingOptions["shape_match"] = "map_snap";
-            RouteResponse? response = await _flurlClient
-                .Request("trace_route")
-                .PostJsonAsync(request, cancellationToken: cancellationToken)
-                .ReceiveJson<RouteResponse>();
-            if (response?.Trip == null)
-            {
-                Log.Warning("Valhalla map‑matching returned OK but no trip data");
-                return Result.Failure("Valhalla map‑matching empty response");
-            }
-            Log.Information("Map‑matching succeeded: {Dist} km", response.Trip.Summary?.Length ?? 0);
+            Log.Debug("{Endpoint} succeeded: {Distance} km", endpoint, response.Trip.Summary?.Length ?? 0);
             return Result.Success(response);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Log.Error(ex, "Valhalla map‑matching error");
-            return Result.Failure($"Map‑matching error: {ex.Message}", ex);
+            Log.Error(ex, "Error calling Valhalla {Endpoint} API", endpoint);
+            return Result.Failure($"Error: {ex.Message}", ex);
         }
     }
 }
