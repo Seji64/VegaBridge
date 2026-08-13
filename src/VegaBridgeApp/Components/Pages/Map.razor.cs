@@ -624,30 +624,40 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
             return [];
 
-        List<GeoResult> results = await GeocodingService.SuggestAsync(query, ct: ct);
+        // More results than shown, so local matches can surface before sorting
+        // (Photon's default 5 are globally popular, e.g. US fast-food chains).
+        List<GeoResult> results = await GeocodingService.SuggestAsync(query, limit: 15, ct: ct);
         if (results.Count <= 1) return results;
 
-        // Results near the current map viewport (fallback: current position) first.
-        Extent? extent = _map?.VisibleExtent;
-        double centerLat = 0, centerLon = 0;
-        if (extent != null && extent.X2 > extent.X1 && extent.Y2 > extent.Y1)
+        try
         {
-            centerLon = (extent.X1 + extent.X2) / 2;
-            centerLat = (extent.Y1 + extent.Y2) / 2;
+            // Nearest to current viewport first, fallback: current GPS position.
+            Extent? extent = _map?.VisibleExtent;
+            double centerLat = 0, centerLon = 0;
+            if (extent != null && extent.X2 > extent.X1 && extent.Y2 > extent.Y1)
+            {
+                centerLon = (extent.X1 + extent.X2) / 2;
+                centerLat = (extent.Y1 + extent.Y2) / 2;
+            }
+            else if (Gps.LastReading != null)
+            {
+                centerLat = Gps.LastReading.Position.Latitude;
+                centerLon = Gps.LastReading.Position.Longitude;
+            }
+            else
+            {
+                return results;
+            }
+
+            return results
+                .OrderBy(r => GeoMath.DistanceMeters(centerLat, centerLon, r.Latitude, r.Longitude))
+                .ToList();
         }
-        else if (Gps.LastReading != null)
+        catch (Exception ex)
         {
-            centerLat = Gps.LastReading.Position.Latitude;
-            centerLon = Gps.LastReading.Position.Longitude;
-        }
-        else
-        {
+            Log.Warning(ex, "Search sorting failed – returning unsorted results");
             return results;
         }
-
-        return results
-            .OrderBy(r => GeoMath.DistanceMeters(centerLat, centerLon, r.Latitude, r.Longitude))
-            .ToList();
     }
 
     /// <summary>
