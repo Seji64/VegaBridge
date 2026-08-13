@@ -205,7 +205,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 if (waypoint.Location == null) continue;
                 Marker marker = new(MarkerType.MarkerPin,
                     new OpenLayers.Blazor.Coordinate(waypoint.Location.Longitude, waypoint.Location.Latitude),
-                    "", PinColor.Green);
+                    "", PinColor.Blue);
                 map.MarkersList.Add(marker);
                 _waypointPins.Add((waypoint, marker));
             }
@@ -1024,12 +1024,13 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                     Location loc = locations[i];
                     OpenLayers.Blazor.Coordinate coord = new(loc.Lon, loc.Lat);
 
-                    // Color logic: Red for destination, Green for start/waypoints
-                    PinColor color = PinColor.Green;
-                    if (i == locations.Count - 1)
+                    // Color logic: Green start, blue waypoints, red destination.
+                    PinColor color = i switch
                     {
-                        color = PinColor.Red;
-                    }
+                        0 => PinColor.Green,
+                        _ when i == locations.Count - 1 => PinColor.Red,
+                        _ => PinColor.Blue
+                    };
 
                     Marker marker = new(MarkerType.MarkerPin, coord, "", color);
                     map.MarkersList.Add(marker);
