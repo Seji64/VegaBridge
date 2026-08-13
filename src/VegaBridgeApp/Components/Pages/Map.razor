@@ -20,7 +20,8 @@
             <OpenStreetMap @ref="_map"
                            Zoom="8" InteractionsEnabled="@(!_isLoading)"
                            ZoomControl="false" OnRenderComplete="@(() => _mapLoaded =true )"
-                           OnClick="OnMapClick">
+                           OnClick="OnMapClick"
+                           OnMarkerClick="OnMarkerClick">
             </OpenStreetMap>
         </div>
 

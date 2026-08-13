@@ -30,7 +30,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private GeoResult? _startLocation;
     private GeoResult? _destinationLocation;
     private List<WaypointViewModel> _waypoints = [];
-    private readonly List<Marker> _waypointMarkers = [];
+    private readonly List<(WaypointViewModel Waypoint, Marker Marker)> _waypointPins = [];
+    private WaypointViewModel? _pendingMoveWaypoint;
     private string? _errorMessage;
     private bool _isLoading;
     private bool _isSaving;
@@ -182,9 +183,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         try
         {
-            foreach (Marker marker in _waypointMarkers)
+            foreach ((_, Marker marker) in _waypointPins)
                 map.MarkersList.Remove(marker);
-            _waypointMarkers.Clear();
+            _waypointPins.Clear();
 
             foreach (WaypointViewModel waypoint in _waypoints)
             {
@@ -193,13 +194,63 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                     new OpenLayers.Blazor.Coordinate(waypoint.Location.Longitude, waypoint.Location.Latitude),
                     "", PinColor.Green);
                 map.MarkersList.Add(marker);
-                _waypointMarkers.Add(marker);
+                _waypointPins.Add((waypoint, marker));
             }
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Failed to refresh waypoint markers");
         }
+    }
+
+    /// <summary>
+    /// Tap on a waypoint pin: offer move / delete.
+    /// </summary>
+    private async Task OnMarkerClick(Marker marker)
+    {
+        if (_disposed || NavService.IsNavigating || _pendingMoveWaypoint != null) return;
+
+        (WaypointViewModel Waypoint, Marker Marker)? pin = _waypointPins.FirstOrDefault(p => p.Marker == marker);
+        if (pin == null || pin.Value.Waypoint.Location == null) return;
+
+        int index = _waypoints.IndexOf(pin.Value.Waypoint);
+        if (index < 0) return;
+
+        DialogParameters<WaypointActionsDialog> parameters = new()
+        {
+            { nameof(WaypointActionsDialog.Location), pin.Value.Waypoint.Location }
+        };
+        DialogOptions options = new()
+        {
+            Position = DialogPosition.BottomCenter,
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        IDialogReference dialog = await DialogService.ShowAsync<WaypointActionsDialog>(L["Waypoint"], parameters, options);
+        DialogResult? result = await dialog.Result;
+        if (result is { Canceled: false } && result.Data is string action)
+        {
+            switch (action)
+            {
+                case "move":
+                    _pendingMoveWaypoint = pin.Value.Waypoint;
+                    Snackbar.Add(L["MapClickMoveHint"], Severity.Info);
+                    break;
+                case "delete":
+                    await DeleteWaypointAsync(index);
+                    break;
+            }
+        }
+    }
+
+    private async Task DeleteWaypointAsync(int index)
+    {
+        RemoveWaypoint(index);
+        if (_currentRouteResponse != null)
+            await CalculateRoute();
+        Snackbar.Add(L["WaypointRemoved"], Severity.Info);
     }
 
     /// <summary>
@@ -213,6 +264,30 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             double lon = coordinate.X;
             double lat = coordinate.Y;
+
+            // Marker tap also fires OnClick – waypoint pins are handled by OnMarkerClick.
+            if (_waypointPins.Any(p =>
+                    p.Waypoint.Location != null &&
+                    GeoMath.DistanceMeters(lat, lon, p.Waypoint.Location.Latitude, p.Waypoint.Location.Longitude) < WaypointTapRadiusM))
+                return;
+
+            // A pending "move" consumes the next map tap.
+            if (_pendingMoveWaypoint != null)
+            {
+                WaypointViewModel waypoint = _pendingMoveWaypoint;
+                _pendingMoveWaypoint = null;
+
+                List<GeoResult> moveReverse = await GeocodingService.GetReverseGeocodingAsync(lon, lat);
+                waypoint.Location = new GeoResult(moveReverse.FirstOrDefault()?.Label ?? L["Waypoint"], lat, lon);
+
+                if (_currentRouteResponse != null)
+                    await CalculateRoute();
+                else
+                    await RefreshWaypointMarkersAsync();
+
+                Snackbar.Add(L["WaypointMoved"], Severity.Success);
+                return;
+            }
 
             List<GeoResult> reverse = await GeocodingService.GetReverseGeocodingAsync(lon, lat);
             GeoResult location = new(reverse.FirstOrDefault()?.Label ?? L["Waypoint"], lat, lon);
@@ -532,6 +607,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     }
 
     private const int MaxViaLocations = 48;
+    private const double WaypointTapRadiusM = 30;
 
     // ── Route Calculation ──
 
@@ -906,6 +982,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 foreach (Shape m in gpsMarkers) map.MarkersList.Add(m);
 
                 List<Location> locations = response.Trip.Locations;
+
+                // Trip order matches CalculateRoute: non-null waypoints only.
+                List<WaypointViewModel> routeWaypoints = _waypoints.Where(w => w.Location != null).ToList();
+                _waypointPins.Clear();
+
                 for (int i = 0; i < locations.Count; i++)
                 {
                     Location loc = locations[i];
@@ -918,7 +999,14 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                         color = PinColor.Red;
                     }
 
-                    map.MarkersList.Add(new Marker(MarkerType.MarkerPin, coord, "", color));
+                    Marker marker = new(MarkerType.MarkerPin, coord, "", color);
+                    map.MarkersList.Add(marker);
+
+                    // Middle locations are waypoints – keep them tappable (move/delete).
+                    if (i > 0 && i < locations.Count - 1 && i - 1 < routeWaypoints.Count)
+                    {
+                        _waypointPins.Add((routeWaypoints[i - 1], marker));
+                    }
                 }
             }
 
