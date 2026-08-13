@@ -41,6 +41,9 @@ public class GeocodingService : IGeocodingService
             return response.Features
                 .Select(MapToGeoResult)
                 .Where(r => r is not null)
+                // MudAutocomplete keys items by the GeoResult (ToString=Label) –
+                // duplicate labels would crash the renderer.
+                .DistinctBy(r => r!.Label)
                 .ToList()!;
         }
         catch (FlurlHttpException ex)
