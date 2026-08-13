@@ -104,18 +104,26 @@ public class GeocodingService : IGeocodingService
     {
         List<string> parts = [];
 
-        // Adresse mit Hausnummer: "Altenbergweg 18"
+        // POI-Name zuerst – matches the search term (e.g. "Kaufland").
+        if (!string.IsNullOrWhiteSpace(p.Name)
+            && !string.Equals(p.Name, p.Street, StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add(p.Name);
+        }
+
+        // Adresse mit Hausnummer
         if (!string.IsNullOrWhiteSpace(p.Street))
         {
             string address = p.Street;
             if (!string.IsNullOrWhiteSpace(p.Housenumber))
                 address += " " + p.Housenumber;
-            parts.Add(address);
+            if (!string.Equals(address, p.Name, StringComparison.OrdinalIgnoreCase))
+                parts.Add(address);
         }
-        else if (!string.IsNullOrWhiteSpace(p.Name))
-        {
+
+        // Fallback: nur Name vorhanden (z.B. POI ohne Straße)
+        if (parts.Count == 0 && !string.IsNullOrWhiteSpace(p.Name))
             parts.Add(p.Name);
-        }
 
         // Stadt (falls nicht identisch mit Name/Straße)
         string? lastPart = parts.LastOrDefault();
