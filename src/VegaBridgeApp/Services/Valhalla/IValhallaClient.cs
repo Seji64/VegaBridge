@@ -17,7 +17,7 @@ public interface IValhallaClient
     /// <summary>
     /// Request map‑matching (trace_route) from Valhalla.
     /// </summary>
-    /// <param name="request">Route request; set CostingOptions["shape_match"]="map_snap" for map matching.</param>
+    /// <param name="request">Trace request with GPS points and costing; map matching is enabled automatically.</param>
     /// <param name="cancellationToken">Optional cancellation token.</param>
     /// <returns>Result with matched route.</returns>
     Task<Result> GetMapMatchAsync(TraceRequest request, CancellationToken cancellationToken = default);
