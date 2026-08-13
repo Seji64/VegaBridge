@@ -86,15 +86,16 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
     // Smoothing / route-matching state
     private Coordinate? _lastSmoothedPosition;
+    private Coordinate? _lastMapMatchedPosition;
     private readonly List<Coordinate> _gpsBuffer = [];
     private int _gpsTickCount;
 
     private const double OffRouteThresholdDefaultM = 10.0;
-    private const int GpsSmoothingWindow = 3; // simple moving average over last N readings
-    private const int RouteLookaheadWindow = 20; // search only near current route index
+    private const int GpsSmoothingWindow = 3;
+    private const int RouteLookaheadWindow = 20;
     private const int MapMatchBufferLimit = 5;
     private const int MapMatchTickInterval = 3;
-    private const int OffRouteHysteresisCount = 3; // consecutive outliers before flagging
+    private const int OffRouteHysteresisCount = 3;
     private int _offRouteCounter;
 
     private double OffRouteThresholdM => Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
@@ -173,6 +174,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
             _destination = destination;
             _isNavigating = true;
+            _offRouteCounter = 0;
+            _lastMapMatchedPosition = null;
+            _gpsTickCount = 0;
+            _gpsBuffer.Clear();
         }
 
         if (wasNavigating)
@@ -211,6 +216,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _routeCoords = [];
             _maneuvers = [];
             _destination = null;
+            _lastMapMatchedPosition = null;
+            _offRouteCounter = 0;
         }
 
         if (wasNavigating)
@@ -286,6 +293,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
             _isOffRoute = false;
+            _offRouteCounter = 0;
+            _lastMapMatchedPosition = null;
         }
 
         FireCurrentManeuver();
@@ -402,13 +411,17 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _gpsBuffer.Add(new Coordinate(smoothLat, smoothLon, null));
             if (_gpsBuffer.Count > MapMatchBufferLimit) _gpsBuffer.RemoveAt(0);
 
-            // 1. Snap current position to route (still needed for UI/Maneuvers)
+            // Prefer map-matched position for navigation if available, else smoothed GPS
+            double navLat = _lastMapMatchedPosition?.Latitude ?? smoothLat;
+            double navLon = _lastMapMatchedPosition?.Longitude ?? smoothLon;
+
+            // 1. Snap current position to route (for UI/Maneuvers)
             int hintIndex = _currentManeuverIndex > 0
                 ? _maneuvers[_currentManeuverIndex].BeginShapeIndex
                 : 0;
 
             (int snappedIndex, double distanceMeters) = FindNearestRouteIndexWithLookahead(
-                smoothLat, smoothLon, hintIndex, RouteLookaheadWindow);
+                navLat, navLon, hintIndex, RouteLookaheadWindow);
 
             if (snappedIndex < 0) return;
 
@@ -434,7 +447,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                     Log.Information("Destination reached!");
                     gps.ReadingReceived -= OnGpsReading;
                     _isNavigating = false;
-                    // Fire-and-forget: stop GPS and notify sinks outside the lock
                     _ = Task.Run(async () =>
                     {
                         await gps.StopTrackingAsync();
@@ -637,7 +649,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (snappedTrip == null || snappedTrip.Legs == null || snappedTrip.Legs.Count == 0) return;
 
             Coordinate lastSnapped = PolylineEncoder.DecodePolyline6(snappedTrip.Legs[0].Shape).Last();
-            
+
             (int _, double distToRoute) = FindNearestRouteIndexWithLookahead(
                 lastSnapped.Latitude, lastSnapped.Longitude, 0, RouteLookaheadWindow);
 
@@ -661,6 +673,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                         _isOffRoute = false;
                         Log.Information("Back on route (verified by Map-Matching)");
                     }
+                    
+                    // Store map-matched position for navigation
+                    _lastMapMatchedPosition = lastSnapped;
+                    Log.Debug("Map-matched position updated: {Lat}, {Lon}", lastSnapped.Latitude, lastSnapped.Longitude);
                 }
             }
         }
