@@ -164,8 +164,7 @@
                                          OpenOnFocus="true"
                                          Strict="true"
                                          DebounceInterval="300"
-                                         Clearable="true"
-                                         ItemDisabledFunc="@(loc => loc?.Type == "separator")">
+                                         Clearable="true">
                             <BeforeItemsTemplate>
                                 <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_startAuto, pin))"/>
                                 <MudDivider/>
@@ -174,14 +173,7 @@
                                 <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_startAuto, pin))"/>
                             </NoItemsTemplate>
                             <ItemTemplate>
-                                @if (context?.Type == "separator")
-                                {
-                                    <MudDivider Class="my-1"/>
-                                }
-                                else
-                                {
-                                    <MudText Typo="Typo.body2">@context?.Label</MudText>
-                                }
+                                <MudText Typo="Typo.body2">@context?.Label</MudText>
                             </ItemTemplate>
                         </MudAutocomplete>
 
@@ -230,8 +222,7 @@
                                          OpenOnFocus="true"
                                          Strict="true"
                                          DebounceInterval="300"
-                                         Clearable="true"
-                                         ItemDisabledFunc="@((GeoResult loc) => loc?.Type == "separator")">
+                                         Clearable="true">
                             <BeforeItemsTemplate>
                                 <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_destAuto, pin))"/>
                                 <MudDivider/>
@@ -240,14 +231,7 @@
                                 <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_destAuto, pin))"/>
                             </NoItemsTemplate>
                             <ItemTemplate>
-                                @if (context?.Type == "separator")
-                                {
-                                    <MudDivider Class="my-1"/>
-                                }
-                                else
-                                {
-                                    <MudText Typo="Typo.body2">@context?.Label</MudText>
-                                }
+                                <MudText Typo="Typo.body2">@context?.Label</MudText>
                             </ItemTemplate>
                         </MudAutocomplete>
 
