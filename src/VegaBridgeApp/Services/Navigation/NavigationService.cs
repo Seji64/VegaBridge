@@ -87,6 +87,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     // Smoothing / route-matching state
     private Coordinate? _lastSmoothedPosition;
     private Coordinate? _lastMapMatchedPosition;
+    private DateTimeOffset _lastMapMatchTimestamp = DateTimeOffset.MinValue;
     private readonly List<Coordinate> _gpsBuffer = [];
     private int _gpsTickCount;
     private bool _verifyInFlight;
@@ -97,6 +98,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private const int MapMatchTickInterval = 3;
     private const int OffRouteHysteresisCount = 3;
     private const double GpsSmoothingAlpha = 0.4; // EMA: neueste Messung gewinnt 40% Gewicht
+    // A map-matched position is only trusted while it is fresh. If no good
+    // match arrives within this window (network loss, API outage, bad match),
+    // navigation falls back to the live raw GPS instead of freezing on an
+    // old position. Time-based, not distance-based: at 100 km/h the rider
+    // covers ~83 m per 3-tick verification interval, so a distance guard
+    // would wrongly discard fresh matches.
+    private static readonly TimeSpan MaxMapMatchAge = TimeSpan.FromSeconds(10);
     private int _offRouteCounter;
 
     private double OffRouteThresholdM => _offRouteThresholdM;
@@ -178,6 +186,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isNavigating = true;
             _offRouteCounter = 0;
             _lastMapMatchedPosition = null;
+            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _lastSmoothedPosition = null;
             _gpsTickCount = 0;
             _verifyInFlight = false;
@@ -236,6 +245,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _maneuvers = [];
             _destination = null;
             _lastMapMatchedPosition = null;
+            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _offRouteCounter = 0;
             _verifyInFlight = false;
         }
@@ -315,6 +325,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isOffRoute = false;
             _offRouteCounter = 0;
             _lastMapMatchedPosition = null;
+            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _lastSmoothedPosition = null;
             _verifyInFlight = false;
         }
@@ -434,9 +445,18 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _gpsBuffer.Add(new Coordinate(smoothLat, smoothLon, null));
             if (_gpsBuffer.Count > MapMatchBufferLimit) _gpsBuffer.RemoveAt(0);
 
-            // Prefer map-matched position for navigation if available, else smoothed GPS
-            double navLat = _lastMapMatchedPosition?.Latitude ?? smoothLat;
-            double navLon = _lastMapMatchedPosition?.Longitude ?? smoothLon;
+            // Prefer map-matched position for navigation if available and
+            // still fresh. A stale map-match (failed API call, timeout,
+            // network loss, bad match) must never freeze the navigation –
+            // fall back to the raw smoothed position instead.
+            double navLat = smoothLat;
+            double navLon = smoothLon;
+            if (_lastMapMatchedPosition is { } mm &&
+                DateTimeOffset.UtcNow - _lastMapMatchTimestamp < MaxMapMatchAge)
+            {
+                navLat = mm.Latitude;
+                navLon = mm.Longitude;
+            }
 
             // 1. Snap current position to route (for UI/Maneuvers)
             int hintIndex = _currentManeuverIndex > 0
@@ -447,6 +467,35 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 navLat, navLon, hintIndex, RouteLookaheadWindow);
 
             if (snappedIndex < 0) return;
+
+            // Local off-route fallback (works even when the trace_route API is
+            // unreachable – mobile network loss). Hysteresis prevents single
+            // GPS glitches in curves from triggering false alarms.
+            double accuracy = reading.PositionAccuracy;
+            double effectiveThreshold = Math.Max(OffRouteThresholdM, accuracy * 1.5);
+
+            if (distanceMeters > effectiveThreshold)
+            {
+                _offRouteCounter++;
+                if (_offRouteCounter >= OffRouteHysteresisCount && !_isOffRoute)
+                {
+                    _isOffRoute = true;
+                    Log.Warning(
+                        "Off route (local)! {Dist:F1}m from route, accuracy={Accuracy:F1}m, threshold={Threshold:F1}m",
+                        distanceMeters, accuracy, effectiveThreshold);
+                    _ = NotifySinksAsync(s => s.OnOffRouteAsync(
+                        reading.Position.Latitude, reading.Position.Longitude, distanceMeters));
+                }
+
+                // Only once the hysteresis confirms the deviation do we stop
+                // updating maneuver/distances; single GPS glitches in curves
+                // still count towards the hysteresis but keep navigation live.
+                if (_isOffRoute)
+                    return;
+            }
+
+            _offRouteCounter = 0;
+            _isOffRoute = false;
 
             // Periodic Off-Route Verification via API (one in-flight at a time)
             if (_gpsTickCount % MapMatchTickInterval == 0 && !_verifyInFlight)
@@ -706,6 +755,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
                     // Store map-matched position for navigation
                     _lastMapMatchedPosition = lastSnapped;
+                    _lastMapMatchTimestamp = DateTimeOffset.UtcNow;
                     Log.Debug("Map-matched position updated: {Lat}, {Lon}", lastSnapped.Latitude, lastSnapped.Longitude);
                 }
             }
