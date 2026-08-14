@@ -172,6 +172,21 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             }
 
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
+
+            // Diagnostic: maneuver map (shape indices + cumulative distance)
+            // so the exported log shows where each turn actually is. Resolves
+            // "instruction stuck" vs. "turn is further along the route".
+            Log.Information("MANEUVER MAP: {Points} pts, {Km:F2} km", _routeCoords.Count, totalDistanceKm);
+            for (int i = 0; i < _maneuvers.Count; i++)
+            {
+                Maneuver m = _maneuvers[i];
+                double len = _cumulativeDistances.Length > m.EndShapeIndex
+                    ? _cumulativeDistances[m.EndShapeIndex] - _cumulativeDistances[m.BeginShapeIndex]
+                    : 0;
+                Log.Information("  M{Idx}: type={Type} shape[{Begin}..{End}] len={Len:F0}m {Instr}",
+                    i + 1, m.Type, m.BeginShapeIndex, m.EndShapeIndex, len, m.Instruction);
+            }
+
             _destination = destination;
             _isNavigating = true;
             _offRouteCounter = 0;
