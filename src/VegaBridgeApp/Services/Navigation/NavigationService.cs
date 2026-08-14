@@ -526,6 +526,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             int displayIndex = GetDisplayManeuverIndex();
 
             bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
+            // Never regress: GPS jitter near a corner (snap bounces between
+            // two maneuvers) must not move the instruction backwards.
+            if (newManeuverIndex < _currentManeuverIndex)
+                maneuverChanged = false;
 
             if (maneuverChanged)
             {
@@ -724,8 +728,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             TraceRequest request = new()
             {
-                Locations = bufferSnapshot.Select(p => new double[] { p.Latitude, p.Longitude }).ToList(),
-                Costing = "motorcycle"
+                Shape = bufferSnapshot.Select(p => new ShapePoint(p.Longitude, p.Latitude)).ToList(),
+                Costing = "motorcycle",
+                TraceOptions = new TraceOptions { SearchRadius = 50 }
             };
             // shape_match=map_snap set by ValhallaClient.GetMapMatchAsync
 
