@@ -144,7 +144,7 @@ public static class MauiProgram
         // Polly retry with exponential backoff + jitter.
         builder.Services.AddHttpClient(RoadClosureService.HttpClientName, client =>
         {
-            client.BaseAddress = new Uri("https://overpass-api.de/api/");
+            client.BaseAddress = new Uri("https://overpass-api.de/");
             client.Timeout = TimeSpan.FromSeconds(30);
         })
         .AddResilienceHandler("overpass-retry", static builder =>
