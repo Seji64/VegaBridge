@@ -493,7 +493,33 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 _ = VerifyRouteAsync(snappedIndex);
             }
 
-            int newManeuverIndex = FindManeuverForShapeIndex(snappedIndex);
+            // Upcoming action: first maneuver whose begin is at/ahead of the
+            // snap. Valhalla maneuvers describe the action at their BEGIN
+            // (the turn happens at begin_shape_index, e.g. "Turn left onto
+            // Rotebühlstraße" at shape 3, spanning the whole road segment
+            // after it). Picking the span-containing maneuver would keep a
+            // finished turn's instruction on screen for the entire following
+            // segment - the stuck-instruction bug. Show the NEXT action.
+            int newManeuverIndex = -1;
+            if (_maneuvers.Count > 0)
+            {
+                if (snappedIndex >= _maneuvers[^1].EndShapeIndex)
+                {
+                    newManeuverIndex = -1; // destination reached
+                }
+                else
+                {
+                    newManeuverIndex = _maneuvers.Count - 1;
+                    for (int i = 0; i < _maneuvers.Count; i++)
+                    {
+                        if (_maneuvers[i].BeginShapeIndex >= snappedIndex)
+                        {
+                            newManeuverIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
 
             // Arrival: the snapped index is past the last maneuver's end
             // (Valhalla "Arrive" has begin == end == last shape index, which
@@ -640,30 +666,20 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         return exx * exx + eyy * eyy;
     }
 
-    private int FindManeuverForShapeIndex(int routeIndex)
-    {
-        for (int i = 0; i < _maneuvers.Count; i++)
-        {
-                if (routeIndex >= _maneuvers[i].BeginShapeIndex &&
-                    routeIndex < _maneuvers[i].EndShapeIndex)
-            {
-                return i;
-            }
-        }
-        return -1;
-    }
 
     // TODO: integrate Valhalla map‑matching confidence weighting
     private double CalculateDistanceToNextTurn(int currentRouteIndex)
     {
         if (_currentManeuverIndex >= _maneuvers.Count) return 0;
 
-        int targetIndex = _maneuvers[_currentManeuverIndex].EndShapeIndex;
+        // Distance to the NEXT action = the current maneuver's begin (the
+        // turn happens at begin_shape_index), clamped against overshoot.
+        int targetIndex = _maneuvers[_currentManeuverIndex].BeginShapeIndex;
         if (targetIndex >= _routeCoords.Count)
             targetIndex = _routeCoords.Count - 1;
 
         if (currentRouteIndex >= _cumulativeDistances.Length - 1) return 0;
-        return _cumulativeDistances[targetIndex] - _cumulativeDistances[currentRouteIndex];
+        return Math.Max(0, _cumulativeDistances[targetIndex] - _cumulativeDistances[currentRouteIndex]);
     }
 
     private (double RemainingKm, double RemainingMin) CalculateRemaining(int currentRouteIndex)
