@@ -77,7 +77,7 @@ public static class MauiProgram
             .MinimumLevel.Debug()
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
             .MinimumLevel.Override("System", LogEventLevel.Warning)
-            .WriteTo.Sink(DebugLogSink.Instance)
+            //.WriteTo.Sink(DebugLogSink.Instance)
             .CreateLogger();
 
         builder.Logging.ClearProviders();

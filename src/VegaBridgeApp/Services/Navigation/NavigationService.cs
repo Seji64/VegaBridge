@@ -40,8 +40,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     }
 
     /// <summary>
-    /// of a sink. No-op if sink was not registered.
-    /// </summary>
+    /// Removes a sink. No-op if the sink was not registered.
     public void RemoveSink(INavigationSink sink)
     {
         lock (_sinks)
@@ -97,7 +96,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private const double GpsSmoothingAlpha = 0.4; // EMA: neueste Messung gewinnt 40% Gewicht
     private int _offRouteCounter;
 
-    private double OffRouteThresholdM => _offRouteThresholdM;
     private double _offRouteThresholdM = OffRouteThresholdDefaultM;
 
     // ── Properties ───────────────────────────────────────────────────────
@@ -429,7 +427,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             if (!_isNavigating || _routeCoords.Count < 2) return;
 
-            // 0. Simple moving average smoothing over the last few raw readings.
+            // 0. Exponential moving average (EMA): newest reading gets 40% weight.
             double smoothLat = reading.Position.Latitude;
             double smoothLon = reading.Position.Longitude;
             if (_lastSmoothedPosition != null)
@@ -461,8 +459,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             // unreachable – mobile network loss). Hysteresis prevents single
             // GPS glitches in curves from triggering false alarms.
             double accuracy = reading.PositionAccuracy;
-            double effectiveThreshold = Math.Max(OffRouteThresholdM, accuracy * 1.5);
-
+            double effectiveThreshold = Math.Max(_offRouteThresholdM, accuracy * 1.5);
             if (distanceMeters > effectiveThreshold)
             {
                 _offRouteCounter++;
@@ -490,8 +487,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (_gpsTickCount % MapMatchTickInterval == 0 && !_verifyInFlight)
             {
                 _verifyInFlight = true;
-                _ = VerifyRouteAsync(snappedIndex);
+                _ = VerifyRouteAsync();
             }
+
 
             // Upcoming action: first maneuver whose begin is at/ahead of the
             // snap. Valhalla maneuvers describe the action at their BEGIN
@@ -675,9 +673,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         if (displayIndex < 0 || displayIndex >= _maneuvers.Count) return 0;
 
 
-        // Distance to the NEXT action = the current maneuver's begin (the
+        // Distance to the DISPLAYED action = that maneuver's begin (the
         // turn happens at begin_shape_index), clamped against overshoot.
-        int targetIndex = _maneuvers[_currentManeuverIndex].BeginShapeIndex;
+        int targetIndex = _maneuvers[displayIndex].BeginShapeIndex;
         if (targetIndex >= _routeCoords.Count)
             targetIndex = _routeCoords.Count - 1;
 
@@ -700,7 +698,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         return (remainingKm, remainingMin);
     }
 
-    private async Task VerifyRouteAsync(int hintIndex)
+    private async Task VerifyRouteAsync()
     {
         try
         {
@@ -726,8 +724,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (!result.IsSuccess || result.Response == null) return;
 
             RouteResponse response = result.Response;
-            var snappedTrip = response.Trip;
-            if (snappedTrip == null || snappedTrip.Legs == null || snappedTrip.Legs.Count == 0) return;
+            Trip? snappedTrip = response.Trip;
+            if (snappedTrip?.Legs == null || snappedTrip.Legs.Count == 0) return;
 
             Coordinate lastSnapped = PolylineEncoder.DecodePolyline6(snappedTrip.Legs[0].Shape).Last();
 
@@ -738,7 +736,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             {
                 if (!_isNavigating) return;
 
-                if (distToRoute > OffRouteThresholdM)
+                if (distToRoute > _offRouteThresholdM)
                 {
                     _offRouteCounter++;
                     if (_offRouteCounter >= OffRouteHysteresisCount && !_isOffRoute)
