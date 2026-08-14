@@ -1023,54 +1023,54 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         // ── Markers for Start, Waypoints and Destination ──
         if (response.Trip.Locations is { Count: > 0 })
         {
-            // Keep the first two markers (GPS position and heading arrow)
-            // Clear all markers from index 2 onwards to remove old route pins
-            if (map.MarkersList.Count > 1)
+            // Keep the GPS position marker (index 0), clear all others so old
+            // route pins are removed, then rebuild the route pins below.
+            // NOTE: the pin rebuild must NOT be gated on MarkersList.Count –
+            // when only the GPS marker exists (Count == 1) the route pins
+            // would silently never be drawn.
+            List<Shape> gpsMarkers = [.. map.MarkersList.Take(1)];
+            map.MarkersList.Clear();
+            StateHasChanged();
+            foreach (Shape m in gpsMarkers) map.MarkersList.Add(m);
+
+            List<Location> locations = response.Trip.Locations;
+
+            // Trip order matches CalculateRoute: non-null waypoints only.
+            List<WaypointViewModel> routeWaypoints = _waypoints.Where(w => w.Location != null).ToList();
+            _waypointPins.Clear();
+
+            for (int i = 0; i < locations.Count; i++)
             {
-                List<Shape> gpsMarkers = [.. map.MarkersList.Take(1)];
-                map.MarkersList.Clear();
-                StateHasChanged();
-                foreach (Shape m in gpsMarkers) map.MarkersList.Add(m);
+                Location loc = locations[i];
+                OpenLayers.Blazor.Coordinate coord = new(loc.Lon, loc.Lat);
 
-                List<Location> locations = response.Trip.Locations;
-
-                // Trip order matches CalculateRoute: non-null waypoints only.
-                List<WaypointViewModel> routeWaypoints = _waypoints.Where(w => w.Location != null).ToList();
-                _waypointPins.Clear();
-
-                for (int i = 0; i < locations.Count; i++)
+                // Color logic: Green start, blue waypoints, red destination.
+                PinColor color = i switch
                 {
-                    Location loc = locations[i];
-                    OpenLayers.Blazor.Coordinate coord = new(loc.Lon, loc.Lat);
+                    0 => PinColor.Green,
+                    _ when i == locations.Count - 1 => PinColor.Red,
+                    _ => PinColor.Blue
+                };
 
-                    // Color logic: Green start, blue waypoints, red destination.
-                    PinColor color = i switch
-                    {
-                        0 => PinColor.Green,
-                        _ when i == locations.Count - 1 => PinColor.Red,
-                        _ => PinColor.Blue
-                    };
+                Marker marker = new(MarkerType.MarkerPin, coord, "", color);
+                map.MarkersList.Add(marker);
 
-                    Marker marker = new(MarkerType.MarkerPin, coord, "", color);
-                    map.MarkersList.Add(marker);
-
-                    // Middle locations are waypoints – keep them tappable (move/delete).
-                    if (i > 0 && i < locations.Count - 1 && i - 1 < routeWaypoints.Count)
-                    {
-                        _waypointPins.Add((routeWaypoints[i - 1], marker));
-                    }
+                // Middle locations are waypoints – keep them tappable (move/delete).
+                if (i > 0 && i < locations.Count - 1 && i - 1 < routeWaypoints.Count)
+                {
+                    _waypointPins.Add((routeWaypoints[i - 1], marker));
                 }
             }
+        }
 
-            Summary? summary = response.Trip?.Summary;
-            if (summary is { MinLat: not null, MaxLat: not null, MinLon: not null, MaxLon: not null })
-            {
-                Extent extent = new(
-                    summary.MinLon.Value, summary.MinLat.Value,
-                    summary.MaxLon.Value, summary.MaxLat.Value);
+        Summary? summary = response.Trip?.Summary;
+        if (summary is { MinLat: not null, MaxLat: not null, MinLon: not null, MaxLon: not null })
+        {
+            Extent extent = new(
+                summary.MinLon.Value, summary.MinLat.Value,
+                summary.MaxLon.Value, summary.MaxLat.Value);
 
-                await map.SetVisibleExtent(extent);
-            }
+            await map.SetVisibleExtent(extent);
         }
     }
 
