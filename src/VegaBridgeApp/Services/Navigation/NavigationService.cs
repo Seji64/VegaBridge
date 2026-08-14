@@ -97,6 +97,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private const int MapMatchTickInterval = 3;
     private const int OffRouteHysteresisCount = 3;
     private const double GpsSmoothingAlpha = 0.4; // EMA: neueste Messung gewinnt 40% Gewicht
+    // Max drift between a map-matched position and the raw GPS fix before the
+    // matched position is considered stale and discarded (prevents the
+    // navigation freezing on an old position when the trace_route call fails).
+    private const double MaxMapMatchDriftM = 100.0;
     private int _offRouteCounter;
 
     private double OffRouteThresholdM => _offRouteThresholdM;
@@ -434,9 +438,27 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _gpsBuffer.Add(new Coordinate(smoothLat, smoothLon, null));
             if (_gpsBuffer.Count > MapMatchBufferLimit) _gpsBuffer.RemoveAt(0);
 
-            // Prefer map-matched position for navigation if available, else smoothed GPS
-            double navLat = _lastMapMatchedPosition?.Latitude ?? smoothLat;
-            double navLon = _lastMapMatchedPosition?.Longitude ?? smoothLon;
+            // Prefer map-matched position for navigation if available and
+            // still plausibly near the current raw GPS fix. A stale map-match
+            // (failed API call, timeout, network loss) must never freeze the
+            // navigation – fall back to the raw smoothed position instead.
+            double navLat = smoothLat;
+            double navLon = smoothLon;
+            if (_lastMapMatchedPosition is { } mm)
+            {
+                double driftM = GeoMath.DistanceMeters(
+                    mm.Latitude, mm.Longitude, smoothLat, smoothLon);
+                if (driftM < MaxMapMatchDriftM)
+                {
+                    navLat = mm.Latitude;
+                    navLon = mm.Longitude;
+                }
+                else
+                {
+                    Log.Debug("Discarding stale map-matched position ({Drift:F0}m drift)", driftM);
+                    _lastMapMatchedPosition = null;
+                }
+            }
 
             // 1. Snap current position to route (for UI/Maneuvers)
             int hintIndex = _currentManeuverIndex > 0
@@ -447,6 +469,35 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 navLat, navLon, hintIndex, RouteLookaheadWindow);
 
             if (snappedIndex < 0) return;
+
+            // Local off-route fallback (works even when the trace_route API is
+            // unreachable – mobile network loss). Hysteresis prevents single
+            // GPS glitches in curves from triggering false alarms.
+            double accuracy = reading.PositionAccuracy;
+            double effectiveThreshold = Math.Max(OffRouteThresholdM, accuracy * 1.5);
+
+            if (distanceMeters > effectiveThreshold)
+            {
+                _offRouteCounter++;
+                if (_offRouteCounter >= OffRouteHysteresisCount && !_isOffRoute)
+                {
+                    _isOffRoute = true;
+                    Log.Warning(
+                        "Off route (local)! {Dist:F1}m from route, accuracy={Accuracy:F1}m, threshold={Threshold:F1}m",
+                        distanceMeters, accuracy, effectiveThreshold);
+                    _ = NotifySinksAsync(s => s.OnOffRouteAsync(
+                        reading.Position.Latitude, reading.Position.Longitude, distanceMeters));
+                }
+
+                // Only once the hysteresis confirms the deviation do we stop
+                // updating maneuver/distances; single GPS glitches in curves
+                // still count towards the hysteresis but keep navigation live.
+                if (_isOffRoute)
+                    return;
+            }
+
+            _offRouteCounter = 0;
+            _isOffRoute = false;
 
             // Periodic Off-Route Verification via API (one in-flight at a time)
             if (_gpsTickCount % MapMatchTickInterval == 0 && !_verifyInFlight)
