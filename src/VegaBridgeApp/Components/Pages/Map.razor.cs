@@ -11,7 +11,6 @@ using Serilog;
 using Shiny.Locations;
 using VegaBridgeApp.Models.Utils;
 using VegaBridgeApp.Services.Navigation;
-using VegaBridgeApp.Services.Debug;
 using VegaBridgeApp.Utils;
 using Coordinate = VegaBridgeApp.Models.Valhalla.Coordinate;
 using Location = VegaBridgeApp.Models.Valhalla.Location;
@@ -43,6 +42,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private RouteResponse? _currentRouteResponse;
     private string? _savedRouteId;
     private bool _mapLoaded = false;
+    // Remember the user's zoom level so recalculating a route or a reroute
+    // does not reset the view. Only user zooms after the first route display
+    // are remembered (the initial Zoom="8" on first load must not win).
+    private double? _savedZoom;
+    private bool _hasShownRoute;
 
     // ── Track whether we've created the initial GPS marker ──
     private bool _gpsMarkerInitialized;
@@ -278,6 +282,17 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     {
         await RemoveWaypointAsync(index);
         Snackbar.Add(L["WaypointRemoved"], Severity.Info);
+    }
+
+    /// <summary>
+    /// Map zoom changed (user gesture or programmatic). Remember the level so
+    /// route recalculations / reroutes keep the user's view. The initial
+    /// Zoom="8" from the component markup is ignored until a route was shown.
+    /// </summary>
+    private void OnMapZoomChanged(double zoom)
+    {
+        if (!_hasShownRoute) return;
+        _savedZoom = zoom;
     }
 
     /// <summary>
@@ -856,6 +871,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 NavService.PrepareNavigationData(_currentRouteResponse.Trip.Legs);
             await NavService.StartNavigation(mergedShape, allManeuvers, totalKm, totalMin, CreateLocation(_destinationLocation));
             Snackbar.Add(L["NavigationStarted"], Severity.Success);
+
+            // Nav-app behavior: zoom in on the current position and rotate
+            // the map so the travel direction points up.
+            await EnterNavigationViewAsync();
         }
         catch (Exception ex)
         {
@@ -863,51 +882,78 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
     }
 
+    // ── Navigation view: zoom in + rotate towards travel direction ──────
+
+    private const double NavigationViewZoom = 16;
+
+    private async Task EnterNavigationViewAsync()
+    {
+        OpenStreetMap? map = _map;
+        GpsReading? reading = Gps.LastReading;
+        if (map == null || reading == null) return;
+
+        double lat = reading.Position.Latitude;
+        double lon = reading.Position.Longitude;
+
+        await map.SetCenter(new OpenLayers.Blazor.Coordinate(lon, lat));
+        await map.SetZoom(NavigationViewZoom);
+
+        // Heading: prefer GPS course; fall back to the bearing towards the
+        // next route point (GPS course is often 0/unset at low speed or on
+        // some simulators).
+        double heading = reading.Heading > 0 ? reading.Heading : 0;
+        if (heading <= 0)
+        {
+            double? routeBearing = BearingToNextRoutePoint(lat, lon);
+            if (routeBearing is { } bearing)
+                heading = bearing;
+        }
+
+        if (heading > 0)
+        {
+            // OpenLayers: positive rotation = clockwise, radians.
+            map.Rotation = GeoMath.ToRad(heading);
+        }
+    }
+
+    /// <summary>
+    /// Bearing from the given position towards the first route point that is
+    /// at least ~30 m ahead. Returns null when no route is loaded.
+    /// </summary>
+    private double? BearingToNextRoutePoint(double lat, double lon)
+    {
+        if (_currentRouteResponse?.Trip?.Legs is not { Count: > 0 } legs) return null;
+
+        List<Coordinate> coords = PolylineEncoder.DecodePolyline6(legs[0].Shape);
+        foreach (Coordinate c in coords)
+        {
+            if (GeoMath.DistanceMeters(lat, lon, c.Latitude, c.Longitude) < 30)
+                continue;
+
+            // Initial bearing (great-circle) from position to the route point.
+            double phi1 = GeoMath.ToRad(lat);
+            double phi2 = GeoMath.ToRad(c.Latitude);
+            double dLon = GeoMath.ToRad(c.Longitude - lon);
+            double y = Math.Sin(dLon) * Math.Cos(phi2);
+            double x = Math.Cos(phi1) * Math.Sin(phi2) -
+                       Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
+            double bearingDeg = (GeoMath.ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
+            return bearingDeg;
+        }
+        return null;
+    }
+
     private async Task ExitNavigation()
     {
         await NavService.StopNavigation();
         await ClearGpsMarkersAsync();
+        if (_map != null)
+        {
+            // Back to north-up view after navigation.
+            _map.Rotation = 0;
+        }
         Snackbar.Add(L["NavigationStopped"], Severity.Info);
     }
-
-    // ── Debug: log export (console output is not visible in MAUI) ────────
-    // The DebugLogSink collects every Serilog line; the buttons write it to
-    // a file and open the system share sheet.
-
-    private bool ShowDevTools => true;
-
-    private async Task ExportDebugLog()
-    {
-        string log = DebugLogSink.Instance.GetLog();
-        if (string.IsNullOrWhiteSpace(log))
-        {
-            Snackbar.Add("Log ist leer – erst navigieren/fahren.", Severity.Info);
-            return;
-        }
-
-        try
-        {
-            string path = Path.Combine(FileSystem.AppDataDirectory, $"nav-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
-            await File.WriteAllTextAsync(path, log);
-            await Share.Default.RequestAsync(new ShareFileRequest
-            {
-                Title = "Nav-Log",
-                File = new ShareFile(path)
-            });
-            Log.Information("Debug log exported: {Path} ({Bytes} bytes)", path, log.Length);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add("Export-Fehler: " + ex.Message, Severity.Error);
-        }
-    }
-
-    private void ClearDebugLog()
-    {
-        DebugLogSink.Instance.Clear();
-        Snackbar.Add("Log gelöscht", Severity.Info);
-    }
-
 
     private async Task SkipWaypoint()
     {
@@ -1106,15 +1152,24 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         Summary? summary = response.Trip?.Summary;
         if (summary is { MinLat: not null, MaxLat: not null, MinLon: not null, MaxLon: not null })
         {
-            Extent extent = new(
-                summary.MinLon.Value, summary.MinLat.Value,
-                summary.MaxLon.Value, summary.MaxLat.Value);
+            if (_savedZoom is { } zoom && _hasShownRoute)
+            {
+                // User has zoomed in before: keep their view instead of
+                // resetting to the route extent on every (re)calculation.
+                await map.SetZoom(zoom);
+            }
+            else
+            {
+                // First display of a route: fit the map to the route extent.
+                Extent extent = new(
+                    summary.MinLon.Value, summary.MinLat.Value,
+                    summary.MaxLon.Value, summary.MaxLat.Value);
 
-            await map.SetVisibleExtent(extent);
+                await map.SetVisibleExtent(extent);
+                _hasShownRoute = true;
+            }
         }
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────
 
     private static string FormatCoordinate(double? lat, double? lon)
     {

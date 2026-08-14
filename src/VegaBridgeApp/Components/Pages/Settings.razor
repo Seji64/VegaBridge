@@ -5,7 +5,7 @@
 @inject IGeocodingService GeocodingService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-<MudContainer MaxWidth="MaxWidth.Medium" Class="px-3 pt-2 pb-6">
+<MudContainer MaxWidth="MaxWidth.Medium" Class="px-3 pt-2 pb-16">
 
     <MudStack Spacing="3">
         
@@ -42,7 +42,7 @@
                             Disabled="!IsConnected"
                             StartIcon="@Icons.Material.Filled.Send"
                             FullWidth="true"
-                            OnClick='@(async () => await BleManager.SendCommandAsync(Commands.MSG, "whatsapp", "Test from VegaBridge", "WhatsApp"))'>
+                            OnClick='@(async () => await BleManager.SendCommandAsync(Commands.MSG, "whatsapp", "Test from VegaBridge", "VegaBridge"))'>
                             Test MSG
                         </MudButton>
 
@@ -56,47 +56,7 @@
                             OnClick="@SendNavigationTestSequenceAsync">
                             Nav Test Sequence (Standard)
                         </MudButton> -->
-
-                        <MudButton
-                            Variant="Variant.Outlined"
-                            Color="Color.Primary"
-                            Size="Size.Small"
-                            Disabled="!IsConnected"
-                            StartIcon="@Icons.Material.Filled.Navigation"
-                            FullWidth="true"
-                            OnClick="@SendNavigationTestSequenceAsync">
-                            Nav Test Sequence (rapid)
-                        </MudButton>
-
-                        <MudSwitch
-                            T="bool"
-                            Color="Color.Primary"
-                            Value="@Gui1ResponseEnabled"
-                            ValueChanged="(bool v) => { Gui1ResponseEnabled = v; StateHasChanged(); }">
-                            GUI1-Response (A/B Test)
-                        </MudSwitch>
-
-                        <MudButton
-                            Variant="Variant.Outlined"
-                            Color="Color.Secondary"
-                            Size="Size.Small"
-                            Disabled="!IsConnected"
-                            StartIcon="@Icons.Material.Filled.Download"
-                            FullWidth="true"
-                            OnClick="@ExportBleLogAsync">
-                            Export BLE Log
-                        </MudButton>
-
-                        <MudButton
-                            Variant="Variant.Outlined"
-                            Color="Color.Error"
-                            Size="Size.Small"
-                            Disabled="!IsConnected"
-                            StartIcon="@Icons.Material.Filled.ClearAll"
-                            FullWidth="true"
-                            OnClick="@ClearBleLog">
-                            Clear BLE Log
-                        </MudButton>
+                        
                     </MudStack>
 
                     <MudDivider />
@@ -203,6 +163,51 @@
                     </MudChip>
                 }
             </MudCardContent>
+        </MudCard>
+
+        <!-- ── Debug Logging ─────────────────────────────────────────────── -->
+        <MudCard Elevation="2" Style="border-radius: 16px;">
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2" Class="mb-3">@L["DebugSection"]</MudText>
+
+                <MudSwitch T="bool"
+                           Color="Color.Secondary"
+                           Value="@DebugLoggingEnabled"
+                           ValueChanged="(bool v) => SetDebugLogging(v)"
+                           Class="mb-3">
+                    @L["DebugLoggingToggle"]
+                </MudSwitch>
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3 pb-2">
+                    @L["DebugLoggingHelp"]
+                </MudText>
+
+                <MudStack Spacing="2">
+                    <MudButton
+                        Variant="Variant.Outlined"
+                        Color="Color.Secondary"
+                        Size="Size.Small"
+                        StartIcon="@Icons.Material.Filled.FileDownload"
+                        FullWidth="true"
+                        Disabled="!DebugLoggingEnabled"
+                        OnClick="@ExportDebugLog">
+                        @L["DebugExportLog"]
+                    </MudButton>
+
+                    <MudButton
+                        Variant="Variant.Outlined"
+                        Color="Color.Error"
+                        Size="Size.Small"
+                        StartIcon="@Icons.Material.Filled.ClearAll"
+                        FullWidth="true"
+                        Disabled="!DebugLoggingEnabled"
+                        OnClick="@ClearDebugLog">
+                        @L["DebugClearLog"]
+                    </MudButton>
+                    
+                </MudStack>
+            </MudCardContent>
+            
         </MudCard>
 
     </MudStack>

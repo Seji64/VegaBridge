@@ -8,6 +8,7 @@ using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Services.BLE.Plugins;
 using VegaBridgeApp.Models.BLE.MvAgusta;
+using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Components.Pages;
 
@@ -28,19 +29,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private string? StatusMessage { get; set; }
     private bool IsConnected => BleManager.IsAnyDeviceConnected;
     private bool IsScanning => ConnectionState == BleConnectionState.Scanning;
-
-    /// <summary>
-    /// A/B test switch for the GUI1-echo response (Settings page).
-    /// Default OFF – official capture shows the phone never writes GUI1.
-    /// Backed by the static MvAgustaBlePlugin.Gui1ResponseEnabled flag,
-    /// so it takes effect immediately, even mid-connection.
-    /// </summary>
-    private bool Gui1ResponseEnabled
-    {
-        get => MvAgustaBlePlugin.Gui1ResponseEnabled;
-        set => MvAgustaBlePlugin.Gui1ResponseEnabled = value;
-    }
-
+    
     private double _offRouteThreshold = 10;
     private GeoResult? _homeLocation;
     
@@ -176,98 +165,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         StatusMessage = L["BLEDisconnected"];
         StateHasChanged();
     }
-
-    /// <summary>
-    /// Quick test sender for a complete navigation sequence.
-    /// Uses the capture-proven frame formats (DEST/REM/NAVI/SM/SM1/FINISH).
-    /// No GUI1 send needed – the GUI1 response happens automatically in the plugin
-    /// as a reply to every bike notification (write with response).
-    /// Rapid-fire: only short write pauses (150 ms), no 5–10 s wait times.
-    /// </summary>
-    private async Task SendNavigationTestSequenceAsync()
-    {
-        if (!IsConnected) return;
-
-        BleCommandLogger.ClearLog();
-        BleCommandLogger.Log("=== TEST SEQUENCE START (Standard, rapid-fire) ===");
-        StatusMessage = "Sending standard nav test sequence...";
-        StateHasChanged();
-
-        // Phase 1: Navigationsstart (DEST/REM – capture-proven Format)
-        // DEST|""|lon|lat – Feld 1 (Adresse) LEER!
-        await BleManager.SendCommandAsync(Commands.DEST, "", "9.258020", "48.775730");
-        await Task.Delay(150);
-        // REM|""|<meter>|"" – trailing empty field
-        await BleManager.SendCommandAsync(Commands.REM, "", "10500", "");
-        await Task.Delay(150);
-
-        // Phase 1: Links abbiegen – NAVI|icon|guide|intersectionName
-        await BleManager.SendCommandAsync(Commands.NAVI, "turn-left", "Links abbiegen\nHauptstraße", "Hauptstraße");
-        await Task.Delay(150);
-        // SM|0|<remaining>|<distToTurn>
-        await BleManager.SendCommandAsync(Commands.SM, "0", "10500", "250");
-        await Task.Delay(150);
-        // SM1|902|<countdown>| – Links-Countdown
-        await BleManager.SendCommandAsync(Commands.SM1, "902", "7", "");
-        await Task.Delay(150);
-
-        StatusMessage = "Test: Links abbiegen gesendet...";
-        StateHasChanged();
-
-        // Phase 2: Rechts abbiegen
-        await BleManager.SendCommandAsync(Commands.NAVI, "turn-right", "Rechts abbiegen\nNebenstraße", "Nebenstraße");
-        await Task.Delay(150);
-        await BleManager.SendCommandAsync(Commands.SM, "0", "10200", "180");
-        await Task.Delay(150);
-        // SM1|901|<countdown>| – Rechts-Countdown
-        await BleManager.SendCommandAsync(Commands.SM1, "901", "6", "");
-        await Task.Delay(150);
-
-        StatusMessage = "Test: Rechts abbiegen gesendet...";
-        StateHasChanged();
-
-        // Ende: Navigation beenden
-        await BleManager.SendCommandAsync(Commands.FINISH, "", "", "");
-        BleCommandLogger.Log("=== TEST SEQUENCE END (Standard) ===");
-        StatusMessage = "Test sequence complete.";
-        StateHasChanged();
-    }
-
-    private async Task ExportBleLogAsync()
-    {
-        IReadOnlyList<string> lines = BleCommandLogger.GetLog();
-        if (lines.Count == 0)
-        {
-            Snackbar.Add("BLE log is empty.", Severity.Info);
-            return;
-        }
-
-        string content = string.Join('\n', lines);
-        byte[] bytes = Encoding.UTF8.GetBytes(content);
-        using MemoryStream stream = new(bytes);
-
-        string filename = $"ble_log_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.txt";
-        FileSaverResult saveResult = await FileSaver.Default.SaveAsync(filename, stream, CancellationToken.None);
-
-        if (saveResult.IsSuccessful)
-        {
-            Snackbar.Add($"BLE log saved ({lines.Count} lines).", Severity.Success);
-        }
-        else
-        {
-            Snackbar.Add(saveResult.Exception?.Message ?? "Save cancelled.", Severity.Error);
-        }
-
-        BleCommandLogger.ClearLog();
-    }
-
-    private void ClearBleLog()
-    {
-        BleCommandLogger.ClearLog();
-        Snackbar.Add("BLE log cleared.", Severity.Info);
-    }
-
-
+    
     private async Task HandleScanButtonClick()
     {
         if (IsScanning)
@@ -306,6 +204,61 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             Preferences.Remove("home_lon");
         }
         StateHasChanged();
+    }
+
+    // ── Debug logging (collects in-memory while enabled) ────────────────
+
+    private bool DebugLoggingEnabled => DebugLogSink.Instance.IsEnabled;
+
+    private void SetDebugLogging(bool enabled)
+    {
+        DebugLogSink.Instance.SetEnabled(enabled);
+        if (enabled)
+        {
+            DebugLogSink.Instance.Clear(); // start a fresh capture
+            Log.Information("Debug logging started (from Settings)");
+        }
+        else
+        {
+            Log.Information("Debug logging stopped (from Settings)");
+        }
+        Snackbar.Add(
+            enabled ? L["DebugLoggingOn"] : L["DebugLoggingOff"],
+            enabled ? Severity.Success : Severity.Info);
+        StateHasChanged();
+    }
+
+    private async Task ExportDebugLog()
+    {
+        string log = DebugLogSink.Instance.GetLog();
+        if (string.IsNullOrWhiteSpace(log))
+        {
+            Snackbar.Add(L["DebugLogEmpty"], Severity.Info);
+            return;
+        }
+
+        try
+        {
+            string path = Path.Combine(FileSystem.AppDataDirectory, $"nav-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+            await File.WriteAllTextAsync(path, log);
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = "Nav-Log",
+                File = new ShareFile(path)
+            });
+            Log.Information("Debug log exported: {Path} ({Bytes} bytes)", path, log.Length);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Debug log export failed");
+            Snackbar.Add(string.Format(L["DebugExportError"], ex.Message), Severity.Error);
+        }
+    }
+
+    private void ClearDebugLog()
+    {
+        DebugLogSink.Instance.Clear();
+        Snackbar.Add(L["DebugLogCleared"], Severity.Info);
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────

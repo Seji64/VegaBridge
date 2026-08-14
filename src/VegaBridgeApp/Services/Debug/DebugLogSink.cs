@@ -9,6 +9,8 @@ namespace VegaBridgeApp.Services.Debug;
 /// it can be exported from the UI. Console output is not reliably visible in
 /// MAUI (device/simulator), so this is the primary way to inspect logs while
 /// testing. Capped – the oldest lines are dropped first on long rides.
+/// Collecting only runs while <see cref="IsEnabled"/> is true, so the app
+/// does not pay for buffering during normal use.
 /// </summary>
 public sealed class DebugLogSink : ILogEventSink
 {
@@ -19,8 +21,28 @@ public sealed class DebugLogSink : ILogEventSink
     private readonly object _lock = new();
     private const int MaxChars = 200_000;
 
+    /// <summary>
+    /// When false, Emit discards events immediately (no buffering cost).
+    /// Persisted in Preferences under "debug_logging_enabled".
+    /// </summary>
+    public bool IsEnabled { get; private set; } =
+        Preferences.Default.Get("debug_logging_enabled", false);
+
+    public void SetEnabled(bool enabled)
+    {
+        lock (_lock)
+        {
+            IsEnabled = enabled;
+            if (!enabled)
+                _sb.Clear();
+        }
+        Preferences.Default.Set("debug_logging_enabled", enabled);
+    }
+
     public void Emit(LogEvent logEvent)
     {
+        if (!IsEnabled) return;
+
         string line = $"{logEvent.Timestamp:HH:mm:ss.fff} {logEvent.Level}: {logEvent.RenderMessage()}";
         lock (_lock)
         {
