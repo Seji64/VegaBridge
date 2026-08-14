@@ -65,6 +65,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private NavigationStatus? _navStatus;
     private double _navProgress;
 
+    // ── Navigation follow-view state (map tracks the position) ──
+    private DateTime _lastNavFollowUpdate = DateTime.MinValue;
+    private double _lastFollowLat;
+    private double _lastFollowLon;
+    private double _lastFollowHeading = -1;
+
     protected override void OnInitialized()
     {
         // Subscribe to GPS position updates
@@ -438,15 +444,21 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     public async Task OnFinishAsync()
     {
         if (_disposed) return;
-        Snackbar.Add(L["DestinationReached"], Severity.Success);
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() =>
+        {
+            Snackbar.Add(L["DestinationReached"], Severity.Success);
+            StateHasChanged();
+        });
     }
 
     public async Task OnCancelAsync()
     {
         if (_disposed) return;
-        Snackbar.Add(L["NavigationStopped"], Severity.Info);
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() =>
+        {
+            Snackbar.Add(L["NavigationStopped"], Severity.Info);
+            StateHasChanged();
+        });
     }
 
     public async Task OnStartAsync(NavigationStartInfo start)
@@ -460,15 +472,26 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (_disposed || _destinationLocation == null || _isLoading) return;
         if ((DateTime.UtcNow - _lastRerouteTime).TotalSeconds < 30) return;
         _lastRerouteTime = DateTime.UtcNow;
-        Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
-        await RerouteAsync(latitude, longitude);
+
+        // Sink callbacks arrive on the GPS thread – all UI work (snackbar,
+        // reroute dialog flow) must run on the Blazor dispatcher.
+        await InvokeAsync(async () =>
+        {
+            Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
+            await RerouteAsync(latitude, longitude);
+        });
     }
 
     public async Task OnRouteUpdatedAsync(RouteResponse response)
     {
         if (_disposed) return;
         _currentRouteResponse = response;
-        await ShowRouteOnMap(response);
+
+        // Sink callbacks arrive on the GPS thread; ShowRouteOnMap touches
+        // MarkersList and calls StateHasChanged, so it must run on the
+        // Blazor dispatcher. Without this the reroute map update throws
+        // and the route disappears from the map.
+        await InvokeAsync(async () => await ShowRouteOnMap(response));
     }
 
     #endregion
@@ -509,10 +532,78 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             await UpdateBreadcrumbAsync(force: force);
 
+            // During navigation, follow the position: keep the map centered on
+            // the current fix and rotate towards the travel direction, like a
+            // navigation app. Throttled – see FollowNavigationViewAsync.
+            if (NavService.IsNavigating)
+            {
+                await FollowNavigationViewAsync(reading);
+            }
+
         }
         finally
         {
             Interlocked.Exchange(ref _markerUpdating, 0);
+        }
+    }
+
+    // ── Navigation follow view: map tracks the rider ─────────────────────
+
+    private const double NavFollowIntervalSec = 1.0;
+    private const double NavFollowMinMoveM = 10.0;
+    private const double NavFollowMinHeadingDelta = 8.0; // degrees
+
+    /// <summary>
+    /// Centers the map on the current GPS fix and rotates it towards the
+    /// travel direction while navigating. Throttled to ~1 Hz and only when
+    /// the position moved enough, so the map does not jitter on every fix.
+    /// </summary>
+    private async Task FollowNavigationViewAsync(GpsReading reading)
+    {
+        OpenStreetMap? map = _map;
+        if (map == null) return;
+
+        double lat = reading.Position.Latitude;
+        double lon = reading.Position.Longitude;
+        DateTime now = DateTime.UtcNow;
+
+        bool movedEnough = _lastNavFollowUpdate == DateTime.MinValue ||
+                           GeoMath.DistanceMeters(_lastFollowLat, _lastFollowLon, lat, lon) > NavFollowMinMoveM;
+        if (!movedEnough || (now - _lastNavFollowUpdate).TotalSeconds < NavFollowIntervalSec)
+            return;
+
+        _lastNavFollowUpdate = now;
+        _lastFollowLat = lat;
+        _lastFollowLon = lon;
+
+        await map.SetCenter(new OpenLayers.Blazor.Coordinate(lon, lat));
+
+        // Heading while moving: GPS course first, then the ACTUAL movement
+        // direction from the breadcrumb trail. The route bearing is only a
+        // last resort – after a reroute the next route point can lie behind
+        // the rider (route leads back to the destination) while the rider is
+        // still going straight, and rotating by the route would flip the map
+        // 180° against the real travel direction.
+        double heading = reading.Heading > 0 ? reading.Heading : 0;
+        if (heading <= 0)
+        {
+            double? movementBearing = BearingFromMovement();
+            if (movementBearing is { } mb)
+                heading = mb;
+            else
+            {
+                double? routeBearing = BearingToNextRoutePoint(lat, lon);
+                if (routeBearing is { } rb)
+                    heading = rb;
+            }
+        }
+
+        // Only rotate when the heading changed notably – avoids map wobble
+        // on small GPS course fluctuations.
+        if (heading > 0 && Math.Abs(heading - _lastFollowHeading) > NavFollowMinHeadingDelta)
+        {
+            map.Rotation = GeoMath.ToRad(heading);
+            _lastFollowHeading = heading;
         }
     }
 
@@ -898,9 +989,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         await map.SetCenter(new OpenLayers.Blazor.Coordinate(lon, lat));
         await map.SetZoom(NavigationViewZoom);
 
-        // Heading: prefer GPS course; fall back to the bearing towards the
-        // next route point (GPS course is often 0/unset at low speed or on
-        // some simulators).
+        // Heading at start: prefer GPS course, then bearing towards the next
+        // route point (still standing at the start – the route is the best
+        // guess for the upcoming direction).
         double heading = reading.Heading > 0 ? reading.Heading : 0;
         if (heading <= 0)
         {
@@ -914,6 +1005,42 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             // OpenLayers: positive rotation = clockwise, radians.
             map.Rotation = GeoMath.ToRad(heading);
         }
+    }
+
+    /// <summary>
+    /// Bearing of the actual movement, derived from the last two breadcrumb
+    /// fixes that are far enough apart. Falls back to null when the rider is
+    /// (nearly) standing. This is what nav apps rotate by – the direction the
+    /// rider is really moving, NOT the direction towards the next route point
+    /// (which after a reroute can point backwards while the rider keeps going).
+    /// </summary>
+    private double? BearingFromMovement()
+    {
+        IReadOnlyList<GpsReading> crumbs = Gps.Breadcrumb;
+        if (crumbs.Count < 2) return null;
+
+        // Walk backwards until two fixes with enough separation are found.
+        for (int i = crumbs.Count - 1; i >= 1; i--)
+        {
+            GpsReading a = crumbs[i - 1];
+            GpsReading b = crumbs[i];
+            double distM = GeoMath.DistanceMeters(
+                a.Position.Latitude, a.Position.Longitude,
+                b.Position.Latitude, b.Position.Longitude);
+            if (distM < NavFollowMinMoveM)
+                continue;
+
+            // Initial bearing (great-circle) from a to b = movement direction.
+            double phi1 = GeoMath.ToRad(a.Position.Latitude);
+            double phi2 = GeoMath.ToRad(b.Position.Latitude);
+            double dLon = GeoMath.ToRad(b.Position.Longitude - a.Position.Longitude);
+            double y = Math.Sin(dLon) * Math.Cos(phi2);
+            double x = Math.Cos(phi1) * Math.Sin(phi2) -
+                       Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
+            double bearingDeg = (GeoMath.ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
+            return bearingDeg;
+        }
+        return null;
     }
 
     /// <summary>
@@ -952,6 +1079,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             // Back to north-up view after navigation.
             _map.Rotation = 0;
         }
+
+        // Reset follow-view state so the next navigation starts fresh.
+        _lastNavFollowUpdate = DateTime.MinValue;
+        _lastFollowHeading = -1;
         Snackbar.Add(L["NavigationStopped"], Severity.Info);
     }
 
@@ -1150,7 +1281,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
 
         Summary? summary = response.Trip?.Summary;
-        if (summary is { MinLat: not null, MaxLat: not null, MinLon: not null, MaxLon: not null })
+        // During navigation the follow-view controls center/zoom/rotation –
+        // ShowRouteOnMap must NOT touch the view, or the reroute kills the
+        // zoom/heading the rider is relying on.
+        if (!NavService.IsNavigating && summary is { MinLat: not null, MaxLat: not null, MinLon: not null, MaxLon: not null })
         {
             if (_savedZoom is { } zoom && _hasShownRoute)
             {
