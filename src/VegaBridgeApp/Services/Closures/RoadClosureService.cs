@@ -94,9 +94,7 @@ public class RoadClosureService : IRoadClosureService
                 .PostUrlEncodedAsync(new { data = query }, cancellationToken: cancellationToken)
                 .ReceiveString();
 
-            using JsonDocument doc = JsonDocument.Parse(responseBody);
-
-            List<RoadClosure> closures = ParseClosures(doc, routeCoords, corridorMeters);
+            List<RoadClosure> closures = ParseClosures(responseBody, routeCoords, corridorMeters);
 
             Log.Information("Closure check: {Count} closure(s) within {Corridor:F0}m corridor",
                 closures.Count, corridorMeters);
@@ -118,52 +116,58 @@ public class RoadClosureService : IRoadClosureService
         }
     }
 
-    private static List<RoadClosure> ParseClosures(JsonDocument doc, IReadOnlyList<Coordinate> routeCoords, double corridorMeters)
+    private List<RoadClosure> ParseClosures(string responseBody, IReadOnlyList<Coordinate> routeCoords, double corridorMeters)
     {
         List<RoadClosure> closures = [];
 
-        if (!doc.RootElement.TryGetProperty("elements", out JsonElement elements))
+        OverpassResponse? response;
+        try
+        {
+            response = JsonSerializer.Deserialize<OverpassResponse>(responseBody);
+        }
+        catch (JsonException ex)
+        {
+            Log.Warning(ex, "Overpass returned malformed JSON");
+            return closures;
+        }
+
+        if (response?.Elements is null)
             return closures;
 
-        foreach (JsonElement el in elements.EnumerateArray())
+        foreach (OverpassElement el in response.Elements)
         {
-            if (!el.TryGetProperty("type", out JsonElement typeEl) ||
-                typeEl.GetString() != "way")
+            if (el.Type != "way" || el.Center is null)
                 continue;
 
-            if (!el.TryGetProperty("center", out JsonElement center) ||
-                !center.TryGetProperty("lat", out JsonElement latEl) ||
-                !center.TryGetProperty("lon", out JsonElement lonEl))
-                continue;
-
-            double lat = latEl.GetDouble();
-            double lon = lonEl.GetDouble();
+            double lat = el.Center.Lat;
+            double lon = el.Center.Lon;
 
             // Corridor filter: keep only closures close enough to the route.
             double distM = DistanceToRoute(lat, lon, routeCoords);
             if (distM > corridorMeters)
                 continue;
 
-            long id = el.TryGetProperty("id", out JsonElement idEl) ? idEl.GetInt64() : 0;
-            string? name = null;
-            string? highway = null;
             ClosureKind kind = ClosureKind.Access;
-
-            if (el.TryGetProperty("tags", out JsonElement tags))
+            if (el.Tags is { } tags)
             {
-                name = tags.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() : null;
-                highway = tags.TryGetProperty("highway", out JsonElement hwEl) ? hwEl.GetString() : null;
                 kind = ClassifyKind(tags);
             }
 
             DateTimeOffset? lastModified = null;
-            if (el.TryGetProperty("timestamp", out JsonElement tsEl) &&
-                DateTimeOffset.TryParse(tsEl.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset ts))
+            if (!string.IsNullOrWhiteSpace(el.Timestamp) &&
+                DateTimeOffset.TryParse(el.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset ts))
             {
                 lastModified = ts;
             }
 
-            closures.Add(new RoadClosure(id, kind, name, highway, lat, lon, lastModified));
+            closures.Add(new RoadClosure(
+                el.Id,
+                kind,
+                el.Tags?.Name,
+                el.Tags?.Highway,
+                lat,
+                lon,
+                lastModified));
         }
 
         // Nearest first.
@@ -172,13 +176,13 @@ public class RoadClosureService : IRoadClosureService
             .ToList();
     }
 
-    private static ClosureKind ClassifyKind(JsonElement tags)
+    private static ClosureKind ClassifyKind(OverpassTags tags)
     {
-        if (tags.TryGetProperty("highway", out JsonElement hw) && hw.GetString() == "construction")
+        if (tags.Highway == "construction")
             return ClosureKind.Construction;
-        if (tags.TryGetProperty("construction", out _))
+        if (!string.IsNullOrEmpty(tags.Construction))
             return ClosureKind.Roadworks;
-        if (tags.TryGetProperty("barrier", out _))
+        if (!string.IsNullOrEmpty(tags.Barrier))
             return ClosureKind.Barrier;
         return ClosureKind.Access;
     }
