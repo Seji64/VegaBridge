@@ -11,6 +11,7 @@ using Serilog.Events;
 using Shiny.BluetoothLE;
 using VegaBridgeApp.Services.BLE;
 using VegaBridgeApp.Services.BLE.Plugins;
+using VegaBridgeApp.Services.Closures;
 using VegaBridgeApp.Services.Geocoding;
 using VegaBridgeApp.Services.Location;
 using VegaBridgeApp.Services.Navigation;
@@ -137,6 +138,14 @@ public static class MauiProgram
             SslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
         });
         builder.Services.AddSingleton<IGeocodingService, GeocodingService>();
+
+        // ── Road Closure Check (Overpass, live OSM) ─────────────────────────
+        builder.Services.AddHttpClient(RoadClosureService.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://overpass-api.de/api/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        builder.Services.AddSingleton<IRoadClosureService, RoadClosureService>();
 
         // ── Route Persistence & GPX Conversion ───────────────────────────────
         builder.Services.AddSingleton<IRouteStorageService, RouteStorageService>();

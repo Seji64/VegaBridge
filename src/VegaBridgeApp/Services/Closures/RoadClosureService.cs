@@ -1,0 +1,228 @@
+using System.Globalization;
+using System.Text.Json;
+using Serilog;
+using VegaBridgeApp.Models.Closures;
+using VegaBridgeApp.Models.Valhalla;
+using VegaBridgeApp.Utils;
+
+namespace VegaBridgeApp.Services.Closures;
+
+/// <summary>
+/// Road-closure check via the Overpass API (live OpenStreetMap data).
+///
+/// Strategy:
+/// 1. Build the route's bounding box + corridor margin.
+/// 2. Query Overpass for construction / access-restricted / barrier ways
+///    inside that box (single request, `out center`).
+/// 3. Filter results to the corridor (point-to-route distance), sort nearest first.
+///
+/// Uses a named <c>HttpClient</c> registered via <c>AddHttpClient</c>, like
+/// the Valhalla and Photon clients.
+/// </summary>
+public class RoadClosureService : IRoadClosureService
+{
+    internal const string HttpClientName = "Overpass";
+
+    private const int MaxQueryAreaDegreesSq = 8; // ~ 800 km² guard against oversized boxes
+    private readonly HttpClient _httpClient;
+    private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    public RoadClosureService(IHttpClientFactory httpClientFactory)
+    {
+        _httpClient = httpClientFactory.CreateClient(HttpClientName);
+    }
+
+    /// <inheritdoc />
+    public async Task<RoadClosureCheckResult> CheckRouteAsync(
+        IReadOnlyList<Coordinate> routeCoords,
+        double corridorMeters = 200,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (routeCoords is null || routeCoords.Count < 2)
+                return RoadClosureCheckResult.Failure("Route needs at least 2 points");
+
+            // 1. Bounding box of the whole route, expanded by the corridor.
+            double minLat = routeCoords.Min(p => p.Latitude);
+            double maxLat = routeCoords.Max(p => p.Latitude);
+            double minLon = routeCoords.Min(p => p.Longitude);
+            double maxLon = routeCoords.Max(p => p.Longitude);
+
+            double margin = corridorMeters / 111_000.0; // approx degrees for the corridor
+            minLat -= margin;
+            maxLat += margin;
+            minLon -= margin / Math.Max(0.1, Math.Cos(maxLat * Math.PI / 180));
+            maxLon += margin / Math.Max(0.1, Math.Cos(maxLat * Math.PI / 180));
+
+            double areaDegSq = (maxLat - minLat) * (maxLon - minLon);
+            if (areaDegSq > MaxQueryAreaDegreesSq)
+            {
+                Log.Warning("Route bounding box too large for Overpass ({Area:F1} deg²), skipping check", areaDegSq);
+                return RoadClosureCheckResult.Failure("Route area too large for a closure check");
+            }
+
+            // 2. Overpass query: construction ways, roads with construction=*,
+            //    access-restricted ways, and physical barriers.
+            string bbox = string.Create(CultureInfo.InvariantCulture,
+                $"{minLat:F6},{minLon:F6},{maxLat:F6},{maxLon:F6}");
+
+            string query = $"""
+                [out:json][timeout:20];
+                (
+                  way["highway"="construction"]({bbox});
+                  way["construction"]({bbox});
+                  way["access"="no"]({bbox});
+                  way["motor_vehicle"="no"]({bbox});
+                  way["barrier"~"^(gate|bollard|lift_gate|swing_gate|block)$"]({bbox});
+                );
+                out center;
+                """;
+
+            Log.Debug("Overpass closure query: {Query}", query.Replace('\n', ' '));
+
+            using HttpRequestMessage request = new(HttpMethod.Post, "api/interpreter")
+            {
+                Content = new StringContent($"data={Uri.EscapeDataString(query)}",
+                    System.Text.Encoding.UTF8, "application/x-www-form-urlencoded")
+            };
+
+            using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                Log.Warning("Overpass returned {Status} for closure check", response.StatusCode);
+                return RoadClosureCheckResult.Failure($"Overpass HTTP {(int)response.StatusCode}");
+            }
+
+            using JsonDocument doc = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(cancellationToken),
+                cancellationToken: cancellationToken);
+
+            List<RoadClosure> closures = ParseClosures(doc, routeCoords, corridorMeters);
+
+            Log.Information("Closure check: {Count} closure(s) within {Corridor:F0}m corridor",
+                closures.Count, corridorMeters);
+
+            return new RoadClosureCheckResult(
+                closures,
+                DateTimeOffset.UtcNow,
+                IsSuccess: true);
+        }
+        catch (OperationCanceledException)
+        {
+            Log.Debug("Closure check cancelled");
+            return RoadClosureCheckResult.Failure("Cancelled");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Closure check failed");
+            return RoadClosureCheckResult.Failure(ex.Message);
+        }
+    }
+
+    private List<RoadClosure> ParseClosures(JsonDocument doc, IReadOnlyList<Coordinate> routeCoords, double corridorMeters)
+    {
+        List<RoadClosure> closures = [];
+
+        if (!doc.RootElement.TryGetProperty("elements", out JsonElement elements))
+            return closures;
+
+        foreach (JsonElement el in elements.EnumerateArray())
+        {
+            if (!el.TryGetProperty("type", out JsonElement typeEl) ||
+                typeEl.GetString() != "way")
+                continue;
+
+            if (!el.TryGetProperty("center", out JsonElement center) ||
+                !center.TryGetProperty("lat", out JsonElement latEl) ||
+                !center.TryGetProperty("lon", out JsonElement lonEl))
+                continue;
+
+            double lat = latEl.GetDouble();
+            double lon = lonEl.GetDouble();
+
+            // Corridor filter: keep only closures close enough to the route.
+            double distM = DistanceToRoute(lat, lon, routeCoords);
+            if (distM > corridorMeters)
+                continue;
+
+            long id = el.TryGetProperty("id", out JsonElement idEl) ? idEl.GetInt64() : 0;
+            string? name = null;
+            string? highway = null;
+            ClosureKind kind = ClosureKind.Access;
+
+            if (el.TryGetProperty("tags", out JsonElement tags))
+            {
+                name = tags.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() : null;
+                highway = tags.TryGetProperty("highway", out JsonElement hwEl) ? hwEl.GetString() : null;
+                kind = ClassifyKind(tags);
+            }
+
+            DateTimeOffset? lastModified = null;
+            if (el.TryGetProperty("timestamp", out JsonElement tsEl) &&
+                DateTimeOffset.TryParse(tsEl.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset ts))
+            {
+                lastModified = ts;
+            }
+
+            closures.Add(new RoadClosure(id, kind, name, highway, lat, lon, lastModified));
+        }
+
+        // Nearest first.
+        return closures
+            .OrderBy(c => DistanceToRoute(c.Latitude, c.Longitude, routeCoords))
+            .ToList();
+    }
+
+    private static ClosureKind ClassifyKind(JsonElement tags)
+    {
+        if (tags.TryGetProperty("highway", out JsonElement hw) && hw.GetString() == "construction")
+            return ClosureKind.Construction;
+        if (tags.TryGetProperty("construction", out _))
+            return ClosureKind.Roadworks;
+        if (tags.TryGetProperty("barrier", out _))
+            return ClosureKind.Barrier;
+        return ClosureKind.Access;
+    }
+
+    /// <summary>
+    /// Minimum distance from a point to the route polyline (haversine on
+    /// segment endpoints, planar approximation for short segments is fine).
+    /// </summary>
+    private static double DistanceToRoute(double lat, double lon, IReadOnlyList<Coordinate> route)
+    {
+        double best = double.MaxValue;
+        for (int i = 0; i < route.Count - 1; i++)
+        {
+            Coordinate a = route[i];
+            Coordinate b = route[i + 1];
+            best = Math.Min(best, PointToSegmentDistanceMeters(lat, lon, a.Latitude, a.Longitude, b.Latitude, b.Longitude));
+            if (best < 1e-6) break;
+        }
+        return best;
+    }
+
+    private static double PointToSegmentDistanceMeters(
+        double px, double py, double ax, double ay, double bx, double by)
+    {
+        double dx = bx - ax;
+        double dy = by - ay;
+
+        double t;
+        if (Math.Abs(dx) < 1e-12 && Math.Abs(dy) < 1e-12)
+        {
+            t = 0;
+        }
+        else
+        {
+            t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
+            t = Math.Clamp(t, 0, 1);
+        }
+
+        double closestLat = ax + t * dx;
+        double closestLon = ay + t * dy;
+        return GeoMath.DistanceMeters(px, py, closestLat, closestLon);
+    }
+}
