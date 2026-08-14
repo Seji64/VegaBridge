@@ -86,8 +86,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
     // Smoothing / route-matching state
     private Coordinate? _lastSmoothedPosition;
-    private Coordinate? _lastMapMatchedPosition;
-    private DateTimeOffset _lastMapMatchTimestamp = DateTimeOffset.MinValue;
     private readonly List<Coordinate> _gpsBuffer = [];
     private int _gpsTickCount;
     private bool _verifyInFlight;
@@ -98,13 +96,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private const int MapMatchTickInterval = 3;
     private const int OffRouteHysteresisCount = 3;
     private const double GpsSmoothingAlpha = 0.4; // EMA: neueste Messung gewinnt 40% Gewicht
-    // A map-matched position is only trusted while it is fresh. If no good
-    // match arrives within this window (network loss, API outage, bad match),
-    // navigation falls back to the live raw GPS instead of freezing on an
-    // old position. Time-based, not distance-based: at 100 km/h the rider
-    // covers ~83 m per 3-tick verification interval, so a distance guard
-    // would wrongly discard fresh matches.
-    private static readonly TimeSpan MaxMapMatchAge = TimeSpan.FromSeconds(10);
     private int _offRouteCounter;
 
     private double OffRouteThresholdM => _offRouteThresholdM;
@@ -185,8 +176,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _destination = destination;
             _isNavigating = true;
             _offRouteCounter = 0;
-            _lastMapMatchedPosition = null;
-            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _lastSmoothedPosition = null;
             _gpsTickCount = 0;
             _verifyInFlight = false;
@@ -244,8 +233,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _routeCoords = [];
             _maneuvers = [];
             _destination = null;
-            _lastMapMatchedPosition = null;
-            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _offRouteCounter = 0;
             _verifyInFlight = false;
         }
@@ -324,8 +311,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
             _isOffRoute = false;
             _offRouteCounter = 0;
-            _lastMapMatchedPosition = null;
-            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _lastSmoothedPosition = null;
             _verifyInFlight = false;
         }
@@ -445,18 +430,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _gpsBuffer.Add(new Coordinate(smoothLat, smoothLon, null));
             if (_gpsBuffer.Count > MapMatchBufferLimit) _gpsBuffer.RemoveAt(0);
 
-            // Prefer map-matched position for navigation if available and
-            // still fresh. A stale map-match (failed API call, timeout,
-            // network loss, bad match) must never freeze the navigation –
-            // fall back to the raw smoothed position instead.
+            // Navigation position is ALWAYS the raw smoothed GPS. Using the
+            // map-matched position here lags 3-6s+ (API roundtrip + sparse
+            // GPS), so a curve taken between two GPS fixes keeps the stale
+            // pre-curve position -> maneuver never advances. Map-matching is
+            // used ONLY for off-route verification below.
             double navLat = smoothLat;
             double navLon = smoothLon;
-            if (_lastMapMatchedPosition is { } mm &&
-                DateTimeOffset.UtcNow - _lastMapMatchTimestamp < MaxMapMatchAge)
-            {
-                navLat = mm.Latitude;
-                navLon = mm.Longitude;
-            }
 
             // 1. Snap current position to route (for UI/Maneuvers)
             int hintIndex = _currentManeuverIndex > 0
@@ -620,7 +600,11 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             bestIndex = t >= 0.5 ? i + 1 : i;
         }
 
-        const double FallbackThresholdSq = 50.0 * 50.0;
+        // PointToSegmentDistanceSq returns degrees², so the 50 m fallback
+        // must be converted to degrees² too (50²/111320²). Otherwise the
+        // full-route scan never fires (2500 degrees² ~ 5000 km²) and the
+        // snap pins to the ±20 window edge after a curve jump.
+        const double FallbackThresholdSq = 50.0 * 50.0 / (111320.0 * 111320.0);
         if (bestDistSq > FallbackThresholdSq)
         {
             bestDistSq = double.MaxValue;
@@ -770,10 +754,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                         Log.Information("Back on route (verified by Map-Matching)");
                     }
 
-                    // Store map-matched position for navigation
-                    _lastMapMatchedPosition = lastSnapped;
-                    _lastMapMatchTimestamp = DateTimeOffset.UtcNow;
-                    Log.Debug("Map-matched position updated: {Lat}, {Lon}", lastSnapped.Latitude, lastSnapped.Longitude);
+                    Log.Debug("Map-matched position: {Lat}, {Lon} (verify only, not used for nav)", lastSnapped.Latitude, lastSnapped.Longitude);
                 }
             }
         }
