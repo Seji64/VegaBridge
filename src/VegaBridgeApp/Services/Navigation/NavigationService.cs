@@ -540,6 +540,18 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _remainingDistanceKm = remainingKm;
             _remainingTimeMin = remainingMin;
 
+            // Diagnostic trace: full navigation state every 10 ticks so a
+            // stuck maneuver can be read from the exported log (position vs
+            // snapped index vs maneuver index). Raw GPS is navLat/navLon.
+            if (_gpsTickCount % 10 == 0)
+            {
+                Log.Information(
+                    "NAV tick {Tick}: pos=({Lat:F6},{Lon:F6}) snap={Snap} man={Man}/{Total} distTurn={Dist:F0}m rem={Rem:F1}km offRoute={OffRoute}",
+                    _gpsTickCount, navLat, navLon, snappedIndex,
+                    _currentManeuverIndex, _maneuvers.Count,
+                    _distanceToNextTurnM, _remainingDistanceKm, _isOffRoute);
+            }
+
             double speedKmh = reading.Speed * 3.6;
 
             NavigationStatus status = new()
@@ -800,8 +812,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             RoundaboutExit = m.RoundaboutExit
         };
 
-        Log.Debug(
-            "Maneuver Display {I}/{T}: {Instr} (ValhallaType={Type})",
+        Log.Information(
+            "MANEUVER {I}/{T}: {Instr} (ValhallaType={Type})",
             targetIndex + 1, _maneuvers.Count,
             m.Instruction, m.Type);
 
