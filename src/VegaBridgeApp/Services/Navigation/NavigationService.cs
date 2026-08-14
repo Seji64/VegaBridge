@@ -100,6 +100,14 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private int _offRouteCounter;
     private int _rawOffRouteCounter;
 
+    // Current travel direction (0-359°, 0 = north, clockwise). Updated on
+    // every GPS tick: GPS course if valid, otherwise derived from the
+    // smoothed position buffer. Used for reroute requests (heading +
+    // heading_tolerance) so Valhalla starts the new route in the rider's
+    // actual travel direction instead of picking an arbitrary first edge.
+    private double _currentHeadingDeg = -1;
+    private const double RerouteHeadingToleranceDeg = 45.0;
+
     private double _offRouteThresholdM = OffRouteThresholdDefaultM;
 
     // ── Properties ───────────────────────────────────────────────────────
@@ -193,6 +201,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isNavigating = true;
             _offRouteCounter = 0;
             _rawOffRouteCounter = 0;
+            _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
             _gpsTickCount = 0;
             _verifyInFlight = false;
@@ -252,6 +261,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _destination = null;
             _offRouteCounter = 0;
             _rawOffRouteCounter = 0;
+            _currentHeadingDeg = -1;
             _verifyInFlight = false;
         }
 
@@ -273,8 +283,19 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         try
         {
             // 1. Build Request
-            List<Models.Valhalla.Location> locs = [
-                new() { Lat = currentLat, Lon = currentLon, Type = "break"},
+            List<Models.Valhalla.Location> locs =
+            [
+                new()
+                {
+                    Lat = currentLat,
+                    Lon = currentLon,
+                    Type = "break",
+                    // Start the new route in the rider's actual travel
+                    // direction so Valhalla does not pick an arbitrary first
+                    // edge (e.g. a 180° turnaround after a missed turn).
+                    Heading = _currentHeadingDeg > 0 ? _currentHeadingDeg : null,
+                    HeadingTolerance = RerouteHeadingToleranceDeg
+                },
                 _destination
             ];
 
@@ -330,6 +351,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isOffRoute = false;
             _offRouteCounter = 0;
             _rawOffRouteCounter = 0;
+            _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
             _verifyInFlight = false;
         }
@@ -481,6 +503,20 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _gpsBuffer.Add(new Coordinate(smoothLat, smoothLon, null));
             if (_gpsBuffer.Count > MapMatchBufferLimit) _gpsBuffer.RemoveAt(0);
 
+            // Track travel direction: GPS course when available, otherwise
+            // derive it from the smoothed position buffer (works at low
+            // speed / on simulators where the GPS course is 0/unset).
+            if (reading.Heading > 0)
+            {
+                _currentHeadingDeg = reading.Heading;
+            }
+            else
+            {
+                double? bufferHeading = BearingFromBuffer();
+                if (bufferHeading is { } bh)
+                    _currentHeadingDeg = bh;
+            }
+
             // Navigation position is ALWAYS the raw smoothed GPS. Using the
             // map-matched position here lags 3-6s+ (API roundtrip + sparse
             // GPS), so a curve taken between two GPS fixes keeps the stale
@@ -619,7 +655,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 CurrentManeuverIndex = _currentManeuverIndex,
                 DisplayManeuverIndex = displayIndex,
                 TotalManeuvers = _maneuvers.Count,
-                Heading = reading.Heading,
+                // Computed travel direction (GPS course or buffer-derived),
+                // not the raw GPS course which is often 0/unset.
+                Heading = _currentHeadingDeg > 0 ? _currentHeadingDeg : reading.Heading,
                 Accuracy = reading.PositionAccuracy,
                 IsStationary = reading.IsStationary
             };
@@ -647,6 +685,38 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     }
 
     // ── Route matching ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Travel direction derived from the last two smoothed GPS fixes that are
+    /// far enough apart (initial bearing a→b). Returns null when the rider is
+    /// (nearly) standing or the buffer has too few points.
+    /// </summary>
+    private double? BearingFromBuffer()
+    {
+        if (_gpsBuffer.Count < 2) return null;
+
+        for (int i = _gpsBuffer.Count - 1; i >= 1; i--)
+        {
+            Coordinate a = _gpsBuffer[i - 1];
+            Coordinate b = _gpsBuffer[i];
+            double distM = GeoMath.DistanceMeters(
+                a.Latitude, a.Longitude, b.Latitude, b.Longitude);
+            if (distM < 10.0)
+                continue;
+
+            // Initial bearing (great-circle) from a to b = movement direction.
+            double phi1 = GeoMath.ToRad(a.Latitude);
+            double phi2 = GeoMath.ToRad(b.Latitude);
+            double dLon = GeoMath.ToRad(b.Longitude - a.Longitude);
+            double y = Math.Sin(dLon) * Math.Cos(phi2);
+            double x = Math.Cos(phi1) * Math.Sin(phi2) -
+                       Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
+            double bearingDeg = (GeoMath.ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
+            return bearingDeg;
+        }
+        return null;
+    }
+
     private (int Index, double DistanceMeters) FindNearestRouteIndex(
         double lat, double lon)
     {

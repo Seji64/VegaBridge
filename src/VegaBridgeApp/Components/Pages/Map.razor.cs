@@ -578,24 +578,16 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         await map.SetCenter(new OpenLayers.Blazor.Coordinate(lon, lat));
 
-        // Heading while moving: GPS course first, then the ACTUAL movement
-        // direction from the breadcrumb trail. The route bearing is only a
-        // last resort – after a reroute the next route point can lie behind
-        // the rider (route leads back to the destination) while the rider is
-        // still going straight, and rotating by the route would flip the map
-        // 180° against the real travel direction.
-        double heading = reading.Heading > 0 ? reading.Heading : 0;
+        // Heading while moving comes from the NavigationService (computed
+        // travel direction: GPS course or buffer-derived) – the service owns
+        // the logic and also uses it for reroute requests. The route bearing
+        // is only a last resort here, e.g. before the first status arrives.
+        double heading = _navStatus?.Heading > 0 ? _navStatus!.Heading : 0;
         if (heading <= 0)
         {
-            double? movementBearing = BearingFromMovement();
-            if (movementBearing is { } mb)
-                heading = mb;
-            else
-            {
-                double? routeBearing = BearingToNextRoutePoint(lat, lon);
-                if (routeBearing is { } rb)
-                    heading = rb;
-            }
+            double? routeBearing = BearingToNextRoutePoint(lat, lon);
+            if (routeBearing is { } rb)
+                heading = rb;
         }
 
         // Only rotate when the heading changed notably – avoids map wobble
@@ -989,10 +981,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         await map.SetCenter(new OpenLayers.Blazor.Coordinate(lon, lat));
         await map.SetZoom(NavigationViewZoom);
 
-        // Heading at start: prefer GPS course, then bearing towards the next
-        // route point (still standing at the start – the route is the best
-        // guess for the upcoming direction).
-        double heading = reading.Heading > 0 ? reading.Heading : 0;
+        // Heading at start: the service-computed travel direction if already
+        // available, otherwise the bearing towards the next route point
+        // (still standing at the start – the route is the best guess for the
+        // upcoming direction).
+        double heading = _navStatus?.Heading > 0 ? _navStatus!.Heading : 0;
         if (heading <= 0)
         {
             double? routeBearing = BearingToNextRoutePoint(lat, lon);
@@ -1005,42 +998,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             // OpenLayers: positive rotation = clockwise, radians.
             map.Rotation = GeoMath.ToRad(heading);
         }
-    }
-
-    /// <summary>
-    /// Bearing of the actual movement, derived from the last two breadcrumb
-    /// fixes that are far enough apart. Falls back to null when the rider is
-    /// (nearly) standing. This is what nav apps rotate by – the direction the
-    /// rider is really moving, NOT the direction towards the next route point
-    /// (which after a reroute can point backwards while the rider keeps going).
-    /// </summary>
-    private double? BearingFromMovement()
-    {
-        IReadOnlyList<GpsReading> crumbs = Gps.Breadcrumb;
-        if (crumbs.Count < 2) return null;
-
-        // Walk backwards until two fixes with enough separation are found.
-        for (int i = crumbs.Count - 1; i >= 1; i--)
-        {
-            GpsReading a = crumbs[i - 1];
-            GpsReading b = crumbs[i];
-            double distM = GeoMath.DistanceMeters(
-                a.Position.Latitude, a.Position.Longitude,
-                b.Position.Latitude, b.Position.Longitude);
-            if (distM < NavFollowMinMoveM)
-                continue;
-
-            // Initial bearing (great-circle) from a to b = movement direction.
-            double phi1 = GeoMath.ToRad(a.Position.Latitude);
-            double phi2 = GeoMath.ToRad(b.Position.Latitude);
-            double dLon = GeoMath.ToRad(b.Position.Longitude - a.Position.Longitude);
-            double y = Math.Sin(dLon) * Math.Cos(phi2);
-            double x = Math.Cos(phi1) * Math.Sin(phi2) -
-                       Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
-            double bearingDeg = (GeoMath.ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
-            return bearingDeg;
-        }
-        return null;
     }
 
     /// <summary>
