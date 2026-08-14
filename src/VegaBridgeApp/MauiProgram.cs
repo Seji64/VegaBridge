@@ -146,6 +146,9 @@ public static class MauiProgram
         {
             client.BaseAddress = new Uri("https://overpass-api.de/");
             client.Timeout = TimeSpan.FromSeconds(30);
+            // Overpass rejects requests without a (non-browser) User-Agent
+            // with HTTP 406 – Flurl/HttpClient sends none by default.
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("VegaBridge/1.0 (closure-check)");
         })
         .AddResilienceHandler("overpass-retry", static builder =>
         {
