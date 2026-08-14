@@ -554,7 +554,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 FireCurrentManeuver(displayIndex);
             }
 
-            _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex);
+            // Distance to the DISPLAYED action (skip-straight can point past
+            // _currentManeuverIndex, e.g. the depart maneuver at start).
+            _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex, displayIndex);
             (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
             _remainingDistanceKm = remainingKm;
             _remainingTimeMin = remainingMin;
@@ -668,9 +670,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
 
     // TODO: integrate Valhalla map‑matching confidence weighting
-    private double CalculateDistanceToNextTurn(int currentRouteIndex)
+    private double CalculateDistanceToNextTurn(int currentRouteIndex, int displayIndex)
     {
-        if (_currentManeuverIndex >= _maneuvers.Count) return 0;
+        if (displayIndex < 0 || displayIndex >= _maneuvers.Count) return 0;
+
 
         // Distance to the NEXT action = the current maneuver's begin (the
         // turn happens at begin_shape_index), clamped against overshoot.
