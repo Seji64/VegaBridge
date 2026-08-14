@@ -11,6 +11,8 @@ using Serilog;
 using Shiny.Locations;
 using VegaBridgeApp.Models.Utils;
 using VegaBridgeApp.Services.Navigation;
+using VegaBridgeApp.Services.Closures;
+using VegaBridgeApp.Models.Closures;
 using VegaBridgeApp.Utils;
 using Coordinate = VegaBridgeApp.Models.Valhalla.Coordinate;
 using Location = VegaBridgeApp.Models.Valhalla.Location;
@@ -24,6 +26,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     
     private const string RouteLayerId = "route-layer";
     private const string BreadcrumbLayerId = "breadcrumb-layer";
+    private const string ClosureLayerId = "closure-layer";
 
     private OpenStreetMap? _map;
     private MudAutocomplete<GeoResult> _startAuto = null!;
@@ -71,6 +74,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private double _lastFollowLat;
     private double _lastFollowLon;
     private double _lastFollowHeading = -1;
+
+    // ── Road closure check state ──
+    private readonly List<RoadClosure> _closures = [];
+    private bool _closureCheckInFlight;
+    private DateTime _lastClosureCheckUtc = DateTime.MinValue;
 
     protected override void OnInitialized()
     {
@@ -488,12 +496,15 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     {
         if (_disposed) return;
         _currentRouteResponse = response;
-
         // Sink callbacks arrive on the GPS thread; ShowRouteOnMap touches
         // MarkersList and calls StateHasChanged, so it must run on the
         // Blazor dispatcher. Without this the reroute map update throws
         // and the route disappears from the map.
         await InvokeAsync(async () => await ShowRouteOnMap(response));
+
+        // Road closure check for the (re)routed path – fire and forget, the
+        // service reports via snackbar/pins on the dispatcher itself.
+        _ = CheckClosuresForRouteAsync(response);
     }
 
     #endregion
@@ -833,6 +844,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             {
                 _currentRouteResponse = result.Response;
                 await ShowRouteOnMap(result.Response);
+                _ = CheckClosuresForRouteAsync(result.Response);
             }
             else
             {
@@ -1298,6 +1310,78 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 await map.SetVisibleExtent(extent);
                 _hasShownRoute = true;
             }
+        }
+
+        ReAddClosureMarkers(map);
+    }
+
+    // ── Road Closure Check (Overpass) ────────────────────────────────────
+
+    private async Task CheckClosuresForRouteAsync(RouteResponse response)
+    {
+        if (_disposed) return;
+        if (_closureCheckInFlight) return;
+        if ((DateTime.UtcNow - _lastClosureCheckUtc).TotalSeconds < 60) return;
+        _lastClosureCheckUtc = DateTime.UtcNow;
+        _closureCheckInFlight = true;
+
+        try
+        {
+            // Decode the route geometry so the service can build the corridor.
+            (string mergedShape, _, _, _) = NavService.PrepareNavigationData(response.Trip?.Legs ?? []);
+            List<Coordinate> routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
+            if (routeCoords.Count < 2) return;
+
+            RoadClosureCheckResult result = await RoadClosureService.CheckRouteAsync(routeCoords);
+
+            await InvokeAsync(() =>
+            {
+                _closures.Clear();
+
+                if (!result.IsSuccess)
+                {
+                    Log.Warning("Road closure check unavailable: {Reason}", result.ErrorMessage);
+                    return;
+                }
+
+                _closures.AddRange(result.Closures);
+                ReAddClosureMarkers(_map);
+
+                if (_closures.Count > 0)
+                {
+                    Snackbar.Add(
+                        string.Format(L["ClosuresFound"], _closures.Count),
+                        Severity.Warning);
+                }
+
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Road closure check failed");
+        }
+        finally
+        {
+            _closureCheckInFlight = false;
+        }
+    }
+
+    /// <summary>
+    /// Adds one red pin per known closure to the map. Call whenever the
+    /// marker list was rebuilt (new route shown, markers cleared).
+    /// </summary>
+    private void ReAddClosureMarkers(OpenStreetMap? map)
+    {
+        if (map == null || _closures.Count == 0) return;
+
+        foreach (RoadClosure closure in _closures)
+        {
+            map.MarkersList.Add(new Marker(
+                MarkerType.MarkerPin,
+                new OpenLayers.Blazor.Coordinate(closure.Longitude, closure.Latitude),
+                "⚠",
+                PinColor.Red));
         }
     }
 

@@ -189,6 +189,7 @@
   <data name="NotFoundTitle" xml:space="preserve"><value>Nicht gefunden</value></data>
   <data name="NotFoundBody" xml:space="preserve"><value>Entschuldigung, der gesuchte Inhalt existiert nicht.</value></data>
 
+<<<<<<< HEAD
   <!-- Debug Logging -->
   <data name="DebugSection" xml:space="preserve"><value>Debug-Protokoll</value></data>
   <data name="DebugLoggingToggle" xml:space="preserve"><value>Debug-Protokoll aufzeichnen</value></data>
@@ -211,4 +212,8 @@
   <data name="LongTestDone" xml:space="preserve"><value>Verbindungstest beendet – Verbindung hat gehalten</value></data>
   <data name="LongTestStopped" xml:space="preserve"><value>Verbindungstest gestoppt</value></data>
   <data name="LongTestError" xml:space="preserve"><value>Test fehlgeschlagen: {0}</value></data>
+
+  <!-- Road Closures -->
+  <data name="ClosuresFound" xml:space="preserve"><value>⚠ {0} Straßensperrung(en) in der Nähe der Route</value></data>
+  <data name="ClosureCheckUnavailable" xml:space="preserve"><value>Sperrungs-Check nicht verfügbar</value></data>
 </root>
