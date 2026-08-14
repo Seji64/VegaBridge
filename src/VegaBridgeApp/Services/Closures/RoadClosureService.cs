@@ -92,7 +92,7 @@ public class RoadClosureService : IRoadClosureService
             string responseBody = await _flurlClient
                 .Request("api/interpreter")
                 .PostUrlEncodedAsync(new { data = query }, cancellationToken: cancellationToken)
-                .GetStringAsync();
+                .ReceiveString();
 
             using JsonDocument doc = JsonDocument.Parse(responseBody);
 
