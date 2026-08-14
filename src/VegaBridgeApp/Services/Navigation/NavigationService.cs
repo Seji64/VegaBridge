@@ -87,6 +87,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     // Smoothing / route-matching state
     private Coordinate? _lastSmoothedPosition;
     private Coordinate? _lastMapMatchedPosition;
+    private DateTimeOffset _lastMapMatchTimestamp = DateTimeOffset.MinValue;
     private readonly List<Coordinate> _gpsBuffer = [];
     private int _gpsTickCount;
     private bool _verifyInFlight;
@@ -97,10 +98,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private const int MapMatchTickInterval = 3;
     private const int OffRouteHysteresisCount = 3;
     private const double GpsSmoothingAlpha = 0.4; // EMA: neueste Messung gewinnt 40% Gewicht
-    // Max drift between a map-matched position and the raw GPS fix before the
-    // matched position is considered stale and discarded (prevents the
-    // navigation freezing on an old position when the trace_route call fails).
-    private const double MaxMapMatchDriftM = 100.0;
+    // A map-matched position is only trusted while it is fresh. If no good
+    // match arrives within this window (network loss, API outage, bad match),
+    // navigation falls back to the live raw GPS instead of freezing on an
+    // old position. Time-based, not distance-based: at 100 km/h the rider
+    // covers ~83 m per 3-tick verification interval, so a distance guard
+    // would wrongly discard fresh matches.
+    private static readonly TimeSpan MaxMapMatchAge = TimeSpan.FromSeconds(10);
     private int _offRouteCounter;
 
     private double OffRouteThresholdM => _offRouteThresholdM;
@@ -182,6 +186,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isNavigating = true;
             _offRouteCounter = 0;
             _lastMapMatchedPosition = null;
+            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _lastSmoothedPosition = null;
             _gpsTickCount = 0;
             _verifyInFlight = false;
@@ -240,6 +245,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _maneuvers = [];
             _destination = null;
             _lastMapMatchedPosition = null;
+            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _offRouteCounter = 0;
             _verifyInFlight = false;
         }
@@ -319,6 +325,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _isOffRoute = false;
             _offRouteCounter = 0;
             _lastMapMatchedPosition = null;
+            _lastMapMatchTimestamp = DateTimeOffset.MinValue;
             _lastSmoothedPosition = null;
             _verifyInFlight = false;
         }
@@ -439,25 +446,16 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (_gpsBuffer.Count > MapMatchBufferLimit) _gpsBuffer.RemoveAt(0);
 
             // Prefer map-matched position for navigation if available and
-            // still plausibly near the current raw GPS fix. A stale map-match
-            // (failed API call, timeout, network loss) must never freeze the
-            // navigation – fall back to the raw smoothed position instead.
+            // still fresh. A stale map-match (failed API call, timeout,
+            // network loss, bad match) must never freeze the navigation –
+            // fall back to the raw smoothed position instead.
             double navLat = smoothLat;
             double navLon = smoothLon;
-            if (_lastMapMatchedPosition is { } mm)
+            if (_lastMapMatchedPosition is { } mm &&
+                DateTimeOffset.UtcNow - _lastMapMatchTimestamp < MaxMapMatchAge)
             {
-                double driftM = GeoMath.DistanceMeters(
-                    mm.Latitude, mm.Longitude, smoothLat, smoothLon);
-                if (driftM < MaxMapMatchDriftM)
-                {
-                    navLat = mm.Latitude;
-                    navLon = mm.Longitude;
-                }
-                else
-                {
-                    Log.Debug("Discarding stale map-matched position ({Drift:F0}m drift)", driftM);
-                    _lastMapMatchedPosition = null;
-                }
+                navLat = mm.Latitude;
+                navLon = mm.Longitude;
             }
 
             // 1. Snap current position to route (for UI/Maneuvers)
@@ -757,6 +755,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
                     // Store map-matched position for navigation
                     _lastMapMatchedPosition = lastSnapped;
+                    _lastMapMatchTimestamp = DateTimeOffset.UtcNow;
                     Log.Debug("Map-matched position updated: {Lat}, {Lon}", lastSnapped.Latitude, lastSnapped.Longitude);
                 }
             }
