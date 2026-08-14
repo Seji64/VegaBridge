@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Flurl.Http;
 using Serilog;
 using VegaBridgeApp.Models.Closures;
 using VegaBridgeApp.Models.Valhalla;
@@ -16,20 +17,23 @@ namespace VegaBridgeApp.Services.Closures;
 ///    inside that box (single request, `out center`).
 /// 3. Filter results to the corridor (point-to-route distance), sort nearest first.
 ///
-/// Uses a named <c>HttpClient</c> registered via <c>AddHttpClient</c>, like
-/// the Valhalla and Photon clients.
+/// Uses a named <c>HttpClient</c> (registered via <c>AddHttpClient</c> +
+/// <c>AddResilienceHandler</c>) so retry and timeout are handled at the
+/// transport layer. Flurl provides the convenient JSON request syntax –
+/// exactly the same pattern as the Valhalla client.
 /// </summary>
 public class RoadClosureService : IRoadClosureService
 {
     internal const string HttpClientName = "Overpass";
+    internal const int RetryCount = 2;
 
     private const int MaxQueryAreaDegreesSq = 8; // ~ 800 km² guard against oversized boxes
-    private readonly HttpClient _httpClient;
-    private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private readonly FlurlClient _flurlClient;
 
     public RoadClosureService(IHttpClientFactory httpClientFactory)
     {
-        _httpClient = httpClientFactory.CreateClient(HttpClientName);
+        HttpClient httpClient = httpClientFactory.CreateClient(HttpClientName);
+        _flurlClient = new FlurlClient(httpClient);
     }
 
     /// <inheritdoc />
@@ -83,22 +87,14 @@ public class RoadClosureService : IRoadClosureService
 
             Log.Debug("Overpass closure query: {Query}", query.Replace('\n', ' '));
 
-            using HttpRequestMessage request = new(HttpMethod.Post, "api/interpreter")
-            {
-                Content = new StringContent($"data={Uri.EscapeDataString(query)}",
-                    System.Text.Encoding.UTF8, "application/x-www-form-urlencoded")
-            };
+            // 3. POST via Flurl (form-encoded `data` parameter), like the
+            //    Valhalla client posts JSON. Polly retries transient failures.
+            string responseBody = await _flurlClient
+                .Request("api/interpreter")
+                .PostUrlEncodedAsync(new { data = query }, cancellationToken: cancellationToken)
+                .GetStringAsync();
 
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                Log.Warning("Overpass returned {Status} for closure check", response.StatusCode);
-                return RoadClosureCheckResult.Failure($"Overpass HTTP {(int)response.StatusCode}");
-            }
-
-            using JsonDocument doc = await JsonDocument.ParseAsync(
-                await response.Content.ReadAsStreamAsync(cancellationToken),
-                cancellationToken: cancellationToken);
+            using JsonDocument doc = JsonDocument.Parse(responseBody);
 
             List<RoadClosure> closures = ParseClosures(doc, routeCoords, corridorMeters);
 
@@ -122,7 +118,7 @@ public class RoadClosureService : IRoadClosureService
         }
     }
 
-    private List<RoadClosure> ParseClosures(JsonDocument doc, IReadOnlyList<Coordinate> routeCoords, double corridorMeters)
+    private static List<RoadClosure> ParseClosures(JsonDocument doc, IReadOnlyList<Coordinate> routeCoords, double corridorMeters)
     {
         List<RoadClosure> closures = [];
 

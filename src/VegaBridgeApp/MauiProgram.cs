@@ -140,10 +140,22 @@ public static class MauiProgram
         builder.Services.AddSingleton<IGeocodingService, GeocodingService>();
 
         // ── Road Closure Check (Overpass, live OSM) ─────────────────────────
+        // Same resilience pattern as the Valhalla client: named HttpClient +
+        // Polly retry with exponential backoff + jitter.
         builder.Services.AddHttpClient(RoadClosureService.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://overpass-api.de/api/");
             client.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .AddResilienceHandler("overpass-retry", static builder =>
+        {
+            builder.AddRetry(new HttpRetryStrategyOptions
+            {
+                MaxRetryAttempts = RoadClosureService.RetryCount,
+                Delay = TimeSpan.FromSeconds(1),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+            });
         });
         builder.Services.AddSingleton<IRoadClosureService, RoadClosureService>();
 
