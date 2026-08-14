@@ -92,9 +92,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private const double OffRouteThresholdDefaultM = 10.0;
     private const int MapMatchBufferLimit = 5;
     private const int MapMatchTickInterval = 3;
-    private const int OffRouteHysteresisCount = 3;
-    private const double GpsSmoothingAlpha = 0.4; // EMA: neueste Messung gewinnt 40% Gewicht
+    private const int OffRouteHysteresisCount = 2; // 2 consecutive ticks = ~2s at 1Hz GPS
+    private const double GpsSmoothingAlpha = 0.7; // EMA: newest reading gets 70% weight (less lag)
+    // Raw (unsmoothed) distance check: reacts immediately, independent of EMA lag.
+    private const double RawOffRouteThresholdM = 25.0;
+    private const int RawOffRouteHysteresisCount = 2;
     private int _offRouteCounter;
+    private int _rawOffRouteCounter;
 
     private double _offRouteThresholdM = OffRouteThresholdDefaultM;
 
@@ -188,6 +192,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _destination = destination;
             _isNavigating = true;
             _offRouteCounter = 0;
+            _rawOffRouteCounter = 0;
             _lastSmoothedPosition = null;
             _gpsTickCount = 0;
             _verifyInFlight = false;
@@ -246,6 +251,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _maneuvers = [];
             _destination = null;
             _offRouteCounter = 0;
+            _rawOffRouteCounter = 0;
             _verifyInFlight = false;
         }
 
@@ -323,6 +329,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
             _isOffRoute = false;
             _offRouteCounter = 0;
+            _rawOffRouteCounter = 0;
             _lastSmoothedPosition = null;
             _verifyInFlight = false;
         }
@@ -427,7 +434,39 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             if (!_isNavigating || _routeCoords.Count < 2) return;
 
-            // 0. Exponential moving average (EMA): newest reading gets 40% weight.
+            // Raw off-route check (unsmoothed GPS, reacts immediately):
+            // catches real off-route events before EMA lag kicks in.
+            double rawAccuracy = reading.PositionAccuracy;
+            double rawThreshold = Math.Max(_offRouteThresholdM, rawAccuracy * 1.2);
+            if (rawAccuracy > 0 && rawThreshold < RawOffRouteThresholdM)
+                rawThreshold = RawOffRouteThresholdM;
+
+            if (rawAccuracy > 0 && rawAccuracy <= 30.0) // only check with decent GPS
+            {
+                (int _, double rawDistMeters) = FindNearestRouteIndex(
+                    reading.Position.Latitude, reading.Position.Longitude);
+                if (rawDistMeters > rawThreshold)
+                {
+                    _rawOffRouteCounter++;
+                    if (_rawOffRouteCounter >= RawOffRouteHysteresisCount && !_isOffRoute)
+                    {
+                        _isOffRoute = true;
+                        Log.Warning(
+                            "Off route (raw)! {Dist:F1}m from route, accuracy={Accuracy:F1}m, threshold={Threshold:F1}m",
+                            rawDistMeters, rawAccuracy, rawThreshold);
+                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(
+                            reading.Position.Latitude, reading.Position.Longitude, rawDistMeters));
+                        // Don't update maneuver/distances while off-route
+                        return;
+                    }
+                }
+                else
+                {
+                    _rawOffRouteCounter = 0;
+                }
+            }
+
+            // 0. Exponential moving average (EMA): newest reading gets 70% weight.
             double smoothLat = reading.Position.Latitude;
             double smoothLon = reading.Position.Longitude;
             if (_lastSmoothedPosition != null)
@@ -481,6 +520,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             }
 
             _offRouteCounter = 0;
+            _rawOffRouteCounter = 0;
             _isOffRoute = false;
 
             // Periodic Off-Route Verification via API (one in-flight at a time)
