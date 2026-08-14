@@ -65,6 +65,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private NavigationStatus? _navStatus;
     private double _navProgress;
 
+    // ── Navigation follow-view state (map tracks the position) ──
+    private DateTime _lastNavFollowUpdate = DateTime.MinValue;
+    private double _lastFollowLat;
+    private double _lastFollowLon;
+    private double _lastFollowHeading = -1;
+
     protected override void OnInitialized()
     {
         // Subscribe to GPS position updates
@@ -509,10 +515,69 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             await UpdateBreadcrumbAsync(force: force);
 
+            // During navigation, follow the position: keep the map centered on
+            // the current fix and rotate towards the travel direction, like a
+            // navigation app. Throttled – see FollowNavigationViewAsync.
+            if (NavService.IsNavigating)
+            {
+                await FollowNavigationViewAsync(reading);
+            }
+
         }
         finally
         {
             Interlocked.Exchange(ref _markerUpdating, 0);
+        }
+    }
+
+    // ── Navigation follow view: map tracks the rider ─────────────────────
+
+    private const double NavFollowIntervalSec = 1.0;
+    private const double NavFollowMinMoveM = 10.0;
+    private const double NavFollowMinHeadingDelta = 8.0; // degrees
+
+    /// <summary>
+    /// Centers the map on the current GPS fix and rotates it towards the
+    /// travel direction while navigating. Throttled to ~1 Hz and only when
+    /// the position moved enough, so the map does not jitter on every fix.
+    /// </summary>
+    private async Task FollowNavigationViewAsync(GpsReading reading)
+    {
+        OpenStreetMap? map = _map;
+        if (map == null) return;
+
+        double lat = reading.Position.Latitude;
+        double lon = reading.Position.Longitude;
+        DateTime now = DateTime.UtcNow;
+
+        bool movedEnough = _lastNavFollowUpdate == DateTime.MinValue ||
+                           GeoMath.DistanceMeters(_lastFollowLat, _lastFollowLon, lat, lon) > NavFollowMinMoveM;
+        if (!movedEnough || (now - _lastNavFollowUpdate).TotalSeconds < NavFollowIntervalSec)
+            return;
+
+        _lastNavFollowUpdate = now;
+        _lastFollowLat = lat;
+        _lastFollowLon = lon;
+
+        await map.SetCenter(new OpenLayers.Blazor.Coordinate(lon, lat));
+
+        // Heading: prefer GPS course; fall back to the bearing towards the
+        // next route point (GPS course is often 0/unset at low speed or on
+        // some simulators).
+        double heading = reading.Heading > 0 ? reading.Heading : 0;
+        if (heading <= 0)
+        {
+            double? routeBearing = BearingToNextRoutePoint(lat, lon);
+            if (routeBearing is { } bearing)
+                heading = bearing;
+        }
+
+        // Only rotate when the heading changed notably – avoids map wobble
+        // on small GPS course fluctuations.
+        if (heading > 0 && Math.Abs(heading - _lastFollowHeading) > NavFollowMinHeadingDelta)
+        {
+            map.Rotation = GeoMath.ToRad(heading);
+            _lastFollowHeading = heading;
         }
     }
 
@@ -952,6 +1017,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             // Back to north-up view after navigation.
             _map.Rotation = 0;
         }
+
+        // Reset follow-view state so the next navigation starts fresh.
+        _lastNavFollowUpdate = DateTime.MinValue;
+        _lastFollowHeading = -1;
         Snackbar.Add(L["NavigationStopped"], Severity.Info);
     }
 
