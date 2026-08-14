@@ -91,7 +91,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private bool _verifyInFlight;
 
     private const double OffRouteThresholdDefaultM = 10.0;
-    private const int RouteLookaheadWindow = 20;
     private const int MapMatchBufferLimit = 5;
     private const int MapMatchTickInterval = 3;
     private const int OffRouteHysteresisCount = 3;
@@ -439,13 +438,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             double navLon = smoothLon;
 
             // 1. Snap current position to route (for UI/Maneuvers)
-            int hintIndex = _currentManeuverIndex > 0
-                ? _maneuvers[_currentManeuverIndex].BeginShapeIndex
-                : 0;
-
-            (int snappedIndex, double distanceMeters) = FindNearestRouteIndexWithLookahead(
-                navLat, navLon, hintIndex, RouteLookaheadWindow);
-
+            (int snappedIndex, double distanceMeters) = FindNearestRouteIndex(
+                navLat, navLon);
             if (snappedIndex < 0) return;
 
             // Local off-route fallback (works even when the trace_route API is
@@ -524,17 +518,14 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _remainingDistanceKm = remainingKm;
             _remainingTimeMin = remainingMin;
 
-            // Diagnostic trace: full navigation state every 10 ticks so a
-            // stuck maneuver can be read from the exported log (position vs
-            // snapped index vs maneuver index). Raw GPS is navLat/navLon.
-            if (_gpsTickCount % 10 == 0)
-            {
-                Log.Information(
-                    "NAV tick {Tick}: pos=({Lat:F6},{Lon:F6}) snap={Snap} man={Man}/{Total} distTurn={Dist:F0}m rem={Rem:F1}km offRoute={OffRoute}",
-                    _gpsTickCount, navLat, navLon, snappedIndex,
-                    _currentManeuverIndex, _maneuvers.Count,
-                    _distanceToNextTurnM, _remainingDistanceKm, _isOffRoute);
-            }
+            // Diagnostic trace on EVERY reading: with sparse GPS fixes (e.g.
+            // simulator, few points) a %10 throttle never fires, so the log
+            // would show nothing. One line per reading is fine (1 Hz).
+            Log.Information(
+                "NAV tick {Tick}: pos=({Lat:F6},{Lon:F6}) snap={Snap} man={Man}/{Total} distTurn={Dist:F0}m rem={Rem:F1}km offRoute={OffRoute}",
+                _gpsTickCount, navLat, navLon, snappedIndex,
+                _currentManeuverIndex, _maneuvers.Count,
+                _distanceToNextTurnM, _remainingDistanceKm, _isOffRoute);
 
             double speedKmh = reading.Speed * 3.6;
 
@@ -575,19 +566,20 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     }
 
     // ── Route matching ───────────────────────────────────────────────────
-    private (int Index, double DistanceMeters) FindNearestRouteIndexWithLookahead(
-        double lat, double lon, int hintIndex, int window)
+    private (int Index, double DistanceMeters) FindNearestRouteIndex(
+        double lat, double lon)
     {
         if (_routeCoords.Count == 0)
             return (-1, double.MaxValue);
 
-        int start = Math.Max(0, hintIndex - window);
-        int end = Math.Min(_routeCoords.Count - 1, hintIndex + window);
-
-        int bestIndex = start;
+        int bestIndex = 0;
         double bestDistSq = double.MaxValue;
 
-        for (int i = start; i < end; i++)
+        // Full-route scan: the old +-20 hint window pinned the snap to the
+        // window edge on GPS jumps (curve taken between two sparse fixes),
+        // so the maneuver never advanced past the turn. A few hundred route
+        // points at 1 Hz is trivial to scan completely.
+        for (int i = 0; i < _routeCoords.Count - 1; i++)
         {
             double distSq = PointToSegmentDistanceSq(
                 lon, lat,
@@ -600,35 +592,12 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             bestIndex = t >= 0.5 ? i + 1 : i;
         }
 
-        // PointToSegmentDistanceSq returns degrees², so the 50 m fallback
-        // must be converted to degrees² too (50²/111320²). Otherwise the
-        // full-route scan never fires (2500 degrees² ~ 5000 km²) and the
-        // snap pins to the ±20 window edge after a curve jump.
-        const double FallbackThresholdSq = 50.0 * 50.0 / (111320.0 * 111320.0);
-        if (bestDistSq > FallbackThresholdSq)
-        {
-            bestDistSq = double.MaxValue;
-            bestIndex = 0;
-
-            for (int i = 0; i < _routeCoords.Count - 1; i++)
-            {
-                double distSq = PointToSegmentDistanceSq(
-                    lon, lat,
-                    _routeCoords[i].Longitude, _routeCoords[i].Latitude,
-                    _routeCoords[i + 1].Longitude, _routeCoords[i + 1].Latitude,
-                    out double t);
-
-                if (!(distSq < bestDistSq)) continue;
-                bestDistSq = distSq;
-                bestIndex = t >= 0.5 ? i + 1 : i;
-            }
-        }
-
         double distanceMeters = GeoMath.DistanceMeters(
             _routeCoords[bestIndex].Latitude, _routeCoords[bestIndex].Longitude,
             lat, lon);
         return (bestIndex, distanceMeters);
     }
+
 
     private static double PointToSegmentDistanceSq(
         double px, double py,
@@ -728,8 +697,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             Coordinate lastSnapped = PolylineEncoder.DecodePolyline6(snappedTrip.Legs[0].Shape).Last();
 
-            (int _, double distToRoute) = FindNearestRouteIndexWithLookahead(
-                lastSnapped.Latitude, lastSnapped.Longitude, hintIndex, RouteLookaheadWindow);
+            (int _, double distToRoute) = FindNearestRouteIndex(
+                lastSnapped.Latitude, lastSnapped.Longitude);
 
             lock (_lock)
             {
