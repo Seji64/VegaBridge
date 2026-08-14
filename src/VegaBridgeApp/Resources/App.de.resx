@@ -188,4 +188,16 @@
   <!-- Not Found -->
   <data name="NotFoundTitle" xml:space="preserve"><value>Nicht gefunden</value></data>
   <data name="NotFoundBody" xml:space="preserve"><value>Entschuldigung, der gesuchte Inhalt existiert nicht.</value></data>
+
+  <!-- Debug Logging -->
+  <data name="DebugSection" xml:space="preserve"><value>Debug-Protokoll</value></data>
+  <data name="DebugLoggingToggle" xml:space="preserve"><value>Debug-Protokoll aufzeichnen</value></data>
+  <data name="DebugLoggingHelp" xml:space="preserve"><value>Zeichnet nur auf, solange aktiviert. Bei Navigationsproblemen: aktivieren, fahren, exportieren.</value></data>
+  <data name="DebugExportLog" xml:space="preserve"><value>Protokoll exportieren</value></data>
+  <data name="DebugClearLog" xml:space="preserve"><value>Protokoll leeren</value></data>
+  <data name="DebugLoggingOn" xml:space="preserve"><value>Debug-Protokoll gestartet</value></data>
+  <data name="DebugLoggingOff" xml:space="preserve"><value>Debug-Protokoll gestoppt</value></data>
+  <data name="DebugLogEmpty" xml:space="preserve"><value>Protokoll ist leer – erst aktivieren und fahren.</value></data>
+  <data name="DebugLogCleared" xml:space="preserve"><value>Protokoll geleert</value></data>
+  <data name="DebugExportError" xml:space="preserve"><value>Exportfehler: {0}</value></data>
 </root>

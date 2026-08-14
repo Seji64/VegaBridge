@@ -205,6 +205,49 @@
             </MudCardContent>
         </MudCard>
 
+        <!-- ── Debug Logging ─────────────────────────────────────────────── -->
+        <MudCard Elevation="2" Style="border-radius: 16px;">
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2" Class="mb-3">@L["DebugSection"]</MudText>
+
+                <MudSwitch T="bool"
+                           Color="Color.Secondary"
+                           Value="@DebugLoggingEnabled"
+                           ValueChanged="(bool v) => SetDebugLogging(v)"
+                           Class="mb-3">
+                    @L["DebugLoggingToggle"]
+                </MudSwitch>
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3">
+                    @L["DebugLoggingHelp"]
+                </MudText>
+
+                <MudStack Spacing="2">
+                    <MudButton
+                        Variant="Variant.Outlined"
+                        Color="Color.Secondary"
+                        Size="Size.Small"
+                        StartIcon="@Icons.Material.Filled.FileDownload"
+                        FullWidth="true"
+                        Disabled="!DebugLoggingEnabled"
+                        OnClick="@ExportDebugLog">
+                        @L["DebugExportLog"]
+                    </MudButton>
+
+                    <MudButton
+                        Variant="Variant.Outlined"
+                        Color="Color.Error"
+                        Size="Size.Small"
+                        StartIcon="@Icons.Material.Filled.ClearAll"
+                        FullWidth="true"
+                        Disabled="!DebugLoggingEnabled"
+                        OnClick="@ClearDebugLog">
+                        @L["DebugClearLog"]
+                    </MudButton>
+                </MudStack>
+            </MudCardContent>
+        </MudCard>
+
     </MudStack>
 
 </MudContainer>

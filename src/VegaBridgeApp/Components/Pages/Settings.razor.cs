@@ -8,6 +8,7 @@ using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Services.BLE.Plugins;
 using VegaBridgeApp.Models.BLE.MvAgusta;
+using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Components.Pages;
 
@@ -306,6 +307,61 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             Preferences.Remove("home_lon");
         }
         StateHasChanged();
+    }
+
+    // ── Debug logging (collects in-memory while enabled) ────────────────
+
+    private bool DebugLoggingEnabled => DebugLogSink.Instance.IsEnabled;
+
+    private void SetDebugLogging(bool enabled)
+    {
+        DebugLogSink.Instance.SetEnabled(enabled);
+        if (enabled)
+        {
+            DebugLogSink.Instance.Clear(); // start a fresh capture
+            Log.Information("Debug logging started (from Settings)");
+        }
+        else
+        {
+            Log.Information("Debug logging stopped (from Settings)");
+        }
+        Snackbar.Add(
+            enabled ? L["DebugLoggingOn"] : L["DebugLoggingOff"],
+            enabled ? Severity.Success : Severity.Info);
+        StateHasChanged();
+    }
+
+    private async Task ExportDebugLog()
+    {
+        string log = DebugLogSink.Instance.GetLog();
+        if (string.IsNullOrWhiteSpace(log))
+        {
+            Snackbar.Add(L["DebugLogEmpty"], Severity.Info);
+            return;
+        }
+
+        try
+        {
+            string path = Path.Combine(FileSystem.AppDataDirectory, $"nav-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+            await File.WriteAllTextAsync(path, log);
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = "Nav-Log",
+                File = new ShareFile(path)
+            });
+            Log.Information("Debug log exported: {Path} ({Bytes} bytes)", path, log.Length);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Debug log export failed");
+            Snackbar.Add(string.Format(L["DebugExportError"], ex.Message), Severity.Error);
+        }
+    }
+
+    private void ClearDebugLog()
+    {
+        DebugLogSink.Instance.Clear();
+        Snackbar.Add(L["DebugLogCleared"], Severity.Info);
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────

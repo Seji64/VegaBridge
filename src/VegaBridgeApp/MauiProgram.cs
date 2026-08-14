@@ -69,15 +69,16 @@ public static class MauiProgram
         builder.Services.AddSingleton<GpsService>();
         // ── Serilog: structured console logging ──────────────────────────
         // Console output is not reliably visible in MAUI, so every line also
-        // goes to the in-memory DebugLogSink (exportable from the Map page).
-        // Always registered: Map.razor uses it via the static Instance, so it
-        // must resolve in Release too (the export buttons are DEBUG-only).
+        // goes to the in-memory DebugLogSink (exportable from the Settings
+        // page). The sink itself only buffers while IsEnabled is true
+        // (toggled in Settings), so normal use costs nothing.
         builder.Services.AddSingleton(DebugLogSink.Instance);
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
             .MinimumLevel.Override("System", LogEventLevel.Warning)
-            //.WriteTo.Sink(DebugLogSink.Instance)
+            .Enrich.FromLogContext()
+            .WriteTo.Sink(DebugLogSink.Instance)
             .CreateLogger();
 
         builder.Logging.ClearProviders();
