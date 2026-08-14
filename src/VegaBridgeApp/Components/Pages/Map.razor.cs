@@ -11,6 +11,7 @@ using Serilog;
 using Shiny.Locations;
 using VegaBridgeApp.Models.Utils;
 using VegaBridgeApp.Services.Navigation;
+using VegaBridgeApp.Services.Debug;
 using VegaBridgeApp.Utils;
 using Coordinate = VegaBridgeApp.Models.Valhalla.Coordinate;
 using Location = VegaBridgeApp.Models.Valhalla.Location;
@@ -868,6 +869,45 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         await ClearGpsMarkersAsync();
         Snackbar.Add(L["NavigationStopped"], Severity.Info);
     }
+
+    // ── Debug: log export (console output is not visible in MAUI) ────────
+    // The DebugLogSink collects every Serilog line; the buttons write it to
+    // a file and open the system share sheet.
+
+    private bool ShowDevTools => true;
+
+    private async Task ExportDebugLog()
+    {
+        string log = DebugLogSink.Instance.GetLog();
+        if (string.IsNullOrWhiteSpace(log))
+        {
+            Snackbar.Add("Log ist leer – erst navigieren/fahren.", Severity.Info);
+            return;
+        }
+
+        try
+        {
+            string path = Path.Combine(FileSystem.AppDataDirectory, $"nav-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+            await File.WriteAllTextAsync(path, log);
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = "Nav-Log",
+                File = new ShareFile(path)
+            });
+            Log.Information("Debug log exported: {Path} ({Bytes} bytes)", path, log.Length);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Export-Fehler: " + ex.Message, Severity.Error);
+        }
+    }
+
+    private void ClearDebugLog()
+    {
+        DebugLogSink.Instance.Clear();
+        Snackbar.Add("Log gelöscht", Severity.Info);
+    }
+
 
     private async Task SkipWaypoint()
     {

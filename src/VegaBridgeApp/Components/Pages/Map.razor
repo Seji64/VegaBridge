@@ -127,7 +127,24 @@
                     Style="position: absolute; bottom: 250px; right: 16px; z-index: 200; pointer-events: auto;"
                     OnClick="@ExitNavigation"/>
             }
-            
+
+            @if (ShowDevTools)
+            {
+                <!-- Debug: export in-memory log (console is not visible in MAUI) -->
+                <MudFab
+                    Color="Color.Secondary"
+                    StartIcon="@Icons.Material.Filled.FileDownload"
+                    Size="Size.Small"
+                    Style="position: absolute; bottom: 160px; left: 16px; z-index: 200; pointer-events: auto;"
+                    OnClick="@ExportDebugLog"/>
+                <MudFab
+                    Color="Color.Secondary"
+                    StartIcon="@Icons.Material.Filled.Delete"
+                    Size="Size.Small"
+                    Style="position: absolute; bottom: 200px; left: 16px; z-index: 200; pointer-events: auto;"
+                    OnClick="@ClearDebugLog"/>
+            }
+
             @if (!NavService.IsNavigating)
             {
                 <!-- Route Planning Panel -->

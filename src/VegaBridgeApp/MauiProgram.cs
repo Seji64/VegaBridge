@@ -14,6 +14,7 @@ using VegaBridgeApp.Services.Geocoding;
 using VegaBridgeApp.Services.Location;
 using VegaBridgeApp.Services.Navigation;
 using VegaBridgeApp.Services.Routes;
+using VegaBridgeApp.Services.Debug;
 using VegaBridgeApp.Services.Valhalla;
 
 namespace VegaBridgeApp;
@@ -67,13 +68,16 @@ public static class MauiProgram
         builder.Services.AddGps<GpsDelegate>();
         builder.Services.AddSingleton<GpsService>();
         // ── Serilog: structured console logging ──────────────────────────
+        // Console output is not reliably visible in MAUI, so every line also
+        // goes to the in-memory DebugLogSink (exportable from the Map page).
+        // Always registered: Map.razor uses it via the static Instance, so it
+        // must resolve in Release too (the export buttons are DEBUG-only).
+        builder.Services.AddSingleton(DebugLogSink.Instance);
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
             .MinimumLevel.Override("System", LogEventLevel.Warning)
-            .Enrich.FromLogContext()
-            .WriteTo.Console(
-                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
+            .WriteTo.Sink(DebugLogSink.Instance)
             .CreateLogger();
 
         builder.Logging.ClearProviders();
