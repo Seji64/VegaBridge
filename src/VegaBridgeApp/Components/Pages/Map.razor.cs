@@ -444,15 +444,21 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     public async Task OnFinishAsync()
     {
         if (_disposed) return;
-        Snackbar.Add(L["DestinationReached"], Severity.Success);
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() =>
+        {
+            Snackbar.Add(L["DestinationReached"], Severity.Success);
+            StateHasChanged();
+        });
     }
 
     public async Task OnCancelAsync()
     {
         if (_disposed) return;
-        Snackbar.Add(L["NavigationStopped"], Severity.Info);
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() =>
+        {
+            Snackbar.Add(L["NavigationStopped"], Severity.Info);
+            StateHasChanged();
+        });
     }
 
     public async Task OnStartAsync(NavigationStartInfo start)
@@ -466,15 +472,26 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (_disposed || _destinationLocation == null || _isLoading) return;
         if ((DateTime.UtcNow - _lastRerouteTime).TotalSeconds < 30) return;
         _lastRerouteTime = DateTime.UtcNow;
-        Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
-        await RerouteAsync(latitude, longitude);
+
+        // Sink callbacks arrive on the GPS thread – all UI work (snackbar,
+        // reroute dialog flow) must run on the Blazor dispatcher.
+        await InvokeAsync(async () =>
+        {
+            Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
+            await RerouteAsync(latitude, longitude);
+        });
     }
 
     public async Task OnRouteUpdatedAsync(RouteResponse response)
     {
         if (_disposed) return;
         _currentRouteResponse = response;
-        await ShowRouteOnMap(response);
+
+        // Sink callbacks arrive on the GPS thread; ShowRouteOnMap touches
+        // MarkersList and calls StateHasChanged, so it must run on the
+        // Blazor dispatcher. Without this the reroute map update throws
+        // and the route disappears from the map.
+        await InvokeAsync(async () => await ShowRouteOnMap(response));
     }
 
     #endregion
