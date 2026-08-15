@@ -1290,6 +1290,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
         else
         {
+            // No GPS fix yet – keep the initial zoom level (the Zoom="8"
+            // markup parameter was removed so re-renders cannot reset the
+            // view during navigation; the default comes from here instead).
+            await map.SetZoom(8);
             Snackbar.Add(L["NoGpsFix"], Severity.Info);
         }
     }
