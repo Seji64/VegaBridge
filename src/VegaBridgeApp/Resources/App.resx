@@ -200,4 +200,15 @@
   <data name="DebugLogEmpty" xml:space="preserve"><value>Log is empty – enable logging and ride first.</value></data>
   <data name="DebugLogCleared" xml:space="preserve"><value>Log cleared</value></data>
   <data name="DebugExportError" xml:space="preserve"><value>Export error: {0}</value></data>
+
+  <!-- Connection Test -->
+  <data name="LongTestTitle" xml:space="preserve"><value>Connection Test</value></data>
+  <data name="LongTestHelp" xml:space="preserve"><value>Sends a ~5 minute navigation simulation with keepalive pings. Start it, switch the screen off, and check afterwards whether the connection to the bike survived.</value></data>
+  <data name="LongTestStart" xml:space="preserve"><value>Start 5-minute test</value></data>
+  <data name="LongTestStop" xml:space="preserve"><value>Stop test</value></data>
+  <data name="LongTestProgress" xml:space="preserve"><value>Step {0} of {1} – keep the screen off…</value></data>
+  <data name="LongTestNotConnected" xml:space="preserve"><value>Connect a device first</value></data>
+  <data name="LongTestDone" xml:space="preserve"><value>Connection test finished – connection survived</value></data>
+  <data name="LongTestStopped" xml:space="preserve"><value>Connection test stopped</value></data>
+  <data name="LongTestError" xml:space="preserve"><value>Test failed: {0}</value></data>
 </root>
