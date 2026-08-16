@@ -160,6 +160,13 @@ public static class MauiProgram
                 Delay = TimeSpan.FromSeconds(1),
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true,
+                // A 504 from Overpass means the query was too heavy for the
+                // server (timeout) – retrying the SAME query will just get
+                // another 504. Fail fast so the provider timeout in the
+                // aggregator can surface the other providers' results.
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .Handle<HttpRequestException>()
+                    .HandleResult(r => r.StatusCode != System.Net.HttpStatusCode.GatewayTimeout)
             });
         });
 

@@ -22,6 +22,13 @@ public class RoadClosureService : IRoadClosureService
     /// <summary>Default corridor used when the caller does not specify one.</summary>
     public const double DefaultCorridorMeters = 15;
 
+    /// <summary>
+    /// Hard timeout per provider. Providers that are slower (e.g. Overpass
+    /// 504s) are cancelled so their result is not delivered, while faster
+    /// providers (MobiData from disk cache) still report their closures.
+    /// </summary>
+    public static readonly TimeSpan ProviderTimeout = TimeSpan.FromSeconds(12);
+
     public RoadClosureService(IEnumerable<IRoadClosureProvider> providers)
     {
         _providers = providers.Where(p => p.IsAvailable).ToList();
@@ -88,12 +95,16 @@ public class RoadClosureService : IRoadClosureService
         DateTimeOffset checkedAt = DateTimeOffset.UtcNow;
         List<string> failures = [];
 
-        // Run the enabled providers in parallel – Overpass (2 requests) and
-        // MobiData (feed download) together can take 20+ s sequentially.
-        // Parallel execution cuts the wait to the slowest provider.
+        // Run the enabled providers in parallel with a hard per-provider
+        // timeout – Overpass (2 requests) can stall (504) while MobiData
+        // (disk cache) answers in ~1s. A slow provider is cancelled so its
+        // absence does not block the closures the fast provider found.
+        using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(ProviderTimeout);
+
         List<(string Key, Task<RoadClosureCheckResult> Task)> pending = enabledKeys
             .Where(k => _byKey.ContainsKey(k))
-            .Select(k => (k, _byKey[k].CheckRouteAsync(routeCoords, corridorMeters, cancellationToken)))
+            .Select(k => (k, _byKey[k].CheckRouteAsync(routeCoords, corridorMeters, timeoutCts.Token)))
             .ToList();
 
         while (pending.Count > 0)
@@ -115,7 +126,14 @@ public class RoadClosureService : IRoadClosureService
             }
             catch (OperationCanceledException)
             {
-                throw;
+                // Only propagate cancellation when the CALLER cancelled
+                // (page closed, navigation stopped). Our per-provider
+                // timeout just means this provider was too slow – its
+                // absence must not block the other providers' results.
+                if (cancellationToken.IsCancellationRequested)
+                    throw;
+                Log.Warning("Road closure provider {Key} timed out after {Timeout}", key, ProviderTimeout);
+                failures.Add($"{key}: timed out");
             }
             catch (Exception ex)
             {

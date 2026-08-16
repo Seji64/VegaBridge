@@ -110,8 +110,8 @@ public class OverpassRoadClosureProvider : IRoadClosureProvider
                 (
                   way["highway"="construction"]({bbox});
                   way["highway"]["construction"]({bbox});
-                  way["access"="no"]({bbox});
-                  way["motor_vehicle"="no"]({bbox});
+                  way["highway"]["access"="no"]({bbox});
+                  way["highway"]["motor_vehicle"="no"]({bbox});
                   way["barrier"~"^(gate|bollard|lift_gate|swing_gate|block)$"]({bbox});
                 );
                 out center tags;
