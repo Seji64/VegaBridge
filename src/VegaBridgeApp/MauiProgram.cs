@@ -182,7 +182,14 @@ public static class MauiProgram
 
         builder.Services.AddSingleton<IRoadClosureProvider, OverpassRoadClosureProvider>();
         builder.Services.AddSingleton<IRoadClosureProvider, MobiDataRoadClosureProvider>();
-        builder.Services.AddSingleton<IRoadClosureService, RoadClosureService>();
+        // Register the concrete type first, then map the interface onto the
+        // SAME singleton instance – the Settings page injects the concrete
+        // type (for the provider list + persistence), the Map injects the
+        // interface. Two separate registrations would create two instances
+        // and the provider selection would not be shared.
+        builder.Services.AddSingleton<RoadClosureService>();
+        builder.Services.AddSingleton<IRoadClosureService>(
+            sp => sp.GetRequiredService<RoadClosureService>());
 
         // ── Route Persistence & GPX Conversion ───────────────────────────────
         builder.Services.AddSingleton<IRouteStorageService, RouteStorageService>();
