@@ -78,20 +78,30 @@ public class RoadClosureService : IRoadClosureService
         DateTimeOffset checkedAt = DateTimeOffset.UtcNow;
         List<string> failures = [];
 
-        foreach (string key in enabledKeys)
+        // Run the enabled providers in parallel – Overpass (2 requests) and
+        // MobiData (feed download) together can take 20+ s sequentially.
+        // Parallel execution cuts the wait to the slowest provider.
+        List<(string Key, Task<RoadClosureCheckResult> Task)> pending = enabledKeys
+            .Where(k => _byKey.ContainsKey(k))
+            .Select(k => (k, _byKey[k].CheckRouteAsync(routeCoords, corridorMeters, cancellationToken)))
+            .ToList();
+
+        while (pending.Count > 0)
         {
-            if (!_byKey.TryGetValue(key, out IRoadClosureProvider? provider))
-                continue;
+            // Wait for whichever provider finishes next, so a throwing
+            // provider does not discard the other results.
+            Task<RoadClosureCheckResult> done = await Task.WhenAny(pending.Select(p => p.Task));
+            int idx = pending.FindIndex(p => p.Task == done);
+            (string key, Task<RoadClosureCheckResult> task) = pending[idx];
+            pending.RemoveAt(idx);
 
             try
             {
-                RoadClosureCheckResult result = await provider.CheckRouteAsync(
-                    routeCoords, corridorMeters, cancellationToken);
-
+                RoadClosureCheckResult result = await task;
                 if (result.IsSuccess)
                     all.AddRange(result.Closures);
                 else if (!string.IsNullOrEmpty(result.ErrorMessage))
-                    failures.Add($"{provider.Key}: {result.ErrorMessage}");
+                    failures.Add($"{key}: {result.ErrorMessage}");
             }
             catch (OperationCanceledException)
             {
@@ -100,7 +110,7 @@ public class RoadClosureService : IRoadClosureService
             catch (Exception ex)
             {
                 Log.Error(ex, "Road closure provider {Key} failed", key);
-                failures.Add($"{provider.Key}: {ex.Message}");
+                failures.Add($"{key}: {ex.Message}");
             }
         }
 

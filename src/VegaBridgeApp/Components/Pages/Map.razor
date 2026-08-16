@@ -113,6 +113,19 @@
                         </MudStack>
                     </div>
                 }
+
+                <!-- Road closure check indicator -->
+                @if (_closureCheckRunning)
+                {
+                    <MudPaper
+                        Elevation="3"
+                        Style="position: absolute; top: 16px; left: 16px; z-index: 200; pointer-events: auto; border-radius: 12px; padding: 8px 14px;">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudProgressCircular Color="Color.Warning" Size="Size.Small" Indeterminate="true" />
+                            <MudText Typo="Typo.body2">@L["ClosureCheckRunning"]</MudText>
+                        </MudStack>
+                    </MudPaper>
+                }
                 
                 <!-- Skip Waypoint button -->
                 <MudFab

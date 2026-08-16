@@ -43,10 +43,73 @@ public class MobiDataRoadClosureProvider : IRoadClosureProvider
     private DateTimeOffset _cacheExpires = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
 
+    // Persistent cache file: the feed is ~2 MB and changes rarely, so it is
+    // stored on disk and reused across app restarts within CacheDuration.
+    private static readonly string CacheFilePath =
+        Path.Combine(FileSystem.AppDataDirectory, "mobidata_roadworks.json");
+    private static readonly string CacheStampFilePath =
+        Path.Combine(FileSystem.AppDataDirectory, "mobidata_roadworks.timestamp");
+
     public MobiDataRoadClosureProvider(IHttpClientFactory httpClientFactory)
     {
         HttpClient httpClient = httpClientFactory.CreateClient(HttpClientName);
         _flurlClient = new FlurlClient(httpClient);
+        TryLoadPersistentCache();
+    }
+
+    /// <summary>
+    /// Loads the on-disk cache (if fresh) into memory so a fast path exists
+    /// before the first network call. A stale or missing cache is ignored –
+    /// <see cref="GetFeaturesAsync"/> then downloads the feed.
+    /// </summary>
+    private void TryLoadPersistentCache()
+    {
+        try
+        {
+            if (!File.Exists(CacheFilePath) || !File.Exists(CacheStampFilePath))
+                return;
+
+            string stamp = File.ReadAllText(CacheStampFilePath);
+            if (!DateTimeOffset.TryParse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset saved))
+                return;
+
+            if (DateTimeOffset.UtcNow - saved > CacheDuration)
+                return; // stale
+
+            string json = File.ReadAllText(CacheFilePath);
+            MobiDataFeed? feed = JsonSerializer.Deserialize<MobiDataFeed>(json);
+            if (feed?.Features is null)
+                return;
+
+            _cachedFeatures = feed.Features;
+            _cacheExpires = saved + CacheDuration;
+            Log.Information("MobiData BW feed loaded from disk cache: {Count} features", _cachedFeatures.Count);
+        }
+        catch (Exception ex)
+        {
+            // Corrupt cache file – treat as no cache, download fresh.
+            Log.Warning(ex, "Failed to load MobiData BW disk cache");
+            _cachedFeatures = null;
+        }
+    }
+
+    /// <summary>
+    /// Persists the downloaded feed to disk so app restarts within the cache
+    /// window do not re-download the ~2 MB feed.
+    /// </summary>
+    private void SavePersistentCache(List<MobiDataFeature> features)
+    {
+        try
+        {
+            string json = JsonSerializer.Serialize(new MobiDataFeed { Features = features });
+            File.WriteAllText(CacheFilePath, json);
+            File.WriteAllText(CacheStampFilePath, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            Log.Information("MobiData BW feed persisted to disk cache");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to persist MobiData BW disk cache");
+        }
     }
 
     /// <inheritdoc />
@@ -182,6 +245,7 @@ public class MobiDataRoadClosureProvider : IRoadClosureProvider
 
             _cachedFeatures = feed?.Features ?? [];
             _cacheExpires = DateTimeOffset.UtcNow + CacheDuration;
+            SavePersistentCache(_cachedFeatures);
             Log.Information("MobiData BW feed cached: {Count} features", _cachedFeatures.Count);
             return _cachedFeatures;
         }

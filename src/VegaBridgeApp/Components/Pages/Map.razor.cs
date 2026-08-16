@@ -81,6 +81,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private readonly List<RoadClosure> _closures = [];
     private bool _closureCheckInFlight;
     private DateTime _lastClosureCheckUtc = DateTime.MinValue;
+    private bool _closureCheckRunning;
 
     protected override void OnInitialized()
     {
@@ -1331,6 +1332,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if ((DateTime.UtcNow - _lastClosureCheckUtc).TotalSeconds < 60) return;
         _lastClosureCheckUtc = DateTime.UtcNow;
         _closureCheckInFlight = true;
+        _closureCheckRunning = true;
+        await InvokeAsync(StateHasChanged);
 
         try
         {
@@ -1371,6 +1374,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         finally
         {
             _closureCheckInFlight = false;
+            _closureCheckRunning = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -1387,7 +1392,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         foreach (RoadClosure closure in _closures)
         {
             map.MarkersList.Add(new Marker(
-                MarkerType.MarkerPin,
+                MarkerType.MarkerFlag,
                 new OpenLayers.Blazor.Coordinate(closure.Longitude, closure.Latitude),
                 "⚠",
                 PinColor.Red));

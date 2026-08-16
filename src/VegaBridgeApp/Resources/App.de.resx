@@ -215,6 +215,7 @@
   <!-- Road Closures -->
   <data name="ClosuresFound" xml:space="preserve"><value>⚠ {0} Straßensperrung(en) in der Nähe der Route</value></data>
   <data name="ClosureCheckUnavailable" xml:space="preserve"><value>Sperrungs-Check nicht verfügbar</value></data>
+  <data name="ClosureCheckRunning" xml:space="preserve"><value>Prüfe Straßensperrungen…</value></data>
 
   <!-- Road Closure Providers -->
   <data name="ClosureProvidersTitle" xml:space="preserve"><value>Sperrungs-Quellen</value></data>
