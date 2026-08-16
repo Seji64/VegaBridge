@@ -124,7 +124,45 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
-    public void StopScanning()
+    /// <summary>
+    /// Falls back to GATT service-UUID based plugin matching. Needed for
+    /// peripherals surfaced via <c>GetConnectedPeripherals()</c> whose name
+    /// is still "Unknown" (iOS did not read it while connected through the
+    /// OS) – name-based IsCompatible matching would miss them.
+    /// </summary>
+    private async Task<IBleDevicePlugin?> SelectPluginByServiceUuidAsync(IPeripheral peripheral)
+    {
+        try
+        {
+            IReadOnlyList<IService> services = await peripheral.GetServices().FirstOrDefaultAsync();
+            if (services is null || services.Count == 0)
+            {
+                Log.Warning("BLE: no GATT services found for {Uuid} – plugin fallback failed", peripheral.Uuid);
+                return null;
+            }
+
+            foreach (IBleDevicePlugin plugin in _plugins)
+            {
+                if (services.Any(s => s.Uuid == plugin.ServiceUuid))
+                {
+                    Log.Information("BLE: plugin {Plugin} matched via service UUID {Uuid} for {Device}",
+                        plugin.DisplayName, plugin.ServiceUuid, peripheral.Uuid);
+                    return plugin;
+                }
+            }
+
+            Log.Warning("BLE: no plugin matched the service list of {Uuid} ({Services} services)",
+                peripheral.Uuid, services.Count);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "BLE: service-UUID plugin matching failed for {Uuid}", peripheral.Uuid);
+            return null;
+        }
+    }
+
+    private void StopScanning()
     {
         Log.Information("Stopping BLE scan");
         _scanTimeoutCts?.Cancel();
@@ -160,9 +198,18 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             _activePeripheral = peripheral;
             
-            // Plugin Selection
-            BleDeviceInfo deviceInfo = new() { Uuid = deviceUuid, Name = peripheral.Name! };
+            // Plugin Selection. Name-based matching works for peripherals
+            // found via advertising. But GetConnectedPeripherals() can return
+            // a device the OS has already connected to, whose name is still
+            // "Unknown" (not read yet). Fall back to GATT service-UUID
+            // matching against each plugin's ServiceUuid.
+            BleDeviceInfo deviceInfo = new() { Uuid = deviceUuid, Name = peripheral.Name ?? "Unknown" };
             _activePlugin = _plugins.FirstOrDefault(p => p.IsCompatible(deviceInfo));
+
+            if (_activePlugin == null)
+            {
+                _activePlugin = await SelectPluginByServiceUuidAsync(peripheral);
+            }
 
             if (_activePlugin == null)
             {
