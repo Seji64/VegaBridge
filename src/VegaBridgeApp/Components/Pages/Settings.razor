@@ -37,8 +37,7 @@
                             FullWidth="true">
                             @L["Disconnect"]
                         </MudButton>
-
-                        //TODO: This should use the TestFunction of the current plugin
+                        
                         <MudButton
                             Variant="Variant.Text"
                             Color="Color.Info"
@@ -47,7 +46,7 @@
                             StartIcon="@Icons.Material.Filled.Send"
                             FullWidth="true"
                             OnClick='@(async () => await BleManager.SendCommandAsync(Commands.MSG, "whatsapp", "Test from VegaBridge", "VegaBridge"))'>
-                            Test MSG
+                            Test Connection
                         </MudButton>
 
                         <!-- <MudButton
@@ -170,7 +169,7 @@
         </MudCard>
 
         <!-- ── Connection Test ─────────────────────────────────────────── -->
-        <MudCard Elevation="2" Style="border-radius: 16px;">
+        @*<MudCard Elevation="2" Style="border-radius: 16px;">
             <MudCardContent>
                 <MudText Typo="Typo.subtitle2" Class="mb-3">@L["LongTestTitle"]</MudText>
 
@@ -206,7 +205,7 @@
                     </MudButton>
                 }
             </MudCardContent>
-        </MudCard>
+        </MudCard>*@
 
         <!-- ── Road Closure Providers ──────────────────────────────────── -->
         <MudCard Elevation="2" Style="border-radius: 16px;">
