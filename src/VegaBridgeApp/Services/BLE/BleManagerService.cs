@@ -4,6 +4,7 @@ using System.Reactive.Subjects;
 using Serilog;
 using Shiny.BluetoothLE;
 using VegaBridgeApp.Models.BLE;
+using VegaBridgeApp.Services.BLE.Plugins;
 
 namespace VegaBridgeApp.Services.BLE;
 
@@ -151,6 +152,23 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             
             SetupConnectionMonitoring(peripheral);
             SetupNotifications(peripheral);
+
+            // Subscribe to write failures: a dead link (iOS dropped it while
+            // the app was in the background) surfaces as a write timeout.
+            // Reconnect instead of pinging/sending into the void.
+            if (_activePlugin is MvAgustaBlePlugin mvPlugin)
+            {
+                mvPlugin.WriteFailed -= OnPluginWriteFailed;
+                mvPlugin.WriteFailed += OnPluginWriteFailed;
+            }
+
+            // After a reconnect the keepalive must resume if a navigation
+            // session is active (the plugin tracks _pingShouldRun).
+            if (_activePlugin is MvAgustaBlePlugin mv)
+            {
+                BleConnectedDeviceWrapper wrapper = new(peripheral, mv);
+                await mv.EnsurePingRunningAsync(wrapper);
+            }
 
             UpdateDeviceList();
             return true;
@@ -441,7 +459,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             });
     }
 
-    private async void HandleUnexpectedDisconnection(IPeripheral peripheral)
+    private void HandleUnexpectedDisconnection(IPeripheral peripheral)
     {
         try
         {
@@ -452,13 +470,34 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             UpdateDeviceList();
             UpdateError("Connection lost. Attempting to reconnect...");
 
-            await RetryConnectionAsync(Guid.Parse(peripheral.Uuid));
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await RetryConnectionAsync(Guid.Parse(peripheral.Uuid));
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Reconnect after unexpected disconnection failed");
+                }
+            });
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Critical error during unexpected disconnection handling for {Uuid}", peripheral.Uuid);
             UpdateError($"Error during reconnection: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// A plugin write failed – the classic sign that iOS dropped the BLE
+    /// link while the app was in the background (write timeout without a
+    /// disconnect event). Reconnect immediately.
+    /// </summary>
+    private void OnPluginWriteFailed(Exception ex)
+    {
+        Log.Warning("Plugin write failed ({Message}) – invalidating connection", ex.Message);
+        InvalidateConnectionAndReconnect();
     }
 
     private async Task<bool> RetryConnectionAsync(Guid deviceUuid)
