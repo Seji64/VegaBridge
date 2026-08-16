@@ -81,15 +81,19 @@ public class MobiDataRoadClosureProvider : IRoadClosureProvider
                     continue;
 
                 // 2. Corridor check over the full LineString geometry: the
-                //    roadworks must actually lie on the route.
+                //    roadworks must actually lie on the route. Coordinates
+                //    are JsonElements because some feed entries are
+                //    malformed – a single bad entry is skipped, not fatal.
                 double minDist = double.MaxValue;
                 (double Lat, double Lon) nearest = (0, 0);
                 bool anyNear = false;
-                for (int i = 0; i < coords.Count; i++)
+                foreach (JsonElement c in coords)
                 {
+                    if (c.ValueKind != JsonValueKind.Array || c.GetArrayLength() < 2)
+                        continue;
                     // GeoJSON coordinates are [lon, lat].
-                    double lon = coords[i][0];
-                    double lat = coords[i][1];
+                    double lon = c[0].GetDouble();
+                    double lat = c[1].GetDouble();
                     double d = DistanceToRoute(lat, lon, routeCoords);
                     if (d < minDist)
                     {
@@ -169,10 +173,11 @@ public class MobiDataRoadClosureProvider : IRoadClosureProvider
             }
             catch (JsonException ex)
             {
+                // Do NOT cache an empty list here – the feed may be
+                // temporarily broken, and a 6h empty cache would blind the
+                // closure check for the rest of the ride. Report instead.
                 Log.Warning(ex, "MobiData BW returned malformed JSON");
-                _cachedFeatures = [];
-                _cacheExpires = DateTimeOffset.UtcNow + CacheDuration;
-                return _cachedFeatures;
+                throw new InvalidDataException("MobiData BW feed is currently unavailable", ex);
             }
 
             _cachedFeatures = feed?.Features ?? [];

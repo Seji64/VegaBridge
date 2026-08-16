@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace VegaBridgeApp.Models.Closures;
@@ -32,7 +33,11 @@ public class MobiDataFeature
 }
 
 /// <summary>
-/// Geometry of a MobiData roadworks feature – a LineString of [lon, lat] pairs.
+/// Geometry of a MobiData roadworks feature – normally a LineString of
+/// [lon, lat] pairs, but some entries in the feed are malformed (flat
+/// coordinate arrays or Point geometry). Coordinates are therefore kept
+/// as raw JsonElements and validated during the check, so a single bad
+/// entry cannot break the whole feed.
 /// </summary>
 public class MobiDataGeometry
 {
@@ -40,7 +45,7 @@ public class MobiDataGeometry
     public string? Type { get; set; }
 
     [JsonPropertyName("coordinates")]
-    public List<List<double>>? Coordinates { get; set; }
+    public List<JsonElement>? Coordinates { get; set; }
 }
 
 /// <summary>
