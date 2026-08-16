@@ -8,6 +8,7 @@ using CommunityToolkit.Maui;
 using Polly;
 using Serilog;
 using Serilog.Events;
+using Shiny.BluetoothLE;
 using VegaBridgeApp.Services.BLE;
 using VegaBridgeApp.Services.BLE.Plugins;
 using VegaBridgeApp.Services.Geocoding;
