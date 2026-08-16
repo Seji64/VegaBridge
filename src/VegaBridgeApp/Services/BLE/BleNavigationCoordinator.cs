@@ -76,7 +76,9 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         {
             TotalDistanceKm = start.TotalDistanceKm,
             TotalTimeMin = start.TotalTimeMin,
-            UpcomingManeuvers = []
+            UpcomingManeuvers = [],
+            StartLatitude = start.StartLatitude,
+            StartLongitude = start.StartLongitude
         };
 
         BleCommandLogger.Log($"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={start.ManeuverCount}");

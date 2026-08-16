@@ -91,6 +91,13 @@ public sealed record NavigationStartInput
     /// Total route duration in minutes.
     /// </summary>
     public required double TotalTimeMin { get; init; }
+
+    /// <summary>
+    /// Start coordinates of the route (first route point), used by the
+    /// plugin for the DEST frame. Null when the route has no geometry.
+    /// </summary>
+    public double? StartLatitude { get; init; }
+    public double? StartLongitude { get; init; }
 }
 
 /// <summary>

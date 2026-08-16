@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
@@ -116,9 +117,12 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         // DEST format (from pklg capture): DEST|\x1e|lon\x1e|lat\x1e|
         // Field 1 (address) is empty in the official MV Ride app.
         // Field 2 = longitude, field 3 = latitude (both 6 decimal places).
-        // TODO: Pass real start coordinates through NavigationStartInput once available.
-        string lon = "9.258020";  // placeholder
-        string lat = "48.775730"; // placeholder
+        // The start coordinates come from the NavigationService (first route
+        // point). 0/0 only happens for test sequences without a real route.
+        double startLon = input.StartLongitude ?? 0;
+        double startLat = input.StartLatitude ?? 0;
+        string lon = startLon != 0 ? startLon.ToString("F6", CultureInfo.InvariantCulture) : "0.000000";
+        string lat = startLat != 0 ? startLat.ToString("F6", CultureInfo.InvariantCulture) : "0.000000";
         await SendAsync(device, Commands.DEST, "", lon, lat);
         await Task.Delay(200);
         
