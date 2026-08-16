@@ -298,8 +298,8 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         _longTestStep = 0;
         StateHasChanged();
 
-        BleCommandLogger.ClearLog();
-        BleCommandLogger.Log("=== LONG CONNECTION TEST START (5 min) ===");
+        DebugLogSink.Instance.Clear();
+        Log.Information("BLE-LOGGER: {Line}", "=== LONG CONNECTION TEST START (5 min) ===");
 
         try
         {
@@ -338,7 +338,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             for (int i = 0; i < steps.Length; i++)
             {
                 _longTestStep = i + 1;
-                BleCommandLogger.Log($"LONG TEST step {_longTestStep}/{steps.Length}: {steps[i].Icon}");
+                Log.Information("BLE-LOGGER: {Line}", $"LONG TEST step {_longTestStep}/{steps.Length}: {steps[i].Icon}");
 
                 await BleManager.SendCommandAsync(Commands.NAVI, steps[i].Icon, steps[i].Instruction, steps[i].Street);
                 await Task.Delay(200);
@@ -365,17 +365,17 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
             // Phase 11: finish via plugin flow → stops the keepalive.
             await BleManager.ExecuteNavigationFinishAsync();
-            BleCommandLogger.Log("=== LONG CONNECTION TEST END (finished) ===");
+            Log.Information("BLE-LOGGER: {Line}", "=== LONG CONNECTION TEST END (finished) ===");
             Snackbar.Add(L["LongTestDone"], Severity.Success);
         }
         catch (OperationCanceledException)
         {
-            BleCommandLogger.Log("=== LONG CONNECTION TEST STOPPED (cancelled) ===");
+            Log.Information("BLE-LOGGER: {Line}", "=== LONG CONNECTION TEST STOPPED (cancelled) ===");
             Snackbar.Add(L["LongTestStopped"], Severity.Info);
         }
         catch (Exception ex)
         {
-            BleCommandLogger.Log($"=== LONG CONNECTION TEST FAILED: {ex.Message} ===");
+            Log.Information("BLE-LOGGER: {Line}", $"=== LONG CONNECTION TEST FAILED: {ex.Message} ===");
             Snackbar.Add(string.Format(L["LongTestError"], ex.Message), Severity.Error);
         }
         finally

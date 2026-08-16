@@ -297,7 +297,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         try
         {
             BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
-            BleCommandLogger.Log("SEND TEST FRAME (via SendTestAsync)");
+            Log.Information("BLE-LOGGER: {Line}", "SEND TEST FRAME (via SendTestAsync)");
             await _activePlugin.SendTestAsync(wrapper);
         }
         catch (Exception ex)
@@ -318,7 +318,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         try
         {
             BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
-            BleCommandLogger.Log($"SEND CMD: {command} fields=[{string.Join(", ", fields)}]");
+            Log.Information("BLE-LOGGER: {Line}", $"SEND CMD: {command} fields=[{string.Join(", ", fields)}]");
             await _activePlugin.SendAsync(wrapper, command, fields);
         }
         catch (Exception ex)
@@ -340,7 +340,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             return;
         }
 
-        BleCommandLogger.Log($"NAV ACTION: {action}");
+        Log.Information("BLE-LOGGER: {Line}", $"NAV ACTION: {action}");
 
         try
         {
@@ -396,7 +396,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     {
         if (_activePeripheral == null || _activePlugin == null) return;
 
-        BleCommandLogger.Log("NAV ACTION: SendNavigationFinishAsync");
+        Log.Information("BLE-LOGGER: {Line}", "NAV ACTION: SendNavigationFinishAsync");
 
         try
         {
@@ -417,7 +417,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     {
         if (_activePeripheral == null || _activePlugin == null) return;
 
-        BleCommandLogger.Log("NAV ACTION: SendNavigationStopAsync");
+        Log.Information("BLE-LOGGER: {Line}", "NAV ACTION: SendNavigationStopAsync");
 
         try
         {
