@@ -351,15 +351,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 skippedViaIndex = _viaLocations.IndexOf(remaining[0]);
                 remaining = remaining.Skip(1).ToList();
             }
-            for (int i = 0; i < remaining.Count; i++)
-            {
-                locs.Add(new Models.Valhalla.Location
-                {
-                    Lat = remaining[i].Lat,
-                    Lon = remaining[i].Lon,
-                    Type = i == 0 ? "break" : "via"
-                });
-            }
+
+            locs.AddRange(remaining.Select((t, i) => new Models.Valhalla.Location { Lat = t.Lat, Lon = t.Lon, Type = i == 0 ? "break" : "via" }));
 
             locs.Add(_destination);
 

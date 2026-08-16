@@ -186,7 +186,11 @@ public class GpsService : IDisposable
     /// <summary>Clear the breadcrumb trail.</summary>
     public void ClearBreadcrumb()
     {
-        _breadcrumb.Clear();
+        lock (_breadcrumbLock)
+        {
+            _breadcrumb.Clear();
+        }
+
         Log.Debug("Breadcrumb cleared");
     }
 

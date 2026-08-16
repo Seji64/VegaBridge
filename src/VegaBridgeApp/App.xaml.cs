@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Serilog;
+﻿using Serilog;
 using VegaBridgeApp.Services.BLE;
 
 namespace VegaBridgeApp;
@@ -16,7 +15,7 @@ public partial class App : Application
 
     protected override Window CreateWindow(IActivationState? activationState)
     {
-        Window window = new(new MainPage()) { Title = "VegaBridgeApp" };
+        Window window = new(new MainPage()) { Title = "VegaBridge" };
 
         // iOS silently drops the BLE link while the app is in the background
         // (screen off, phone in the pocket) – often without a disconnect
@@ -34,12 +33,10 @@ public partial class App : Application
                 bool connected = await ble.EnsureConnectedAsync();
                 Log.Information("App resumed – BLE connection {State}", connected ? "alive" : "unavailable");
 
-                if (connected)
-                {
-                    BleNavigationCoordinator coordinator =
-                        _services.GetRequiredService<BleNavigationCoordinator>();
-                    await coordinator.ResendCurrentStateAsync();
-                }
+                if (!connected) return;
+                BleNavigationCoordinator coordinator =
+                    _services.GetRequiredService<BleNavigationCoordinator>();
+                await coordinator.ResendCurrentStateAsync();
             }
             catch (Exception ex)
             {

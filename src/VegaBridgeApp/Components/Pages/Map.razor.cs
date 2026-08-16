@@ -266,7 +266,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             IDialogReference dialog = await DialogService.ShowAsync<WaypointActionsDialog>(L["Waypoint"], parameters, options);
             DialogResult? result = await dialog.Result;
-        if (result is { Canceled: false } && result.Data is string action)
+        if (result is { Canceled: false, Data: string action })
         {
             switch (action)
             {
@@ -613,8 +613,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         await RefreshWaypointMarkersAsync(force: true);
 
         // Also remove breadcrumb layer if present
-        Layer? breadcrumbLayer = map.LayersList?
-            .FirstOrDefault(l => l.Id == BreadcrumbLayerId);
+        Layer? breadcrumbLayer = map.LayersList.FirstOrDefault(l => l.Id == BreadcrumbLayerId);
         if (breadcrumbLayer != null)
             await map.RemoveLayer(breadcrumbLayer);
     }
@@ -634,7 +633,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         try
         {
-            Layer? existing = map.LayersList?.FirstOrDefault(l => l.Id == BreadcrumbLayerId);
+            Layer? existing = map.LayersList.FirstOrDefault(l => l.Id == BreadcrumbLayerId);
             if (existing != null)
             {
                 await map.RemoveLayer(existing);
@@ -863,7 +862,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
         // Simple sampling: take every Nth point
         int step = (int)Math.Ceiling((double)middle.Count / (maxCount - 2));
-        List<WaypointViewModel> sampled = middle.Where((item, index) => index % step == 0).Take(maxCount - 2).ToList();
+        List<WaypointViewModel> sampled = middle.Where((_, index) => index % step == 0).Take(maxCount - 2).ToList();
 
         _waypoints = [first, .. sampled, last];
     }
@@ -912,7 +911,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             foreach (Location wp in _currentRouteResponse.Trip!.Locations!)
             {
                 List<GeoResult> reverseGeo = await GeocodingService.GetReverseGeocodingAsync(wp.Lon, wp.Lat);
-                route.Waypoints.Add(new Models.Valhalla.Coordinate(wp.Lat, wp.Lon, reverseGeo.FirstOrDefault()?.Label ?? "Waypoint"));
+                route.Waypoints.Add(new Coordinate(wp.Lat, wp.Lon, reverseGeo.FirstOrDefault()?.Label ?? "Waypoint"));
             }
 
             await RouteStorage.SaveRouteAsync(route);
@@ -1188,7 +1187,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (map == null) return;
 
         // 2. Alte Route-Layer entfernen
-        Layer? existingLayer = map.LayersList?.FirstOrDefault(l => l.Id == RouteLayerId);
+        Layer? existingLayer = map.LayersList.FirstOrDefault(l => l.Id == RouteLayerId);
         if (existingLayer != null)
             await map.RemoveLayer(existingLayer);
 

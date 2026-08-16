@@ -101,7 +101,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
                 BleConnectionState.Connecting => L["Connecting"],
                 BleConnectionState.Error => L["BLEError"],
                 _ => null
-            };
+            } ?? throw new InvalidOperationException();
         }
         return null;
     }
