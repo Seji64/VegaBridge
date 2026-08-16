@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Text.Json;
-using Flurl.Http;
 using Serilog;
 using VegaBridgeApp.Models.Closures;
 using VegaBridgeApp.Models.Valhalla;
@@ -9,310 +6,136 @@ using VegaBridgeApp.Utils;
 namespace VegaBridgeApp.Services.Closures;
 
 /// <summary>
-/// Road-closure check via the Overpass API (live OpenStreetMap data).
-///
-/// Strategy:
-/// 1. Build the route's bounding box + corridor margin.
-/// 2. Query Overpass for construction / access-restricted / barrier ways
-///    inside that box (single request, `out center`).
-/// 3. Filter results to the corridor (point-to-route distance), sort nearest first.
-///
-/// Uses a named <c>HttpClient</c> (registered via <c>AddHttpClient</c> +
-/// <c>AddResilienceHandler</c>) so retry and timeout are handled at the
-/// transport layer. Flurl provides the convenient JSON request syntax –
-/// exactly the same pattern as the Valhalla client.
+/// Aggregates all configured <see cref="IRoadClosureProvider"/>s and merges
+/// their results. The active providers are selected by the user in Settings
+/// (persisted in Preferences) – so additional providers can be added later
+/// by implementing <see cref="IRoadClosureProvider"/> and registering them
+/// in DI, without touching this class or the UI.
 /// </summary>
 public class RoadClosureService : IRoadClosureService
 {
-    internal const string HttpClientName = "Overpass";
-    internal const int RetryCount = 2;
+    private const string PreferencesKey = "closure_provider_enabled";
 
-    private const int MaxQueryAreaDegreesSq = 8; // ~ 800 km² guard against oversized boxes
+    private readonly IReadOnlyList<IRoadClosureProvider> _providers;
+    private readonly IReadOnlyDictionary<string, IRoadClosureProvider> _byKey;
 
-    /// <summary>
-    /// Minimum length (in meters) that a closure way must run alongside the
-    /// route to count as a closure ON the route. Ways that merely cross the
-    /// route (farm tracks, driveways with access=no) span less than this.
-    /// </summary>
-    private const double MinOverlapMeters = 30;
+    /// <summary>Default corridor used when the caller does not specify one.</summary>
+    public const double DefaultCorridorMeters = 15;
 
-    /// <summary>
-    /// Highway tags that are not drivable by motorcycle – closures on these
-    /// are irrelevant for the route check.
-    /// </summary>
-    private static readonly HashSet<string> NonDrivableHighwayTags =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "path", "footway", "cycleway", "steps", "bridleway",
-            "pedestrian", "corridor", "track"
-        };
-    private readonly FlurlClient _flurlClient;
-
-    public RoadClosureService(IHttpClientFactory httpClientFactory)
+    public RoadClosureService(IEnumerable<IRoadClosureProvider> providers)
     {
-        HttpClient httpClient = httpClientFactory.CreateClient(HttpClientName);
-        _flurlClient = new FlurlClient(httpClient);
+        _providers = providers.Where(p => p.IsAvailable).ToList();
+        _byKey = _providers.ToDictionary(p => p.Key);
+    }
+
+    /// <summary>All available providers (for the Settings UI).</summary>
+    public IReadOnlyList<IRoadClosureProvider> Providers => _providers;
+
+    /// <summary>
+    /// Returns the keys of the providers the user has enabled in Settings.
+    /// Defaults to all providers when nothing is persisted yet.
+    /// </summary>
+    public IReadOnlyList<string> GetEnabledProviderKeys()
+    {
+        string? stored = Preferences.Default.Get(PreferencesKey, (string?)null);
+        if (string.IsNullOrWhiteSpace(stored))
+            return _providers.Select(p => p.Key).ToList();
+
+        HashSet<string> enabled = stored
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Only keys that still map to a registered provider.
+        return _providers.Where(p => enabled.Contains(p.Key)).Select(p => p.Key).ToList();
+    }
+
+    /// <summary>
+    /// Persists the enabled provider keys. Unknown keys are ignored.
+    /// </summary>
+    public void SetEnabledProviderKeys(IEnumerable<string> keys)
+    {
+        HashSet<string> known = keys
+            .Where(k => _byKey.ContainsKey(k))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Preferences.Default.Set(PreferencesKey, string.Join(',', known));
     }
 
     /// <inheritdoc />
     public async Task<RoadClosureCheckResult> CheckRouteAsync(
         IReadOnlyList<Coordinate> routeCoords,
-        double corridorMeters = 15,
+        double corridorMeters = DefaultCorridorMeters,
         CancellationToken cancellationToken = default)
     {
-        try
+        IReadOnlyList<string> enabledKeys = GetEnabledProviderKeys();
+        if (enabledKeys.Count == 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (routeCoords is null || routeCoords.Count < 2)
-                return RoadClosureCheckResult.Failure("Route needs at least 2 points");
-
-            // 1. Bounding box of the whole route, expanded by the corridor.
-            double minLat = routeCoords.Min(p => p.Latitude);
-            double maxLat = routeCoords.Max(p => p.Latitude);
-            double minLon = routeCoords.Min(p => p.Longitude);
-            double maxLon = routeCoords.Max(p => p.Longitude);
-
-            double margin = corridorMeters / 111_000.0; // approx degrees for the corridor
-            minLat -= margin;
-            maxLat += margin;
-            minLon -= margin / Math.Max(0.1, Math.Cos(maxLat * Math.PI / 180));
-            maxLon += margin / Math.Max(0.1, Math.Cos(maxLat * Math.PI / 180));
-
-            double areaDegSq = (maxLat - minLat) * (maxLon - minLon);
-            if (areaDegSq > MaxQueryAreaDegreesSq)
-            {
-                Log.Warning("Route bounding box too large for Overpass ({Area:F1} deg²), skipping check", areaDegSq);
-                return RoadClosureCheckResult.Failure("Route area too large for a closure check");
-            }
-
-            string bbox = string.Create(CultureInfo.InvariantCulture,
-                $"{minLat:F6},{minLon:F6},{maxLat:F6},{maxLon:F6}");
-
-            // 2. Two-stage query:
-            //    a) Cheap `out center` pass over the bbox to get candidate
-            //       ways with their tags (no geometry – fast even for long
-            //       routes, avoids Overpass timeouts).
-            //    b) Targeted `out geom` for exactly those candidate ids so
-            //       the expensive geometry is only fetched for candidates.
-            string candidateQuery = $"""
-                [out:json][timeout:20];
-                (
-                  way["highway"="construction"]({bbox});
-                  way["highway"]["construction"]({bbox});
-                  way["access"="no"]({bbox});
-                  way["motor_vehicle"="no"]({bbox});
-                  way["barrier"~"^(gate|bollard|lift_gate|swing_gate|block)$"]({bbox});
-                );
-                out center tags;
-                """;
-
-            Log.Debug("Overpass closure candidate query: {Query}", candidateQuery.Replace('\n', ' '));
-
-            string candidateBody = await _flurlClient
-                .Request("api/interpreter")
-                .PostUrlEncodedAsync(new { data = candidateQuery }, cancellationToken: cancellationToken)
-                .ReceiveString();
-
-            List<OverpassElement> candidates = ParseCandidates(candidateBody);
-            if (candidates.Count == 0)
-            {
-                Log.Information("Closure check: no candidates in bounding box");
-                return new RoadClosureCheckResult([], DateTimeOffset.UtcNow, IsSuccess: true);
-            }
-
-            // b) Geometry for the candidates only – the corridor filter runs
-            //    on the real way geometry in ParseClosures.
-            string ids = string.Join(',', candidates.Select(c => c.Id));
-            string geometryQuery = $"""
-                [out:json][timeout:20];
-                way(id:{ids});
-                out geom tags;
-                """;
-
-            Log.Debug("Overpass closure geometry query ({Count} ways): {Query}", candidates.Count, geometryQuery.Replace('\n', ' '));
-
-            string geometryBody = await _flurlClient
-                .Request("api/interpreter")
-                .PostUrlEncodedAsync(new { data = geometryQuery }, cancellationToken: cancellationToken)
-                .ReceiveString();
-
-            List<RoadClosure> closures = ParseClosures(geometryBody, routeCoords, corridorMeters);
-
-            Log.Information("Closure check: {Count} closure(s) within {Corridor:F0}m corridor",
-                closures.Count, corridorMeters);
-
-            return new RoadClosureCheckResult(
-                closures,
-                DateTimeOffset.UtcNow,
-                IsSuccess: true);
-        }
-        catch (OperationCanceledException)
-        {
-            Log.Debug("Closure check cancelled");
-            return RoadClosureCheckResult.Failure("Cancelled");
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Closure check failed");
-            return RoadClosureCheckResult.Failure(ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Parses the cheap `out center tags` response and keeps only elements
-    /// that have a center and a drivable highway tag (if any highway tag
-    /// is present). The corridor filter itself runs later on the geometry.
-    /// </summary>
-    private static List<OverpassElement> ParseCandidates(string responseBody)
-    {
-        List<OverpassElement> candidates = [];
-
-        OverpassResponse? response;
-        try
-        {
-            response = JsonSerializer.Deserialize<OverpassResponse>(responseBody);
-        }
-        catch (JsonException ex)
-        {
-            Log.Warning(ex, "Overpass returned malformed JSON");
-            return candidates;
+            Log.Information("Road closure check: no provider enabled in Settings");
+            return RoadClosureCheckResult.Failure("No road-closure provider enabled in Settings");
         }
 
-        if (response?.Elements is null)
-            return candidates;
+        List<RoadClosure> all = [];
+        DateTimeOffset checkedAt = DateTimeOffset.UtcNow;
+        List<string> failures = [];
 
-        foreach (OverpassElement el in response.Elements)
+        foreach (string key in enabledKeys)
         {
-            if (el.Type != "way" || el.Center is null)
+            if (!_byKey.TryGetValue(key, out IRoadClosureProvider? provider))
                 continue;
 
-            // Only drivable ways matter for a motorcycle route. Footpaths,
-            // cycleways, steps and forest tracks with access=no are common
-            // OSM tags but irrelevant for the rider.
-            string? highway = el.Tags?.Highway;
-            if (!string.IsNullOrEmpty(highway) &&
-                NonDrivableHighwayTags.Contains(highway))
-                continue;
+            try
+            {
+                RoadClosureCheckResult result = await provider.CheckRouteAsync(
+                    routeCoords, corridorMeters, cancellationToken);
 
-            candidates.Add(el);
+                if (result.IsSuccess)
+                    all.AddRange(result.Closures);
+                else if (!string.IsNullOrEmpty(result.ErrorMessage))
+                    failures.Add($"{provider.Key}: {result.ErrorMessage}");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Road closure provider {Key} failed", key);
+                failures.Add($"{provider.Key}: {ex.Message}");
+            }
         }
 
-        return candidates;
-    }
-
-    private List<RoadClosure> ParseClosures(string responseBody, IReadOnlyList<Coordinate> routeCoords, double corridorMeters)
-    {
-        List<RoadClosure> closures = [];
-
-        OverpassResponse? response;
-        try
+        // Deduplicate by (source, id) – the same closure can appear in
+        // multiple feeds (e.g. mobidata and OSM). Keep the nearest.
+        Dictionary<(string Source, long Id), RoadClosure> byId = [];
+        foreach (RoadClosure closure in all)
         {
-            response = JsonSerializer.Deserialize<OverpassResponse>(responseBody);
-        }
-        catch (JsonException ex)
-        {
-            Log.Warning(ex, "Overpass returned malformed JSON");
-            return closures;
-        }
-
-        if (response?.Elements is null)
-            return closures;
-
-        foreach (OverpassElement el in response.Elements)
-        {
-            if (el.Type != "way" || el.Geometry is not { Count: > 0 } geometry)
-                continue;
-
-            // Only drivable ways matter for a motorcycle route. Footpaths,
-            // cycleways, steps and forest tracks with access=no are common
-            // OSM tags but irrelevant for the rider.
-            string? highway = el.Tags?.Highway;
-            if (!string.IsNullOrEmpty(highway) &&
-                NonDrivableHighwayTags.Contains(highway))
-                continue;
-
-            // Corridor filter over the FULL way geometry (not just the
-            // center): the closure must actually touch the route.
-            // Points of the way that lie within the corridor, in way order.
-            List<(OverpassGeometryPoint Point, double DistM)> near = [];
-            double minDist = double.MaxValue;
-            OverpassGeometryPoint? nearest = null;
-            foreach (OverpassGeometryPoint p in geometry)
+            double dist = DistanceToRoute(closure.Latitude, closure.Longitude, routeCoords);
+            if (byId.TryGetValue((closure.Source, closure.OsmId), out RoadClosure? existing))
             {
-                double d = DistanceToRoute(p.Lat, p.Lon, routeCoords);
-                if (d <= corridorMeters)
-                    near.Add((p, d));
-                if (d < minDist)
-                {
-                    minDist = d;
-                    nearest = p;
-                }
+                if (dist < DistanceToRoute(existing.Latitude, existing.Longitude, routeCoords))
+                    byId[(closure.Source, closure.OsmId)] = closure;
             }
-
-            if (near.Count == 0 || nearest == null)
-                continue;
-
-            // A way that merely CROSSES the route (e.g. an access=no farm
-            // track intersecting the road) has only a single point within
-            // the corridor. Only closures that RUN ALONG the route matter:
-            // require the near points to span a meaningful length.
-            double overlapM = 0;
-            for (int i = 1; i < near.Count; i++)
+            else
             {
-                overlapM += GeoMath.DistanceMeters(
-                    near[i - 1].Point.Lat, near[i - 1].Point.Lon,
-                    near[i].Point.Lat, near[i].Point.Lon);
+                byId[(closure.Source, closure.OsmId)] = closure;
             }
-            if (overlapM < MinOverlapMeters)
-                continue;
-
-            ClosureKind kind = ClosureKind.Access;
-            if (el.Tags is { } tags)
-            {
-                kind = ClassifyKind(tags);
-            }
-
-            DateTimeOffset? lastModified = null;
-            if (!string.IsNullOrWhiteSpace(el.Timestamp) &&
-                DateTimeOffset.TryParse(el.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset ts))
-            {
-                lastModified = ts;
-            }
-
-            // Position = the geometry point closest to the route (accurate
-            // location for the map highlight, not the way center).
-            closures.Add(new RoadClosure(
-                el.Id,
-                kind,
-                el.Tags?.Name,
-                el.Tags?.Highway,
-                nearest.Lat,
-                nearest.Lon,
-                lastModified));
         }
 
-        // Nearest first.
-        return closures
+        List<RoadClosure> merged = byId.Values
             .OrderBy(c => DistanceToRoute(c.Latitude, c.Longitude, routeCoords))
             .ToList();
+
+        Log.Information("Road closure check: {Count} closure(s) from {Providers} providers",
+            merged.Count, string.Join(", ", enabledKeys));
+
+        if (merged.Count == 0 && failures.Count > 0)
+        {
+            return RoadClosureCheckResult.Failure(string.Join("; ", failures));
+        }
+
+        return new RoadClosureCheckResult(merged, checkedAt, IsSuccess: true);
     }
 
-    private static ClosureKind ClassifyKind(OverpassTags tags)
-    {
-        if (tags.Highway == "construction")
-            return ClosureKind.Construction;
-        if (!string.IsNullOrEmpty(tags.Construction))
-            return ClosureKind.Roadworks;
-        if (!string.IsNullOrEmpty(tags.Barrier))
-            return ClosureKind.Barrier;
-        return ClosureKind.Access;
-    }
-
-    /// <summary>
-    /// Minimum distance from a point to the route polyline (haversine on
-    /// segment endpoints, planar approximation for short segments is fine).
-    /// </summary>
     private static double DistanceToRoute(double lat, double lon, IReadOnlyList<Coordinate> route)
     {
         double best = double.MaxValue;

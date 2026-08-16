@@ -139,10 +139,12 @@ public static class MauiProgram
         });
         builder.Services.AddSingleton<IGeocodingService, GeocodingService>();
 
-        // ── Road Closure Check (Overpass, live OSM) ─────────────────────────
-        // Same resilience pattern as the Valhalla client: named HttpClient +
-        // Polly retry with exponential backoff + jitter.
-        builder.Services.AddHttpClient(RoadClosureService.HttpClientName, client =>
+        // ── Road Closure Check (provider-based) ────────────────────────────
+        // Multiple providers can be enabled in Settings (Overpass/OSM,
+        // MobiData BW official roadworks, …). Same resilience pattern as the
+        // Valhalla client: named HttpClient + Polly retry with exponential
+        // backoff + jitter.
+        builder.Services.AddHttpClient(OverpassRoadClosureProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://overpass-api.de/");
             client.Timeout = TimeSpan.FromSeconds(30);
@@ -154,12 +156,32 @@ public static class MauiProgram
         {
             builder.AddRetry(new HttpRetryStrategyOptions
             {
-                MaxRetryAttempts = RoadClosureService.RetryCount,
+                MaxRetryAttempts = OverpassRoadClosureProvider.RetryCount,
                 Delay = TimeSpan.FromSeconds(1),
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true,
             });
         });
+
+        builder.Services.AddHttpClient(MobiDataRoadClosureProvider.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://api.mobidata-bw.de/");
+            client.Timeout = TimeSpan.FromSeconds(60);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("VegaBridge/1.0 (closure-check)");
+        })
+        .AddResilienceHandler("mobidata-retry", static builder =>
+        {
+            builder.AddRetry(new HttpRetryStrategyOptions
+            {
+                MaxRetryAttempts = MobiDataRoadClosureProvider.RetryCount,
+                Delay = TimeSpan.FromSeconds(1),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+            });
+        });
+
+        builder.Services.AddSingleton<IRoadClosureProvider, OverpassRoadClosureProvider>();
+        builder.Services.AddSingleton<IRoadClosureProvider, MobiDataRoadClosureProvider>();
         builder.Services.AddSingleton<IRoadClosureService, RoadClosureService>();
 
         // ── Route Persistence & GPX Conversion ───────────────────────────────

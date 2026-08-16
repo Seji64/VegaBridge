@@ -4,16 +4,22 @@ using VegaBridgeApp.Models.Valhalla;
 namespace VegaBridgeApp.Services.Closures;
 
 /// <summary>
-/// Aggregates the user-selected road-closure providers (Overpass/OSM,
-/// MobiData BW, …) along a route. Intended as a pre-route or en-route
-/// safety check: the caller provides the route geometry, the active
-/// providers query a corridor around it, and the results are merged
-/// (deduplicated, nearest first).
+/// A single road-closure data source (Overpass/OSM, MobiData BW, …).
+/// Providers are discovered via DI and selected by the user in Settings.
 /// </summary>
-public interface IRoadClosureService
+public interface IRoadClosureProvider
 {
+    /// <summary>Stable identifier, also used as the Settings key (e.g. "overpass", "mobidata").</summary>
+    string Key { get; }
+
+    /// <summary>Localized display name shown in Settings (resx key without "ClosureProvider" prefix).</summary>
+    string DisplayNameResxKey { get; }
+
+    /// <summary>Whether the provider is available on this platform / configured (always true unless a provider needs an API key).</summary>
+    bool IsAvailable { get; }
+
     /// <summary>
-    /// Queries all enabled providers for closures near the given route.
+    /// Queries this source for closures near the given route.
     /// </summary>
     /// <param name="routeCoords">Route geometry (at least 2 points).</param>
     /// <param name="corridorMeters">Half-width of the corridor around the route to scan.</param>
@@ -24,6 +30,6 @@ public interface IRoadClosureService
     /// </returns>
     Task<RoadClosureCheckResult> CheckRouteAsync(
         IReadOnlyList<Coordinate> routeCoords,
-        double corridorMeters = RoadClosureService.DefaultCorridorMeters,
+        double corridorMeters,
         CancellationToken cancellationToken = default);
 }

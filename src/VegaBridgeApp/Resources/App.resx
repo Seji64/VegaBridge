@@ -215,4 +215,12 @@
   <!-- Road Closures -->
   <data name="ClosuresFound" xml:space="preserve"><value>⚠ {0} road closure(s) near the route</value></data>
   <data name="ClosureCheckUnavailable" xml:space="preserve"><value>Road closure check unavailable</value></data>
+
+  <!-- Road Closure Providers -->
+  <data name="ClosureProvidersTitle" xml:space="preserve"><value>Road closure sources</value></data>
+  <data name="ClosureProvidersHelp" xml:space="preserve"><value>Choose which data sources are checked for road closures along your route. Multiple sources can be active at once.</value></data>
+  <data name="ClosureProviderOverpass" xml:space="preserve"><value>Overpass (OpenStreetMap, worldwide)</value></data>
+  <data name="ClosureProviderMobiData" xml:space="preserve"><value>MobiData BW (official Baden-Württemberg roadworks)</value></data>
+  <data name="ClosureProviderEnabled" xml:space="preserve"><value>Road closure source enabled</value></data>
+  <data name="ClosureProviderDisabled" xml:space="preserve"><value>Road closure source disabled</value></data>
 </root>
