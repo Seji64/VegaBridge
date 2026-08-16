@@ -44,7 +44,8 @@ public static class MauiProgram
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddMudServices(config =>
         {
-            config.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomCenter;
+            config.SnackbarConfiguration.PositionClass = "mud-snackbar-location-bottom-center mb-16";
+            config.SnackbarConfiguration.PreventDuplicates = true;
         });
         builder.Services.AddMudExtensions();
 
