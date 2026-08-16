@@ -105,6 +105,20 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         await SendUpdateAsync();
     }
 
+    /// <summary>
+    /// Re-sends the current maneuver + status to the bike after a reconnect.
+    /// Called when the app returns to the foreground and the BLE link was
+    /// rebuilt – the display otherwise keeps showing stale instructions.
+    /// </summary>
+    public async Task ResendCurrentStateAsync()
+    {
+        if (!_isNavigating || _currentManeuver == null || _currentStatus == null)
+            return;
+
+        Log.Information("Resending navigation state after reconnect");
+        await SendUpdateAsync();
+    }
+
     /// <inheritdoc />
     public async Task OnOffRouteAsync(double lat, double lon, double distM)
     {

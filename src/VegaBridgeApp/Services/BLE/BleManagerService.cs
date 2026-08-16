@@ -198,6 +198,74 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
+    /// <summary>
+    /// Ensures the active BLE connection is still alive and usable. iOS can
+    /// silently drop the link while the app is in the background (screen off,
+    /// phone in the pocket) – the UI still shows "Connected", but writes time
+    /// out. Call this when the app returns to the foreground and before
+    /// sending navigation frames; it reconnects when the link is gone.
+    /// </summary>
+    public async Task<bool> EnsureConnectedAsync()
+    {
+        if (_activePeripheral == null)
+            return false;
+
+        try
+        {
+            // Shiny reports the current link status; Connected means the
+            // GATT link is really alive, anything else (Disconnected,
+            // Connecting, etc.) means we must rebuild it.
+            if (_activePeripheral.Status == ConnectionState.Connected)
+            {
+                Log.Debug("BLE connection still alive (EnsureConnected)");
+                return true;
+            }
+
+            Log.Warning("BLE link lost (status={Status}) – reconnecting", _activePeripheral.Status);
+            return await RetryConnectionAsync(Guid.Parse(_activePeripheral.Uuid));
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "EnsureConnectedAsync failed");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Marks the current connection as broken and schedules a reconnect.
+    /// Used when a write times out (Arg_TimeoutException) – the classic sign
+    /// that iOS dropped the link without firing a disconnect event.
+    /// </summary>
+    public void InvalidateConnectionAndReconnect()
+    {
+        IPeripheral? lost = _activePeripheral;
+        if (lost == null) return;
+
+        Log.Warning("Forcing connection state to Idle after write failure");
+        _connectionSubscription?.Dispose();
+        _connectionSubscription = null;
+        _notificationSubscription?.Dispose();
+        _notificationSubscription = null;
+        _activePeripheral = null;
+        _activePlugin = null;
+        _state.OnNext(BleConnectionState.Idle);
+        UpdateDeviceList();
+        UpdateError("Connection lost. Attempting to reconnect...");
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            try
+            {
+                await RetryConnectionAsync(Guid.Parse(lost.Uuid));
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Reconnect after write failure failed");
+            }
+        });
+    }
+
     // ── Plugin API Proxy ──────────────────────────────────────────────────
 
     public async Task SendTestFrameAsync()
@@ -291,6 +359,15 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         {
             Log.Error(ex, "Failed to execute navigation action {Action}", action);
             UpdateError($"Navigation command failed: {ex.Message}", isCritical: false);
+
+            // Write timeouts (Arg_TimeoutException) are the classic sign that
+            // iOS dropped the BLE link while the app was in the background –
+            // without a disconnect event. Rebuild the connection instead of
+            // silently failing every subsequent frame.
+            if (_activePeripheral != null)
+            {
+                InvalidateConnectionAndReconnect();
+            }
         }
     }
 
