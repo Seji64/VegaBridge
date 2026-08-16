@@ -77,6 +77,11 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private int _currentManeuverIndex;
     private bool _isNavigating;
 
+    // Intermediate waypoints of the active route (excluding start + final
+    // destination). Kept so a reroute (off-route or skip-waypoint) rebuilds
+    // the route through the remaining waypoints instead of dropping them.
+    private List<Models.Valhalla.Location> _viaLocations = [];
+
     // ── Session state ────────────────────────────────────────────────────
     private double _distanceToNextTurnM;
     private double _remainingDistanceKm;
@@ -161,12 +166,20 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// <summary>
     /// Start navigating along a Valhalla route.
     /// </summary>
+    /// <param name="mergedShape">Encoded polyline of the full route (all legs).</param>
+    /// <param name="maneuvers">Maneuvers of the full route.</param>
+    /// <param name="totalDistanceKm">Total route distance.</param>
+    /// <param name="totalTimeMin">Total route duration.</param>
+    /// <param name="destination">Final destination location.</param>
+    /// <param name="viaLocations">Intermediate waypoints (without start/destination).
+    /// Kept so a reroute keeps driving through the remaining waypoints.</param>
     public async Task StartNavigation(
         string mergedShape,
         List<Maneuver> maneuvers,
         double totalDistanceKm,
         double totalTimeMin,
-        Models.Valhalla.Location destination)
+        Models.Valhalla.Location destination,
+        IReadOnlyList<Models.Valhalla.Location>? viaLocations = null)
     {
         bool wasNavigating;
         lock (_lock)
@@ -198,6 +211,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             }
 
             _destination = destination;
+            _viaLocations = viaLocations is { Count: > 0 } ? [.. viaLocations] : [];
             _isNavigating = true;
             _offRouteCounter = 0;
             _rawOffRouteCounter = 0;
@@ -259,6 +273,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _routeCoords = [];
             _maneuvers = [];
             _destination = null;
+            _viaLocations = [];
             _offRouteCounter = 0;
             _rawOffRouteCounter = 0;
             _currentHeadingDeg = -1;
@@ -274,15 +289,40 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     }
 
     /// <summary>
-    /// Performs a reroute calculation from the current position to the destination.
+    /// Performs a reroute calculation from the current position to the destination,
+    /// keeping the remaining waypoints of the active route.
     /// </summary>
-    public async Task<bool> PerformRerouteAsync(double currentLat, double currentLon)
+    /// <param name="currentLat">Current latitude.</param>
+    /// <param name="currentLon">Current longitude.</param>
+    /// <param name="skipNextWaypoint">
+    /// When true, the first not-yet-reached waypoint is skipped (user pressed
+    /// "skip waypoint"). The reroute then goes through all remaining waypoints.
+    /// </param>
+    /// <param name="skippedViaIndex">
+    /// When skipNextWaypoint is true and a waypoint was skipped, receives the
+    /// index of the skipped waypoint in the via-locations list passed to
+    /// StartNavigation; otherwise -1. Lets the caller remove the waypoint pin.
+    /// </param>
+    public async Task<bool> PerformRerouteAsync(
+        double currentLat, double currentLon,
+        bool skipNextWaypoint,
+        out int skippedViaIndex)
     {
+        skippedViaIndex = -1;
         if (!_isNavigating || _destination == null) return false;
 
         try
         {
-            // 1. Build Request
+            // Current progress along the old route – used to drop waypoints
+            // the rider has already passed.
+            int snappedIndex = _routeCoords.Count > 0
+                ? FindNearestRouteIndex(currentLat, currentLon).Index
+                : 0;
+
+            // 1. Build Request – start + remaining waypoints + destination.
+            // The waypoints must be kept, otherwise Valhalla routes directly
+            // to the final destination and silently drops all intermediate
+            // stops ("skip waypoint" used to skip ALL waypoints).
             List<Models.Valhalla.Location> locs =
             [
                 new()
@@ -295,9 +335,34 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                     // edge (e.g. a 180° turnaround after a missed turn).
                     Heading = _currentHeadingDeg > 0 ? _currentHeadingDeg : null,
                     HeadingTolerance = RerouteHeadingToleranceDeg
-                },
-                _destination
+                }
             ];
+
+            // Remaining waypoints: drop every one the rider has already
+            // passed (its nearest route index is behind the current snapped
+            // index), so the reroute only goes through waypoints still ahead.
+            List<Models.Valhalla.Location> remaining = _viaLocations
+                .Where(v => FindNearestRouteIndex(v.Lat, v.Lon).Index >= snappedIndex - 1)
+                .ToList();
+
+            if (skipNextWaypoint && remaining.Count > 0)
+            {
+                // Report which waypoint was skipped (index in the original
+                // via list) so the caller can drop the matching pin.
+                skippedViaIndex = _viaLocations.IndexOf(remaining[0]);
+                remaining = remaining.Skip(1).ToList();
+            }
+            for (int i = 0; i < remaining.Count; i++)
+            {
+                locs.Add(new Models.Valhalla.Location
+                {
+                    Lat = remaining[i].Lat,
+                    Lon = remaining[i].Lon,
+                    Type = i == 0 ? "break" : "via"
+                });
+            }
+
+            locs.Add(_destination);
 
             RouteRequest request = new()
             {
@@ -317,7 +382,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             RouteResponse response = result.Response;
 
-            // 3. Update state
+            // 3. Update state – the remaining waypoints are the new via set
+            // (the skipped one is gone).
             (string mergedShape, List<Maneuver> maneuvers, double totalKm, double totalMin) =
                 PrepareNavigationData(response.Trip?.Legs ?? []);
             if (string.IsNullOrEmpty(mergedShape)) return false;
@@ -325,12 +391,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             lock (_lock)
             {
                 Reroute(mergedShape, maneuvers, totalKm, totalMin);
+                _viaLocations = remaining;
             }
 
             // 4. Notify sinks
             _ = NotifySinksAsync(s => s.OnRouteUpdatedAsync(response));
 
-            Log.Information("Reroute successful.");
+            Log.Information("Reroute successful ({ViaCount} waypoints remaining).", remaining.Count);
             return true;
         }
         catch (Exception ex)

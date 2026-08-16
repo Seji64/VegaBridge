@@ -952,7 +952,18 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             (string mergedShape, List<Maneuver> allManeuvers, double totalKm, double totalMin) =
                 NavService.PrepareNavigationData(_currentRouteResponse.Trip.Legs);
-            await NavService.StartNavigation(mergedShape, allManeuvers, totalKm, totalMin, CreateLocation(_destinationLocation));
+
+            // Pass the intermediate waypoints to the navigation service so a
+            // reroute (off-route or skip-waypoint) keeps driving through the
+            // remaining waypoints instead of dropping them all.
+            List<Models.Valhalla.Location> viaLocations = _waypoints
+                .Where(w => w.Location != null)
+                .Select(w => CreateLocation(w.Location!, "break"))
+                .ToList();
+
+            await NavService.StartNavigation(
+                mergedShape, allManeuvers, totalKm, totalMin,
+                CreateLocation(_destinationLocation), viaLocations);
             Snackbar.Add(L["NavigationStarted"], Severity.Success);
 
             // Nav-app behavior: zoom in on the current position and rotate
@@ -1060,10 +1071,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         double lat = Gps.LastReading.Position.Latitude;
         double lon = Gps.LastReading.Position.Longitude;
         Snackbar.Add(L["WaypointSkip"], Severity.Warning);
-        await RerouteAsync(lat, lon);
+        // skipNextWaypoint=true: the service drops the first not-yet-reached
+        // waypoint and reroutes through all remaining ones.
+        await RerouteAsync(lat, lon, skipNextWaypoint: true);
     }
 
-    private async Task RerouteAsync(double currentLat, double currentLon)
+    private async Task RerouteAsync(double currentLat, double currentLon, bool skipNextWaypoint = false)
     {
         if (_isLoading) return;
         _isLoading = true;
@@ -1072,7 +1085,24 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             // Reroute calculation lives in the NavigationService (state + sink notify).
             // Map update happens via OnRouteUpdatedAsync.
-            bool rerouted = await NavService.PerformRerouteAsync(currentLat, currentLon);
+            bool rerouted = await NavService.PerformRerouteAsync(
+                currentLat, currentLon, skipNextWaypoint, out int skippedViaIndex);
+
+            if (rerouted && skippedViaIndex >= 0)
+            {
+                // skippedViaIndex refers to the waypoints WITH a location
+                // (the via list passed to the service). Map it back to the
+                // raw _waypoints list, which may contain empty entries.
+                List<int> nonNullIndices = _waypoints
+                    .Select((w, i) => w.Location != null ? i : -1)
+                    .Where(i => i >= 0)
+                    .ToList();
+                if (skippedViaIndex < nonNullIndices.Count)
+                {
+                    _waypoints.RemoveAt(nonNullIndices[skippedViaIndex]);
+                    await RefreshWaypointMarkersAsync();
+                }
+            }
 
             Snackbar.Add(
                 rerouted ? L["RouteRecalculated"] : L["RerouteNoRoute"],
