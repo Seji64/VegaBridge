@@ -189,7 +189,6 @@
   <data name="NotFoundTitle" xml:space="preserve"><value>Nicht gefunden</value></data>
   <data name="NotFoundBody" xml:space="preserve"><value>Entschuldigung, der gesuchte Inhalt existiert nicht.</value></data>
 
-<<<<<<< HEAD
   <!-- Debug Logging -->
   <data name="DebugSection" xml:space="preserve"><value>Debug-Protokoll</value></data>
   <data name="DebugLoggingToggle" xml:space="preserve"><value>Debug-Protokoll aufzeichnen</value></data>
