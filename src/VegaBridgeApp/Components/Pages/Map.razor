@@ -259,7 +259,7 @@
                                       Color="Color.Primary"
                                       StartIcon="@Icons.Material.Filled.Start"
                                       Disabled="@(_startLocation is null || _destinationLocation is null || _waypoints!.Any(x => x.Location is null))"
-                                      bind-Loading="@_isLoading"
+                                      Loading="@(_isLoading || _closureCheckRunning)"
                                       OnClick="@CalculateRoute">
                         @L["CalculateRoute"]
                     </MudLoadingButton>
