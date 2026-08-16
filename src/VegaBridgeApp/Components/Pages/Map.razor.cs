@@ -1085,8 +1085,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             // Reroute calculation lives in the NavigationService (state + sink notify).
             // Map update happens via OnRouteUpdatedAsync.
-            bool rerouted = await NavService.PerformRerouteAsync(
-                currentLat, currentLon, skipNextWaypoint, out int skippedViaIndex);
+            (bool rerouted, int skippedViaIndex) = await NavService.PerformRerouteAsync(
+                currentLat, currentLon, skipNextWaypoint);
 
             if (rerouted && skippedViaIndex >= 0)
             {

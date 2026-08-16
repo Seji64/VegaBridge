@@ -298,18 +298,17 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// When true, the first not-yet-reached waypoint is skipped (user pressed
     /// "skip waypoint"). The reroute then goes through all remaining waypoints.
     /// </param>
-    /// <param name="skippedViaIndex">
-    /// When skipNextWaypoint is true and a waypoint was skipped, receives the
+    /// <returns>
+    /// A tuple: <c>Success</c> whether the reroute was calculated, and
+    /// <c>SkippedViaIndex</c> – when skipNextWaypoint skipped a waypoint, the
     /// index of the skipped waypoint in the via-locations list passed to
     /// StartNavigation; otherwise -1. Lets the caller remove the waypoint pin.
-    /// </param>
-    public async Task<bool> PerformRerouteAsync(
-        double currentLat, double currentLon,
-        bool skipNextWaypoint,
-        out int skippedViaIndex)
+    /// </returns>
+    public async Task<(bool Success, int SkippedViaIndex)> PerformRerouteAsync(
+        double currentLat, double currentLon, bool skipNextWaypoint)
     {
-        skippedViaIndex = -1;
-        if (!_isNavigating || _destination == null) return false;
+        int skippedViaIndex = -1;
+        if (!_isNavigating || _destination == null) return (false, -1);
 
         try
         {
@@ -377,7 +376,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (!result.IsSuccess || result.Response == null)
             {
                 Log.Warning("Reroute failed: {Error}", result.ErrorMessage);
-                return false;
+                return (false, -1);
             }
 
             RouteResponse response = result.Response;
@@ -386,7 +385,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             // (the skipped one is gone).
             (string mergedShape, List<Maneuver> maneuvers, double totalKm, double totalMin) =
                 PrepareNavigationData(response.Trip?.Legs ?? []);
-            if (string.IsNullOrEmpty(mergedShape)) return false;
+            if (string.IsNullOrEmpty(mergedShape)) return (false, -1);
 
             lock (_lock)
             {
@@ -398,12 +397,12 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _ = NotifySinksAsync(s => s.OnRouteUpdatedAsync(response));
 
             Log.Information("Reroute successful ({ViaCount} waypoints remaining).", remaining.Count);
-            return true;
+            return (true, skippedViaIndex);
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Reroute calculation error");
-            return false;
+            return (false, -1);
         }
     }
 
