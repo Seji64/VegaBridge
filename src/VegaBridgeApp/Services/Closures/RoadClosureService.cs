@@ -47,12 +47,15 @@ public class RoadClosureService : IRoadClosureService
 
     /// <summary>
     /// Returns the keys of the providers the user has enabled in Settings.
-    /// Defaults to <see cref="DefaultEnabledKeys"/> when nothing is persisted yet.
+    /// Defaults to <see cref="DefaultEnabledKeys"/> when NOTHING was ever
+    /// persisted (first launch). An explicitly stored empty string means the
+    /// user deliberately disabled ALL providers – that must NOT fall back to
+    /// the default, otherwise a provider can never be switched off.
     /// </summary>
     public IReadOnlyList<string> GetEnabledProviderKeys()
     {
         string? stored = Preferences.Default.Get(PreferencesKey, (string?)null);
-        if (string.IsNullOrWhiteSpace(stored))
+        if (stored is null)
             return _providers
                 .Where(p => DefaultEnabledKeys.Contains(p.Key))
                 .Select(p => p.Key)
