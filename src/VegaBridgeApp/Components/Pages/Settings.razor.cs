@@ -8,6 +8,7 @@ using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Services.BLE.Plugins;
 using VegaBridgeApp.Models.BLE.MvAgusta;
+using VegaBridgeApp.Services.Closures;
 using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Components.Pages;
@@ -216,6 +217,26 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     // ── Debug logging (collects in-memory while enabled) ────────────────
 
     private bool DebugLoggingEnabled => DebugLogSink.Instance.IsEnabled;
+
+    // ── Road closure providers ───────────────────────────────────────────
+
+    private bool IsProviderEnabled(string key) =>
+        RoadClosureService.GetEnabledProviderKeys().Contains(key);
+
+    private void SetProviderEnabled(string key, bool enabled)
+    {
+        HashSet<string> keys = RoadClosureService.GetEnabledProviderKeys().ToHashSet();
+        if (enabled)
+            keys.Add(key);
+        else
+            keys.Remove(key);
+
+        RoadClosureService.SetEnabledProviderKeys(keys);
+        Snackbar.Add(
+            enabled ? L["ClosureProviderEnabled"] : L["ClosureProviderDisabled"],
+            Severity.Success);
+        StateHasChanged();
+    }
 
     private void SetDebugLogging(bool enabled)
     {

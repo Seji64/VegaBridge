@@ -3,6 +3,7 @@
 @using VegaBridgeApp.Models.Utils
 @using VegaBridgeApp.Services.Routes
 @using VegaBridgeApp.Services.Navigation
+@using VegaBridgeApp.Services.Closures
 @inject IGeocodingService GeocodingService
 @inject IValhallaClient ValhallaClient
 @inject IRouteStorageService RouteStorage
@@ -10,6 +11,7 @@
 @inject IDialogService DialogService
 @inject GpsService Gps
 @inject NavigationService NavService
+@inject IRoadClosureService RoadClosureService
 
 
 <MudContainer Class="px-0 mx-0 pb-0 mb-0" Style="max-width: none; width: 100%;">
@@ -110,6 +112,19 @@
                             </MudStack>
                         </MudStack>
                     </div>
+                }
+
+                <!-- Road closure check indicator -->
+                @if (_closureCheckRunning)
+                {
+                    <MudPaper
+                        Elevation="3"
+                        Style="position: absolute; top: 16px; left: 16px; z-index: 200; pointer-events: auto; border-radius: 12px; padding: 8px 14px;">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudProgressCircular Color="Color.Warning" Size="Size.Small" Indeterminate="true" />
+                            <MudText Typo="Typo.body2">@L["ClosureCheckRunning"]</MudText>
+                        </MudStack>
+                    </MudPaper>
                 }
                 
                 <!-- Skip Waypoint button -->
@@ -244,7 +259,7 @@
                                       Color="Color.Primary"
                                       StartIcon="@Icons.Material.Filled.Start"
                                       Disabled="@(_startLocation is null || _destinationLocation is null || _waypoints!.Any(x => x.Location is null))"
-                                      bind-Loading="@_isLoading"
+                                      Loading="@(_isLoading || _closureCheckRunning)"
                                       OnClick="@CalculateRoute">
                         @L["CalculateRoute"]
                     </MudLoadingButton>

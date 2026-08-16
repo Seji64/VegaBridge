@@ -11,6 +11,7 @@ using Serilog.Events;
 using Shiny.BluetoothLE;
 using VegaBridgeApp.Services.BLE;
 using VegaBridgeApp.Services.BLE.Plugins;
+using VegaBridgeApp.Services.Closures;
 using VegaBridgeApp.Services.Geocoding;
 using VegaBridgeApp.Services.Location;
 using VegaBridgeApp.Services.Navigation;
@@ -43,7 +44,8 @@ public static class MauiProgram
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddMudServices(config =>
         {
-            config.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomCenter;
+            config.SnackbarConfiguration.PositionClass = "mud-snackbar-location-bottom-center mb-16";
+            config.SnackbarConfiguration.PreventDuplicates = true;
         });
         builder.Services.AddMudExtensions();
 
@@ -137,6 +139,65 @@ public static class MauiProgram
             SslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
         });
         builder.Services.AddSingleton<IGeocodingService, GeocodingService>();
+
+        // ── Road Closure Check (provider-based) ────────────────────────────
+        // Multiple providers can be enabled in Settings (Overpass/OSM,
+        // MobiData BW official roadworks, …). Same resilience pattern as the
+        // Valhalla client: named HttpClient + Polly retry with exponential
+        // backoff + jitter.
+        builder.Services.AddHttpClient(OverpassRoadClosureProvider.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://overpass-api.de/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+            // Overpass rejects requests without a (non-browser) User-Agent
+            // with HTTP 406 – Flurl/HttpClient sends none by default.
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("VegaBridge/1.0 (closure-check)");
+        })
+        .AddResilienceHandler("overpass-retry", static builder =>
+        {
+            builder.AddRetry(new HttpRetryStrategyOptions
+            {
+                MaxRetryAttempts = OverpassRoadClosureProvider.RetryCount,
+                Delay = TimeSpan.FromSeconds(1),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+                // A 504 from Overpass means the query was too heavy for the
+                // server (timeout) – retrying the SAME query will just get
+                // another 504. Fail fast so the provider timeout in the
+                // aggregator can surface the other providers' results.
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .Handle<HttpRequestException>()
+                    .HandleResult(r => r.StatusCode != System.Net.HttpStatusCode.GatewayTimeout)
+            });
+        });
+
+        builder.Services.AddHttpClient(MobiDataRoadClosureProvider.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://api.mobidata-bw.de/");
+            client.Timeout = TimeSpan.FromSeconds(60);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("VegaBridge/1.0 (closure-check)");
+        })
+        .AddResilienceHandler("mobidata-retry", static builder =>
+        {
+            builder.AddRetry(new HttpRetryStrategyOptions
+            {
+                MaxRetryAttempts = MobiDataRoadClosureProvider.RetryCount,
+                Delay = TimeSpan.FromSeconds(1),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+            });
+        });
+
+        builder.Services.AddSingleton<IRoadClosureProvider, OverpassRoadClosureProvider>();
+        builder.Services.AddSingleton<IRoadClosureProvider, MobiDataRoadClosureProvider>();
+        // Register the concrete type first, then map the interface onto the
+        // SAME singleton instance – the Settings page injects the concrete
+        // type (for the provider list + persistence), the Map injects the
+        // interface. Two separate registrations would create two instances
+        // and the provider selection would not be shared.
+        builder.Services.AddSingleton<RoadClosureService>();
+        builder.Services.AddSingleton<IRoadClosureService>(
+            sp => sp.GetRequiredService<RoadClosureService>());
 
         // ── Route Persistence & GPX Conversion ───────────────────────────────
         builder.Services.AddSingleton<IRouteStorageService, RouteStorageService>();

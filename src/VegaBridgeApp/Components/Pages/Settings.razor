@@ -1,11 +1,13 @@
 @page "/settings"
 @using VegaBridgeApp.Models.BLE
 @using VegaBridgeApp.Models.BLE.MvAgusta
+@using VegaBridgeApp.Services.Closures
 @inject BleManagerService BleManager
 @inject IGeocodingService GeocodingService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject GpsService Gps
+@inject RoadClosureService RoadClosureService
 <MudContainer MaxWidth="MaxWidth.Medium" Class="px-3 pt-2 pb-16">
 
     <MudStack Spacing="3">
@@ -202,6 +204,27 @@
                         OnClick="StartLongTestAsync">
                         @L["LongTestStart"]
                     </MudButton>
+                }
+            </MudCardContent>
+        </MudCard>
+
+        <!-- ── Road Closure Providers ──────────────────────────────────── -->
+        <MudCard Elevation="2" Style="border-radius: 16px;">
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2" Class="mb-1">@L["ClosureProvidersTitle"]</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3">
+                    @L["ClosureProvidersHelp"]
+                </MudText>
+
+                @foreach (var provider in RoadClosureService.Providers)
+                {
+                    <MudSwitch T="bool"
+                               Color="Color.Secondary"
+                               Value="@IsProviderEnabled(provider.Key)"
+                               ValueChanged="(bool v) => SetProviderEnabled(provider.Key, v)"
+                               Class="mb-2">
+                        @L[provider.DisplayNameResxKey]
+                    </MudSwitch>
                 }
             </MudCardContent>
         </MudCard>

@@ -11,6 +11,8 @@ using Serilog;
 using Shiny.Locations;
 using VegaBridgeApp.Models.Utils;
 using VegaBridgeApp.Services.Navigation;
+using VegaBridgeApp.Services.Closures;
+using VegaBridgeApp.Models.Closures;
 using VegaBridgeApp.Utils;
 using Coordinate = VegaBridgeApp.Models.Valhalla.Coordinate;
 using Location = VegaBridgeApp.Models.Valhalla.Location;
@@ -24,6 +26,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     
     private const string RouteLayerId = "route-layer";
     private const string BreadcrumbLayerId = "breadcrumb-layer";
+    private const string ClosureLayerIdPrefix = "closure-overlay-";
+    private const string ClosureHighlightColor = "#FFD600"; // yellow – clearly visible over the red route
+    private const double ClosureHighlightRadiusM = 80;
 
     private OpenStreetMap? _map;
     private MudAutocomplete<GeoResult> _startAuto = null!;
@@ -71,6 +76,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private double _lastFollowLat;
     private double _lastFollowLon;
     private double _lastFollowHeading = -1;
+
+    // ── Road closure check state ──
+    private readonly List<RoadClosure> _closures = [];
+    private bool _closureCheckInFlight;
+    private DateTime _lastClosureCheckUtc = DateTime.MinValue;
+    private bool _closureCheckRunning;
 
     protected override void OnInitialized()
     {
@@ -488,12 +499,15 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     {
         if (_disposed) return;
         _currentRouteResponse = response;
-
         // Sink callbacks arrive on the GPS thread; ShowRouteOnMap touches
         // MarkersList and calls StateHasChanged, so it must run on the
         // Blazor dispatcher. Without this the reroute map update throws
         // and the route disappears from the map.
         await InvokeAsync(async () => await ShowRouteOnMap(response));
+
+        // Road closure check for the (re)routed path – fire and forget, the
+        // service reports via snackbar/pins on the dispatcher itself.
+        _ = CheckClosuresForRouteAsync(response);
     }
 
     #endregion
@@ -833,6 +847,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             {
                 _currentRouteResponse = result.Response;
                 await ShowRouteOnMap(result.Response);
+                _ = CheckClosuresForRouteAsync(result.Response);
             }
             else
             {
@@ -846,6 +861,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
         finally
         {
+            // Release the functional loading state immediately. The closure
+            // check runs in the background (own _closureCheckRunning flag);
+            // it must NOT keep _isLoading set, because _isLoading also gates
+            // OffRoute reroute, SkipWaypoint and RerouteAsync.
             _isLoading = false;
             StateHasChanged();
         }
@@ -1299,6 +1318,192 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 _hasShownRoute = true;
             }
         }
+
+        // Yellow overlay + pins for known closures. Decode the route shape
+        // (already computed above) to position the highlight window.
+        if (string.IsNullOrEmpty(combinedShape))
+            await ReAddClosureMarkersAsync(map, null);
+        else
+            await ReAddClosureMarkersAsync(map, PolylineEncoder.DecodePolyline6(combinedShape));
+    }
+
+    // ── Road Closure Check (Overpass) ────────────────────────────────────
+
+    private async Task CheckClosuresForRouteAsync(RouteResponse response)
+    {
+        if (_disposed) return;
+        if (_closureCheckInFlight) return;
+        if ((DateTime.UtcNow - _lastClosureCheckUtc).TotalSeconds < 60) return;
+        _lastClosureCheckUtc = DateTime.UtcNow;
+        _closureCheckInFlight = true;
+        _closureCheckRunning = true;
+        await InvokeAsync(() =>
+        {
+            // Make the background work visible: the map indicator stays up
+            // for the whole check and the snackbar tells the user data is
+            // being fetched (first request downloads the MobiData feed).
+            Snackbar.Add(L["ClosureCheckRunning"], Severity.Info);
+            StateHasChanged();
+        });
+
+        try
+        {
+            // Decode the route geometry so the service can build the corridor.
+            (string mergedShape, _, _, _) = NavService.PrepareNavigationData(response.Trip?.Legs ?? []);
+            List<Coordinate> routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
+            if (routeCoords.Count < 2) return;
+
+            RoadClosureCheckResult result = await RoadClosureService.CheckRouteAsync(routeCoords);
+
+            await InvokeAsync(async () =>
+            {
+                _closures.Clear();
+
+                if (!result.IsSuccess)
+                {
+                    Log.Warning("Road closure check unavailable: {Reason}", result.ErrorMessage);
+                    return;
+                }
+
+                _closures.AddRange(result.Closures);
+                await ReAddClosureMarkersAsync(_map, routeCoords);
+
+                if (_closures.Count > 0)
+                {
+                    Snackbar.Add(
+                        string.Format(L["ClosuresFound"], _closures.Count),
+                        Severity.Warning);
+                }
+
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Road closure check failed");
+        }
+        finally
+        {
+            _closureCheckInFlight = false;
+            _closureCheckRunning = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Adds one red pin per known closure to the map plus a yellow overlay
+    /// along the route where the closure lies. Call whenever the marker list
+    /// was rebuilt (new route shown, markers cleared).
+    /// </summary>
+    private async Task ReAddClosureMarkersAsync(OpenStreetMap? map, List<Coordinate>? routeCoords)
+    {
+        if (map == null) return;
+
+        // 1. Red pins at the closure positions.
+        foreach (RoadClosure closure in _closures)
+        {
+            map.MarkersList.Add(new Marker(
+                MarkerType.MarkerFlag,
+                new OpenLayers.Blazor.Coordinate(closure.Longitude, closure.Latitude),
+                "⚠",
+                PinColor.Red));
+        }
+
+        // 2. Yellow overlay: highlight the route segment around each closure
+        //    so it is visible at a glance (the user asked for a yellow route
+        //    stroke instead of / in addition to the pins).
+        if (_closures.Count == 0 || routeCoords is not { Count: > 1 }) return;
+
+        // Remove any previous closure overlay layers.
+        List<Layer> oldOverlays = map.LayersList
+            .Where(l => l.Id?.StartsWith(ClosureLayerIdPrefix) == true)
+            .ToList();
+        foreach (Layer l in oldOverlays)
+            await map.RemoveLayer(l);
+
+        foreach (RoadClosure closure in _closures)
+        {
+            // Find the route point nearest to the closure position and take a
+            // window around it (half the corridor each side).
+            int nearestIdx = FindNearestRoutePointIndex(closure.Latitude, closure.Longitude, routeCoords);
+            if (nearestIdx < 0) continue;
+
+            List<Coordinate> segment = ExtractRouteWindow(routeCoords, nearestIdx, ClosureHighlightRadiusM);
+            if (segment.Count < 2) continue;
+
+            string polyline = PolylineEncoder.EncodePolyline6(segment);
+            Layer overlay = new()
+            {
+                Id = $"{ClosureLayerIdPrefix}{closure.OsmId}",
+                LayerType = LayerType.Vector,
+                SourceType = SourceType.VectorPolyline,
+                Projection = "EPSG:4326",
+                Data = polyline,
+                FormatOptions = new { factor = 1e6 },
+                Style = new StyleOptions
+                {
+                    Stroke = new StyleOptions.StrokeOptions
+                    {
+                        Color = ClosureHighlightColor,
+                        Width = 8,
+                        LineCap = "round",
+                        LineJoin = "round"
+                    }
+                }
+            };
+            await map.AddLayer(overlay);
+        }
+    }
+
+    /// <summary>Index of the route point closest to the given position, or -1.</summary>
+    private static int FindNearestRoutePointIndex(double lat, double lon, List<Coordinate> routeCoords)
+    {
+        int best = -1;
+        double bestDist = double.MaxValue;
+        for (int i = 0; i < routeCoords.Count; i++)
+        {
+            double d = GeoMath.DistanceMeters(lat, lon, routeCoords[i].Latitude, routeCoords[i].Longitude);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Extracts a window of route points around <paramref name="centerIdx"/>,
+    /// extending roughly <paramref name="radiusM"/> meters in both directions.
+    /// </summary>
+    private static List<Coordinate> ExtractRouteWindow(
+        List<Coordinate> routeCoords, int centerIdx, double radiusM)
+    {
+        List<Coordinate> result = [routeCoords[centerIdx]];
+
+        // Forward from the center.
+        double dist = 0;
+        for (int i = centerIdx + 1; i < routeCoords.Count && dist < radiusM; i++)
+        {
+            dist += GeoMath.DistanceMeters(
+                routeCoords[i - 1].Latitude, routeCoords[i - 1].Longitude,
+                routeCoords[i].Latitude, routeCoords[i].Longitude);
+            result.Add(routeCoords[i]);
+        }
+
+        // Backward from the center (prepend).
+        List<Coordinate> backward = [];
+        dist = 0;
+        for (int i = centerIdx - 1; i >= 0 && dist < radiusM; i--)
+        {
+            dist += GeoMath.DistanceMeters(
+                routeCoords[i + 1].Latitude, routeCoords[i + 1].Longitude,
+                routeCoords[i].Latitude, routeCoords[i].Longitude);
+            backward.Add(routeCoords[i]);
+        }
+        backward.Reverse();
+        backward.AddRange(result);
+        return backward;
     }
 
     private static string FormatCoordinate(double? lat, double? lon)
