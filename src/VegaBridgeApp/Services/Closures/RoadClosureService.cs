@@ -32,14 +32,24 @@ public class RoadClosureService : IRoadClosureService
     public IReadOnlyList<IRoadClosureProvider> Providers => _providers;
 
     /// <summary>
+    /// Provider keys enabled by default when the user has not changed the
+    /// selection yet. Only Overpass is active by default – MobiData BW is
+    /// an opt-in (its feed download adds latency).
+    /// </summary>
+    private static readonly string[] DefaultEnabledKeys = ["overpass"];
+
+    /// <summary>
     /// Returns the keys of the providers the user has enabled in Settings.
-    /// Defaults to all providers when nothing is persisted yet.
+    /// Defaults to <see cref="DefaultEnabledKeys"/> when nothing is persisted yet.
     /// </summary>
     public IReadOnlyList<string> GetEnabledProviderKeys()
     {
         string? stored = Preferences.Default.Get(PreferencesKey, (string?)null);
         if (string.IsNullOrWhiteSpace(stored))
-            return _providers.Select(p => p.Key).ToList();
+            return _providers
+                .Where(p => DefaultEnabledKeys.Contains(p.Key))
+                .Select(p => p.Key)
+                .ToList();
 
         HashSet<string> enabled = stored
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
