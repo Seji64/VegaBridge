@@ -80,6 +80,29 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 _discoveredPeripherals[_activePeripheral.Uuid] = _activePeripheral;
             }
 
+            // iOS quirk: once the OS has established a connection (e.g. via
+            // state restoration) the peripheral often stops advertising, so
+            // a pure scan never sees it again. RetrieveConnectedPeripherals
+            // finds exactly those devices. Add them to the list so the user
+            // can re-select / re-attach to a device that iOS knows about.
+            try
+            {
+                foreach (IPeripheral connected in bleManager.GetConnectedPeripherals())
+                {
+                    _discoveredPeripherals[connected.Uuid.ToUpper()] = connected;
+                    Log.Information("BLE: OS-connected peripheral found without advertising: {Uuid} ({Name})",
+                        connected.Uuid, connected.Name ?? "Unknown");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "BLE: GetConnectedPeripherals failed (non-fatal)");
+            }
+
+            // The list must be rebuilt now – an OS-connected peripheral that
+            // doesn't advertise will never trigger UpdateDeviceFromScanResult.
+            UpdateDeviceList();
+
             Log.Information("BLE scanning started");
             
             _scanSubscription = bleManager.ScanForUniquePeripherals().Subscribe(UpdateDeviceFromScanResult);
@@ -543,7 +566,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         List<BleDeviceInfo> list =
         [
             .. _discoveredPeripherals.Values
-                .Where(p => !string.IsNullOrWhiteSpace(p.Name) && p.Name != "Unknown")
+                // OS-connected peripherals (retrieved without advertising)
+                // may have an unknown name on first sight – keep them, the
+                // user recognizes the bike and the name is read on connect.
+                .Where(p => (!string.IsNullOrWhiteSpace(p.Name) && p.Name != "Unknown") || p.IsConnected())
                 .Select(p => 
                 {
                     BleDeviceInfo deviceInfo = new()
