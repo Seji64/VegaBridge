@@ -861,8 +861,14 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
         finally
         {
-            _isLoading = false;
-            StateHasChanged();
+            // The closure check (started above) is part of "calculating the
+            // route" from the user's perspective – keep the loading state up
+            // until it finishes. CheckClosuresForRouteAsync releases it.
+            if (!_closureCheckRunning)
+            {
+                _isLoading = false;
+                StateHasChanged();
+            }
         }
     }
 
@@ -1382,6 +1388,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             _closureCheckInFlight = false;
             _closureCheckRunning = false;
+            // Release the loading state held by CalculateRoute (see there) –
+            // the closure check was the last step of "calculating the route".
+            _isLoading = false;
             await InvokeAsync(StateHasChanged);
         }
     }
