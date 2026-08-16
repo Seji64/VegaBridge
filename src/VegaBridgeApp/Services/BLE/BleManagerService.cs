@@ -461,7 +461,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
-    private async Task RetryConnectionAsync(Guid deviceUuid)
+    private async Task<bool> RetryConnectionAsync(Guid deviceUuid)
     {
         const int maxRetries = 3;
         int attempt = 0;
@@ -474,10 +474,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), token);
-                if (!await ConnectAsync(deviceUuid)) continue;
-                return;
+                if (await ConnectAsync(deviceUuid))
+                {
+                    return true;
+                }
             }
-            catch (OperationCanceledException) { return; }
+            catch (OperationCanceledException) { return false; }
             catch (Exception ex)
             {
                 Log.Warning(ex, "Retry attempt {Attempt} failed for {Uuid}", attempt, deviceUuid);
@@ -488,6 +490,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         {
             UpdateError("Connection lost. Reconnection attempts failed.");
         }
+        return false;
     }
 
     private void UpdateDeviceFromScanResult(IPeripheral result)
