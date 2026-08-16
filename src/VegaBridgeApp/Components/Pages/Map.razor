@@ -53,6 +53,18 @@
                     @if (_navManeuver != null)
                     {
                         <MudStack Spacing="0">
+                            
+                            <!-- Progress bar -->
+                            <MudProgressLinear Value="@((int)_navProgress)" Color="Color.Primary" Size="Size.Medium"/>
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" Style="margin-top: -2px;">
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    @string.Format(L["Km"], _navStatus?.RemainingDistanceKm)
+                                </MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    @FormatTime(_navStatus?.RemainingTimeMin)
+                                </MudText>
+                            </MudStack>
+                            
                             <!-- Icon + Label row -->
                             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.Center" Spacing="1">
                                 <MudIcon Size="Size.Small" Icon="@GetTurnIcon(_navManeuver.ValhallaType)" Color="Color.Inherit"/>
@@ -72,6 +84,7 @@
                                 }
                             </MudStack>
 
+
                             <!-- Instruction -->
                             <MudText Typo="Typo.subtitle1" Align="Align.Center" Class="mud-text-primary">
                                 @_navManeuver.Instruction
@@ -87,32 +100,7 @@
                         </MudStack>
                     }
                 </MudPaper>
-
-                <!-- Speed overlay -->
-                <div Style="position: absolute; top: 250px; right: 16px; z-index: 150; pointer-events: auto; text-align: right; text-shadow: 0 2px 8px rgba(0,0,0,0.7);">
-                    <MudText Typo="Typo.h2" Style="font-size: 3rem; font-weight: 700; line-height: 1; letter-spacing: -2px;">
-                        @Gps.CurrentSpeedKmh.ToString("F0")
-                    </MudText>
-                    <MudText Typo="Typo.h6" Class="mud-text-secondary">@L["NavKph"]</MudText>
-                </div>
                 
-                <!-- Progress bar -->
-                @if (_navProgress > 0)
-                {
-                    <div Style="position: absolute; bottom: 80px; left: 0; right: 0; z-index: 150; pointer-events: auto;" Class="px-3">
-                        <MudStack Spacing="0">
-                            <MudProgressLinear Value="@((int)_navProgress)" Color="Color.Primary" Size="Size.Small"/>
-                            <MudStack Row="true" Justify="Justify.SpaceBetween" Style="margin-top: -2px;">
-                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                    @string.Format(L["Km"], _navStatus?.RemainingDistanceKm)
-                                </MudText>
-                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                    @FormatTime(_navStatus?.RemainingTimeMin)
-                                </MudText>
-                            </MudStack>
-                        </MudStack>
-                    </div>
-                }
 
                 <!-- Road closure check indicator -->
                 @if (_closureCheckRunning)
