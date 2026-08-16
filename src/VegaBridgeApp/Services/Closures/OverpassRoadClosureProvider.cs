@@ -58,7 +58,7 @@ public class OverpassRoadClosureProvider : IRoadClosureProvider
         };
     private readonly FlurlClient _flurlClient;
 
-    public RoadClosureService(IHttpClientFactory httpClientFactory)
+    public OverpassRoadClosureProvider(IHttpClientFactory httpClientFactory)
     {
         HttpClient httpClient = httpClientFactory.CreateClient(HttpClientName);
         _flurlClient = new FlurlClient(httpClient);
