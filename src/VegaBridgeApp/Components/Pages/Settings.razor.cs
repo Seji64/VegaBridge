@@ -304,11 +304,16 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         try
         {
             // Phase 1: navigation start via plugin flow → starts the PING
-            // keepalive (15 s interval) exactly like a real ride.
+            // keepalive (15 s interval) exactly like a real ride. Real GPS
+            // coordinates so the DEST frame on the display is not 0/0.
+            double? startLat = Gps.LastReading?.Position.Latitude;
+            double? startLon = Gps.LastReading?.Position.Longitude;
             NavigationStartInput startInput = new()
             {
                 TotalDistanceKm = 12.5,
-                TotalTimeMin = 8
+                TotalTimeMin = 8,
+                StartLatitude = startLat,
+                StartLongitude = startLon
             };
             await BleManager.ExecuteNavigationActionAsync("SendNavigationStartAsync", startInput);
             await Task.Delay(500);

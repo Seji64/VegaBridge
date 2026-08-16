@@ -231,7 +231,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             TotalDistanceKm = TotalDistanceKm,
             TotalTimeMin = TotalTimeMin,
-            ManeuverCount = maneuvers.Count
+            ManeuverCount = maneuvers.Count,
+            // Real start coordinates for the DEST frame on the bike display.
+            StartLatitude = _routeCoords.Count > 0 ? _routeCoords[0].Latitude : null,
+            StartLongitude = _routeCoords.Count > 0 ? _routeCoords[0].Longitude : null
         }));
 
         await gps.StartTrackingAsync(backgroundMode: true);
