@@ -33,6 +33,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private GeoResult? _destinationLocation;
     private List<WaypointViewModel> _waypoints = [];
     private readonly List<(WaypointViewModel Waypoint, Marker Marker)> _waypointPins = [];
+    private readonly HashSet<Guid> _skippedWaypointIds = [];
     private WaypointViewModel? _pendingMoveWaypoint;
     private DateTime _lastMarkerClickUtc = DateTime.MinValue;
     private bool _actionsDialogOpen;
@@ -217,6 +218,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             foreach (WaypointViewModel waypoint in _waypoints)
             {
                 if (waypoint.Location == null) continue;
+                if (_skippedWaypointIds.Contains(waypoint.Id)) continue;
                 Marker marker = new(MarkerType.MarkerPin,
                     new OpenLayers.Blazor.Coordinate(waypoint.Location.Longitude, waypoint.Location.Latitude),
                     "", PinColor.Blue);
@@ -1041,6 +1043,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private async Task ExitNavigation()
     {
         await NavService.StopNavigation();
+        // Skipped waypoints were only skipped for the running navigation –
+        // the planned route (list + pins) stays intact after stopping.
+        _skippedWaypointIds.Clear();
         await ClearGpsMarkersAsync();
         if (_map != null)
         {
@@ -1091,16 +1096,19 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             if (rerouted && skippedViaIndex >= 0)
             {
                 // skippedViaIndex refers to the waypoints WITH a location
-                // (the via list passed to the service). Map it back to the
-                // raw _waypoints list, which may contain empty entries.
-                List<int> nonNullIndices = _waypoints
-                    .Select((w, i) => w.Location != null ? i : -1)
-                    .Where(i => i >= 0)
+                // minus those already skipped (same filtered list the
+                // service works with). Map it back to the raw _waypoints
+                // list, which may contain empty entries.
+                List<WaypointViewModel> skippable = _waypoints
+                    .Where(w => w.Location != null && !_skippedWaypointIds.Contains(w.Id))
                     .ToList();
-                if (skippedViaIndex < nonNullIndices.Count)
+                if (skippedViaIndex < skippable.Count)
                 {
-                    _waypoints.RemoveAt(nonNullIndices[skippedViaIndex]);
-                    await RefreshWaypointMarkersAsync();
+                    // Mark as skipped instead of removing: the waypoint must
+                    // still be there when navigation ends (planning list +
+                    // pins). Only the running navigation drops it.
+                    _skippedWaypointIds.Add(skippable[skippedViaIndex].Id);
+                    await RefreshWaypointMarkersAsync(force: true);
                 }
             }
 
@@ -1240,7 +1248,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             List<Location> locations = response.Trip.Locations;
 
             // Trip order matches CalculateRoute: non-null waypoints only.
-            List<WaypointViewModel> routeWaypoints = _waypoints.Where(w => w.Location != null).ToList();
+            List<WaypointViewModel> routeWaypoints = _waypoints
+                .Where(w => w.Location != null && !_skippedWaypointIds.Contains(w.Id))
+                .ToList();
             _waypointPins.Clear();
 
             for (int i = 0; i < locations.Count; i++)
