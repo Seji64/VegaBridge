@@ -134,7 +134,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     {
         try
         {
-            IReadOnlyList<IService> services = await peripheral.GetServices().FirstOrDefaultAsync();
+            IReadOnlyList<BleServiceInfo> services = await peripheral.GetServices().FirstOrDefaultAsync();
             if (services is null || services.Count == 0)
             {
                 Log.Warning("BLE: no GATT services found for {Uuid} – plugin fallback failed", peripheral.Uuid);
@@ -143,7 +143,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             foreach (IBleDevicePlugin plugin in _plugins)
             {
-                if (services.Any(s => s.Uuid == plugin.ServiceUuid))
+                // BleServiceInfo.Uuid is a short/long string UUID (e.g. "180D"
+                // or "0000180d-..."); plugin.ServiceUuid is a Guid. Compare
+                // case-insensitively on the full 36-char form.
+                string pluginUuid = plugin.ServiceUuid.ToString().ToUpperInvariant();
+                if (services.Any(s => NormalizeUuid(s.Uuid) == pluginUuid))
                 {
                     Log.Information("BLE: plugin {Plugin} matched via service UUID {Uuid} for {Device}",
                         plugin.DisplayName, plugin.ServiceUuid, peripheral.Uuid);
@@ -162,7 +166,20 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
-    private void StopScanning()
+    /// <summary>
+    /// Normalizes a GATT UUID string to the full 36-char upper-case form,
+    /// so short forms ("180D") and long forms ("0000180d-0000-1000-8000-00805f9b34fb")
+    /// compare equal.
+    /// </summary>
+    private static string NormalizeUuid(string uuid)
+    {
+        string value = uuid.Trim().ToUpperInvariant();
+        if (value.Length == 4)
+            value = $"0000{value}-0000-1000-8000-00805F9B34FB";
+        return value;
+    }
+
+    public void StopScanning()
     {
         Log.Information("Stopping BLE scan");
         _scanTimeoutCts?.Cancel();
