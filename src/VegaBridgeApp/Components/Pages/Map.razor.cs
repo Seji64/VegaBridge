@@ -26,7 +26,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     
     private const string RouteLayerId = "route-layer";
     private const string BreadcrumbLayerId = "breadcrumb-layer";
-    private const string ClosureLayerId = "closure-layer";
+    private const string ClosureLayerIdPrefix = "closure-overlay-";
+    private const string ClosureHighlightColor = "#FFD600"; // yellow – clearly visible over the red route
+    private const double ClosureHighlightRadiusM = 80;
 
     private OpenStreetMap? _map;
     private MudAutocomplete<GeoResult> _startAuto = null!;
@@ -1312,7 +1314,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             }
         }
 
-        ReAddClosureMarkers(map);
+        // Yellow overlay + pins for known closures. Decode the route shape
+        // (already computed above) to position the highlight window.
+        if (string.IsNullOrEmpty(combinedShape))
+            await ReAddClosureMarkersAsync(map, null);
+        else
+            await ReAddClosureMarkersAsync(map, PolylineEncoder.DecodePolyline6(combinedShape));
     }
 
     // ── Road Closure Check (Overpass) ────────────────────────────────────
@@ -1334,7 +1341,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             RoadClosureCheckResult result = await RoadClosureService.CheckRouteAsync(routeCoords);
 
-            await InvokeAsync(() =>
+            await InvokeAsync(async () =>
             {
                 _closures.Clear();
 
@@ -1345,7 +1352,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 }
 
                 _closures.AddRange(result.Closures);
-                ReAddClosureMarkers(_map);
+                await ReAddClosureMarkersAsync(_map, routeCoords);
 
                 if (_closures.Count > 0)
                 {
@@ -1368,13 +1375,15 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     }
 
     /// <summary>
-    /// Adds one red pin per known closure to the map. Call whenever the
-    /// marker list was rebuilt (new route shown, markers cleared).
+    /// Adds one red pin per known closure to the map plus a yellow overlay
+    /// along the route where the closure lies. Call whenever the marker list
+    /// was rebuilt (new route shown, markers cleared).
     /// </summary>
-    private void ReAddClosureMarkers(OpenStreetMap? map)
+    private async Task ReAddClosureMarkersAsync(OpenStreetMap? map, List<Coordinate>? routeCoords)
     {
-        if (map == null || _closures.Count == 0) return;
+        if (map == null) return;
 
+        // 1. Red pins at the closure positions.
         foreach (RoadClosure closure in _closures)
         {
             map.MarkersList.Add(new Marker(
@@ -1383,6 +1392,102 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 "⚠",
                 PinColor.Red));
         }
+
+        // 2. Yellow overlay: highlight the route segment around each closure
+        //    so it is visible at a glance (the user asked for a yellow route
+        //    stroke instead of / in addition to the pins).
+        if (_closures.Count == 0 || routeCoords is not { Count: > 1 }) return;
+
+        // Remove any previous closure overlay layers.
+        List<Layer> oldOverlays = map.LayersList
+            .Where(l => l.Id?.StartsWith(ClosureLayerIdPrefix) == true)
+            .ToList();
+        foreach (Layer l in oldOverlays)
+            await map.RemoveLayer(l);
+
+        foreach (RoadClosure closure in _closures)
+        {
+            // Find the route point nearest to the closure position and take a
+            // window around it (half the corridor each side).
+            int nearestIdx = FindNearestRoutePointIndex(closure.Latitude, closure.Longitude, routeCoords);
+            if (nearestIdx < 0) continue;
+
+            List<Coordinate> segment = ExtractRouteWindow(routeCoords, nearestIdx, ClosureHighlightRadiusM);
+            if (segment.Count < 2) continue;
+
+            string polyline = PolylineEncoder.EncodePolyline6(segment);
+            Layer overlay = new()
+            {
+                Id = $"{ClosureLayerIdPrefix}{closure.OsmId}",
+                LayerType = LayerType.Vector,
+                SourceType = SourceType.VectorPolyline,
+                Projection = "EPSG:4326",
+                Data = polyline,
+                FormatOptions = new { factor = 1e6 },
+                Style = new StyleOptions
+                {
+                    Stroke = new StyleOptions.StrokeOptions
+                    {
+                        Color = ClosureHighlightColor,
+                        Width = 8,
+                        LineCap = "round",
+                        LineJoin = "round"
+                    }
+                }
+            };
+            await map.AddLayer(overlay);
+        }
+    }
+
+    /// <summary>Index of the route point closest to the given position, or -1.</summary>
+    private static int FindNearestRoutePointIndex(double lat, double lon, List<Coordinate> routeCoords)
+    {
+        int best = -1;
+        double bestDist = double.MaxValue;
+        for (int i = 0; i < routeCoords.Count; i++)
+        {
+            double d = GeoMath.DistanceMeters(lat, lon, routeCoords[i].Latitude, routeCoords[i].Longitude);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Extracts a window of route points around <paramref name="centerIdx"/>,
+    /// extending roughly <paramref name="radiusM"/> meters in both directions.
+    /// </summary>
+    private static List<Coordinate> ExtractRouteWindow(
+        List<Coordinate> routeCoords, int centerIdx, double radiusM)
+    {
+        List<Coordinate> result = [routeCoords[centerIdx]];
+
+        // Forward from the center.
+        double dist = 0;
+        for (int i = centerIdx + 1; i < routeCoords.Count && dist < radiusM; i++)
+        {
+            dist += GeoMath.DistanceMeters(
+                routeCoords[i - 1].Latitude, routeCoords[i - 1].Longitude,
+                routeCoords[i].Latitude, routeCoords[i].Longitude);
+            result.Add(routeCoords[i]);
+        }
+
+        // Backward from the center (prepend).
+        List<Coordinate> backward = [];
+        dist = 0;
+        for (int i = centerIdx - 1; i >= 0 && dist < radiusM; i--)
+        {
+            dist += GeoMath.DistanceMeters(
+                routeCoords[i + 1].Latitude, routeCoords[i + 1].Longitude,
+                routeCoords[i].Latitude, routeCoords[i].Longitude);
+            backward.Add(routeCoords[i]);
+        }
+        backward.Reverse();
+        backward.AddRange(result);
+        return backward;
     }
 
     private static string FormatCoordinate(double? lat, double? lon)

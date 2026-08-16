@@ -3,10 +3,9 @@ using System.Text.Json.Serialization;
 namespace VegaBridgeApp.Models.Closures;
 
 /// <summary>
-/// Element centroid returned by `out center` (used for ways, which have no
-/// single coordinate). Used in the cheap first-pass candidate query.
+/// A point of a way geometry as returned by `out geom`.
 /// </summary>
-public class OverpassCenter
+public class OverpassGeometryPoint
 {
     [JsonPropertyName("lat")]
     public double Lat { get; set; }
