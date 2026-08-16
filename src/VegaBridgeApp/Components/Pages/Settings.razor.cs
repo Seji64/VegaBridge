@@ -33,6 +33,13 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private double _offRouteThreshold = 10;
     private GeoResult? _homeLocation;
     
+    // ── Long-duration connection test state ──
+    private CancellationTokenSource? _longTestCts;
+    private bool _longTestRunning;
+    private int _longTestStep;
+    private const int LongTestTotalSteps = 10;
+    private const int LongTestStepDelaySec = 30; // 10 steps × 30s ≈ 5 min
+    
     private IDisposable? _stateSubscription;
     private IDisposable? _devicesSubscription;
     private IDisposable? _errorSubscription;
@@ -259,6 +266,125 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     {
         DebugLogSink.Instance.Clear();
         Snackbar.Add(L["DebugLogCleared"], Severity.Info);
+    }
+
+    // ── Long-duration connection test ────────────────────────────────────
+    // Sends a ~5 min navigation simulation (10 steps × 30 s) so the rider
+    // can verify the BLE link survives a screen-off ride. Uses the plugin
+    // start/finish flow, so the PING keepalive runs during the whole test –
+    // exactly like real navigation.
+
+    private bool LongTestRunning => _longTestRunning;
+
+    private string LongTestStatusText
+    {
+        get
+        {
+            if (!_longTestRunning) return string.Empty;
+            return string.Format(L["LongTestProgress"], _longTestStep, LongTestTotalSteps);
+        }
+    }
+
+    private async Task StartLongTestAsync()
+    {
+        if (!IsConnected)
+        {
+            Snackbar.Add(L["LongTestNotConnected"], Severity.Warning);
+            return;
+        }
+
+        _longTestCts = new CancellationTokenSource();
+        _longTestRunning = true;
+        _longTestStep = 0;
+        StateHasChanged();
+
+        BleCommandLogger.ClearLog();
+        BleCommandLogger.Log("=== LONG CONNECTION TEST START (5 min) ===");
+
+        try
+        {
+            // Phase 1: navigation start via plugin flow → starts the PING
+            // keepalive (15 s interval) exactly like a real ride.
+            NavigationStartInput startInput = new()
+            {
+                TotalDistanceKm = 12.5,
+                TotalTimeMin = 8
+            };
+            await BleManager.ExecuteNavigationActionAsync("SendNavigationStartAsync", startInput);
+            await Task.Delay(500);
+
+            // Phases 2..10: one maneuver every 30 s, distance shrinking.
+            // Keeps the display alive and lets us check if the connection
+            // survives (keepalive + reconnect logic) with the screen off.
+            (string Icon, string Instruction, string Street)[] steps =
+            [
+                ("turn-left",  "Links abbiegen\nHauptstraße", "Hauptstraße"),
+                ("straight",   "Geradeaus fahren", "B 27"),
+                ("turn-right", "Rechts abbiegen\nNebenstraße", "Nebenstraße"),
+                ("roundabout-right-1", "Kreisverkehr\nAusfahrt 1", "L 1015"),
+                ("turn-left",  "Links abbiegen\nSchwabstraße", "Schwabstraße"),
+                ("straight",   "Geradeaus fahren", "L 1015"),
+                ("turn-right", "Rechts abbiegen\nIndustriestraße", "Industriestraße"),
+                ("roundabout-right-2", "Kreisverkehr\nAusfahrt 2", "K 1234"),
+                ("turn-left",  "Links abbiegen\nZielstraße", "Zielstraße"),
+                ("straight",   "Ziel erreicht in Kürze", "Ankunft")
+            ];
+
+            for (int i = 0; i < steps.Length; i++)
+            {
+                _longTestStep = i + 1;
+                BleCommandLogger.Log($"LONG TEST step {_longTestStep}/{steps.Length}: {steps[i].Icon}");
+
+                await BleManager.SendCommandAsync(Commands.NAVI, steps[i].Icon, steps[i].Instruction, steps[i].Street);
+                await Task.Delay(200);
+
+                double remainingKm = 12.5 * (1.0 - (double)i / steps.Length);
+                double distToTurn = Math.Max(0, 400 - i * 40);
+                await BleManager.SendCommandAsync(Commands.SM, "0", ((int)(remainingKm * 1000)).ToString(), ((int)distToTurn).ToString());
+                await Task.Delay(200);
+
+                // Countdown for turn maneuvers (like the old rapid test).
+                if (steps[i].Icon.StartsWith("turn") || steps[i].Icon.StartsWith("roundabout"))
+                {
+                    await BleManager.SendCommandAsync(Commands.SM1, steps[i].Icon.Contains("left") ? "902" : "901", "7", "");
+                }
+
+                await InvokeAsync(StateHasChanged);
+
+                // Wait for the next step, unless it was the last one.
+                if (i < steps.Length - 1)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(LongTestStepDelaySec), _longTestCts.Token);
+                }
+            }
+
+            // Phase 11: finish via plugin flow → stops the keepalive.
+            await BleManager.ExecuteNavigationFinishAsync();
+            BleCommandLogger.Log("=== LONG CONNECTION TEST END (finished) ===");
+            Snackbar.Add(L["LongTestDone"], Severity.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            BleCommandLogger.Log("=== LONG CONNECTION TEST STOPPED (cancelled) ===");
+            Snackbar.Add(L["LongTestStopped"], Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            BleCommandLogger.Log($"=== LONG CONNECTION TEST FAILED: {ex.Message} ===");
+            Snackbar.Add(string.Format(L["LongTestError"], ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _longTestRunning = false;
+            _longTestCts?.Dispose();
+            _longTestCts = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void StopLongTest()
+    {
+        _longTestCts?.Cancel();
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────

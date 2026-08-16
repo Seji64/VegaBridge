@@ -165,6 +165,45 @@
             </MudCardContent>
         </MudCard>
 
+        <!-- ── Connection Test ─────────────────────────────────────────── -->
+        <MudCard Elevation="2" Style="border-radius: 16px;">
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2" Class="mb-3">@L["LongTestTitle"]</MudText>
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3">
+                    @L["LongTestHelp"]
+                </MudText>
+
+                @if (LongTestRunning)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Primary" Class="mb-3">
+                        @LongTestStatusText
+                    </MudText>
+                    <MudProgressLinear Color="Color.Primary" Value="(double)_longTestStep / LongTestTotalSteps * 100" Class="mb-3" />
+                    <MudButton
+                        Variant="Variant.Filled"
+                        Color="Color.Error"
+                        StartIcon="@Icons.Material.Filled.Stop"
+                        FullWidth="true"
+                        OnClick="@StopLongTest">
+                        @L["LongTestStop"]
+                    </MudButton>
+                }
+                else
+                {
+                    <MudButton
+                        Variant="Variant.Filled"
+                        Color="Color.Primary"
+                        StartIcon="@Icons.Material.Filled.Timer"
+                        FullWidth="true"
+                        Disabled="!IsConnected"
+                        OnClick="StartLongTestAsync">
+                        @L["LongTestStart"]
+                    </MudButton>
+                }
+            </MudCardContent>
+        </MudCard>
+
         <!-- ── Debug Logging ─────────────────────────────────────────────── -->
         <MudCard Elevation="2" Style="border-radius: 16px;">
             <MudCardContent>
