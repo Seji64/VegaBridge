@@ -1333,7 +1333,14 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         _lastClosureCheckUtc = DateTime.UtcNow;
         _closureCheckInFlight = true;
         _closureCheckRunning = true;
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() =>
+        {
+            // Make the background work visible: the map indicator stays up
+            // for the whole check and the snackbar tells the user data is
+            // being fetched (first request downloads the MobiData feed).
+            Snackbar.Add(L["ClosureCheckRunning"], Severity.Info);
+            StateHasChanged();
+        });
 
         try
         {
