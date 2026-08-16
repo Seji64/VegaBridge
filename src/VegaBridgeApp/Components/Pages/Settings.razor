@@ -1,6 +1,5 @@
 @page "/settings"
 @using VegaBridgeApp.Models.BLE
-@using VegaBridgeApp.Models.BLE.MvAgusta
 @using VegaBridgeApp.Services.Closures
 @inject BleManagerService BleManager
 @inject IGeocodingService GeocodingService
@@ -37,7 +36,6 @@
                             FullWidth="true">
                             @L["Disconnect"]
                         </MudButton>
-                        
                         <MudButton
                             Variant="Variant.Text"
                             Color="Color.Info"
@@ -45,7 +43,7 @@
                             Disabled="!IsConnected"
                             StartIcon="@Icons.Material.Filled.Send"
                             FullWidth="true"
-                            OnClick='@(async () => await BleManager.SendCommandAsync(Commands.MSG, "whatsapp", "Test from VegaBridge", "VegaBridge"))'>
+                            OnClick="@(async () => await BleManager.SendTestFrameAsync())">
                             Test Connection
                         </MudButton>
 
