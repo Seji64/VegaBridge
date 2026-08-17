@@ -30,8 +30,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private const double ClosureHighlightRadiusM = 80;
 
     private OpenStreetMap? _map;
-    private MudAutocomplete<GeoResult> _startAuto = null!;
-    private MudAutocomplete<GeoResult> _destAuto = null!;
+    private MudAutocomplete<GeoResult>? _startAuto;
+    private MudAutocomplete<GeoResult>? _destAuto;
 
     private GeoResult? _startLocation;
     private GeoResult? _destinationLocation;
@@ -251,17 +251,21 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         // Overlapping pins (e.g. added twice at the same spot) fire this twice.
         if (_actionsDialogOpen) return;
 
-        (WaypointViewModel Waypoint, Marker Marker)? pin = _waypointPins.FirstOrDefault(p => p.Marker == marker);
-        if (pin.Value.Waypoint.Location == null) return;
+        (WaypointViewModel Waypoint, Marker Marker) pin = _waypointPins.FirstOrDefault(p => p.Marker == marker);
+        // FirstOrDefault on a value tuple never returns null - it returns
+        // (null, null). Check the Waypoint reference directly: taps on
+        // non-waypoint markers (start pin, destination, closure flags,
+        // route pin) must not throw.
+        if (pin.Waypoint is null || pin.Waypoint.Location is null) return;
 
-        int index = _waypoints.IndexOf(pin.Value.Waypoint);
+        int index = _waypoints.IndexOf(pin.Waypoint);
         if (index < 0) return;
 
         // Claim this tap so OnMapClick (which also fires on marker taps) backs off.
         _lastMarkerClickUtc = DateTime.UtcNow;
         DialogParameters<WaypointActionsDialog> parameters = new()
         {
-            { nameof(WaypointActionsDialog.Location), pin.Value.Waypoint.Location }
+            { nameof(WaypointActionsDialog.Location), pin.Waypoint.Location }
         };
         DialogOptions options = new()
         {
@@ -765,8 +769,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     /// <summary>
     /// Selects a pinned location via the autocomplete – sets the value and closes the menu.
     /// </summary>
-    private async Task SelectPinAsync(MudAutocomplete<GeoResult> auto, GeoResult pin)
+    private async Task SelectPinAsync(MudAutocomplete<GeoResult>? auto, GeoResult pin)
     {
+        // @ref fields (_startAuto/_destAuto) are null before the first render –
+        // the callback can fire from the pinned-locations template. Guard is
+        // required despite the nullable analysis being satisfied at call sites.
+        if (auto == null) return;
         await auto.SelectOptionAsync(pin);
     }
 
