@@ -122,7 +122,7 @@
             <MudCard Elevation="2" Style="border-radius: 16px;">
                 <MudCardContent>
                     <MudText Typo="Typo.subtitle2" Class="mb-2">@L["ConnectionDetails"]</MudText>
-                    <MudText Typo="Typo.body2">@L["BLEConnectedTo", SelectedDevice?.Name]</MudText>
+                    <MudText Typo="Typo.body2">@L["BLEConnectedTo", SelectedDevice?.Name ?? ""]</MudText>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="font-family: monospace;">@SelectedDevice?.Uuid</MudText>
                 </MudCardContent>
             </MudCard>
