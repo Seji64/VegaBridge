@@ -179,7 +179,17 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         NavigationUpdateInput input = new()
         {
-            ManeuverIcon = NavigationIconMapper.GetSemanticIcon(maneuver.ValhallaType),
+            // Valhalla emits kDestination (type 4) at the end of EVERY leg,
+            // including intermediate waypoints ("Arrive" at the leg end).
+            // Only the very last maneuver of the route is the real
+            // destination – mapping a waypoint arrival to the finish icon
+            // makes the bike display FINISH mid-route (observed on a real
+            // ride; the official MV app shows the same quirk for the same
+            // reason). Map waypoint arrivals to "straight" instead.
+            ManeuverIcon = NavigationIconMapper.GetSemanticIcon(
+                maneuver.ValhallaType == 4 && maneuver.Index < maneuver.Total - 1
+                    ? 0 // kNone → straight
+                    : maneuver.ValhallaType),
             InstructionText = maneuver.Instruction,
             StreetName = street,
             IntersectionName = intersectionName,
