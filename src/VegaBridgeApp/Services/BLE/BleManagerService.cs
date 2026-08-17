@@ -80,6 +80,29 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 _discoveredPeripherals[_activePeripheral.Uuid] = _activePeripheral;
             }
 
+            // iOS quirk: once the OS has established a connection (e.g. via
+            // state restoration) the peripheral often stops advertising, so
+            // a pure scan never sees it again. RetrieveConnectedPeripherals
+            // finds exactly those devices. Add them to the list so the user
+            // can re-select / re-attach to a device that iOS knows about.
+            try
+            {
+                foreach (IPeripheral connected in bleManager.GetConnectedPeripherals())
+                {
+                    _discoveredPeripherals[connected.Uuid.ToUpper()] = connected;
+                    Log.Information("BLE: OS-connected peripheral found without advertising: {Uuid} ({Name})",
+                        connected.Uuid, connected.Name ?? "Unknown");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "BLE: GetConnectedPeripherals failed (non-fatal)");
+            }
+
+            // The list must be rebuilt now – an OS-connected peripheral that
+            // doesn't advertise will never trigger UpdateDeviceFromScanResult.
+            UpdateDeviceList();
+
             Log.Information("BLE scanning started");
             
             _scanSubscription = bleManager.ScanForUniquePeripherals().Subscribe(UpdateDeviceFromScanResult);
@@ -99,6 +122,61 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             Log.Error(ex, "Failed to start BLE scan");
             UpdateError($"Could not start scan: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Falls back to GATT service-UUID based plugin matching. Needed for
+    /// peripherals surfaced via <c>GetConnectedPeripherals()</c> whose name
+    /// is still "Unknown" (iOS did not read it while connected through the
+    /// OS) – name-based IsCompatible matching would miss them.
+    /// </summary>
+    private async Task<IBleDevicePlugin?> SelectPluginByServiceUuidAsync(IPeripheral peripheral)
+    {
+        try
+        {
+            IReadOnlyList<BleServiceInfo> services = await peripheral.GetServices().FirstOrDefaultAsync();
+            if (services is null || services.Count == 0)
+            {
+                Log.Warning("BLE: no GATT services found for {Uuid} – plugin fallback failed", peripheral.Uuid);
+                return null;
+            }
+
+            foreach (IBleDevicePlugin plugin in _plugins)
+            {
+                // BleServiceInfo.Uuid is a short/long string UUID (e.g. "180D"
+                // or "0000180d-..."); plugin.ServiceUuid is a Guid. Compare
+                // case-insensitively on the full 36-char form.
+                string pluginUuid = plugin.ServiceUuid.ToString().ToUpperInvariant();
+                if (services.Any(s => NormalizeUuid(s.Uuid) == pluginUuid))
+                {
+                    Log.Information("BLE: plugin {Plugin} matched via service UUID {Uuid} for {Device}",
+                        plugin.DisplayName, plugin.ServiceUuid, peripheral.Uuid);
+                    return plugin;
+                }
+            }
+
+            Log.Warning("BLE: no plugin matched the service list of {Uuid} ({Services} services)",
+                peripheral.Uuid, services.Count);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "BLE: service-UUID plugin matching failed for {Uuid}", peripheral.Uuid);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Normalizes a GATT UUID string to the full 36-char upper-case form,
+    /// so short forms ("180D") and long forms ("0000180d-0000-1000-8000-00805f9b34fb")
+    /// compare equal.
+    /// </summary>
+    private static string NormalizeUuid(string uuid)
+    {
+        string value = uuid.Trim().ToUpperInvariant();
+        if (value.Length == 4)
+            value = $"0000{value}-0000-1000-8000-00805F9B34FB";
+        return value;
     }
 
     public void StopScanning()
@@ -137,9 +215,18 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             _activePeripheral = peripheral;
             
-            // Plugin Selection
-            BleDeviceInfo deviceInfo = new() { Uuid = deviceUuid, Name = peripheral.Name! };
+            // Plugin Selection. Name-based matching works for peripherals
+            // found via advertising. But GetConnectedPeripherals() can return
+            // a device the OS has already connected to, whose name is still
+            // "Unknown" (not read yet). Fall back to GATT service-UUID
+            // matching against each plugin's ServiceUuid.
+            BleDeviceInfo deviceInfo = new() { Uuid = deviceUuid, Name = peripheral.Name ?? "Unknown" };
             _activePlugin = _plugins.FirstOrDefault(p => p.IsCompatible(deviceInfo));
+
+            if (_activePlugin == null)
+            {
+                _activePlugin = await SelectPluginByServiceUuidAsync(peripheral);
+            }
 
             if (_activePlugin == null)
             {
@@ -543,7 +630,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         List<BleDeviceInfo> list =
         [
             .. _discoveredPeripherals.Values
-                .Where(p => !string.IsNullOrWhiteSpace(p.Name) && p.Name != "Unknown")
+                // OS-connected peripherals (retrieved without advertising)
+                // may have an unknown name on first sight – keep them, the
+                // user recognizes the bike and the name is read on connect.
+                .Where(p => (!string.IsNullOrWhiteSpace(p.Name) && p.Name != "Unknown") || p.IsConnected())
                 .Select(p => 
                 {
                     BleDeviceInfo deviceInfo = new()
