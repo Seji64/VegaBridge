@@ -103,7 +103,7 @@ dotnet publish src/VegaBridgeApp -f net10.0-ios -c Release
 
 ---
 ## Contributions
-Interested in adding support for other motorcycle brands? Check out the `IBleDevicePlugin` interface to implement a new manufacturer protocol.
+Interested in bringing other motorcycle brands to VegaBridge? We'd love the help! Feel free to explore the `IBleDevicePlugin` interface to see how you can implement a new manufacturer protocol and contribute.
 ---
 ## License
 
