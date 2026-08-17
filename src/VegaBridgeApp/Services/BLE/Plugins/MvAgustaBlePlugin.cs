@@ -73,6 +73,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         // it (see UpdateDeviceList: Name = p.Name!). Defensive null-checks
         // are required at runtime despite the non-nullable declaration.
         // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
+        // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
         return device.Name?.Contains("MV", StringComparison.OrdinalIgnoreCase) == true ||
                device.Name?.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase) == true;
     }
@@ -293,7 +294,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     {
         if (_pingCts != null)
         {
-            _pingCts.Cancel();
+            await _pingCts.CancelAsync();
             _pingCts.Dispose();
             _pingCts = null;
         }
@@ -421,12 +422,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         ms.WriteByte(Cr);
         ms.Write(Encoding.UTF8.GetBytes(command));
 
-        foreach (string? field in fields)
+        foreach (string field in fields)
         {
             ms.WriteByte(Rs);
-            byte[] fieldBytes = field != null
-                ? Encoding.UTF8.GetBytes(field)
-                : [];
+            byte[] fieldBytes = Encoding.UTF8.GetBytes(field);
             ms.Write(fieldBytes);
         }
 
@@ -436,7 +435,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 
     private bool IsValidFrame(byte[] data)
     {
-        return data.Length >= 3 && data[0] == Cr && data[^1] == Cr;
+        if (data.Length < 3) return false;
+        return data[0] == Cr && data[^1] == Cr;
     }
 
     private bool TryParseFrame(byte[] data, out string command, out string[] fields)

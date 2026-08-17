@@ -9,7 +9,6 @@ namespace VegaBridgeApp.Utils;
 public static class GeoMath
 {
     private const double EarthRadiusM = 6371000.0;
-    private const double EarthRadiusKm = 6371.0;
 
     /// <summary>Haversine distance in meters between two lat/lon points.</summary>
     public static double DistanceMeters(double lat1, double lon1, double lat2, double lon2)

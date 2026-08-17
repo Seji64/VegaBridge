@@ -41,6 +41,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
     /// <summary>
     /// Removes a sink. No-op if the sink was not registered.
+    /// </summary>
     public void RemoveSink(INavigationSink sink)
     {
         lock (_sinks)
@@ -952,8 +953,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         
         if (targetIndex < 0 || targetIndex >= _maneuvers.Count) return;
 
-        Maneuver? m = _maneuvers[targetIndex];
-        if (m == null) return;
+        Maneuver m = _maneuvers[targetIndex];
 
         NavigationManeuverInfo info = new()
         {

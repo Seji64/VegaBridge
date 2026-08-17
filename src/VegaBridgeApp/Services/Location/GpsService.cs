@@ -179,8 +179,11 @@ public class GpsService : IDisposable
         await _gpsManager.StopListener();
         TrackingChanged?.Invoke(false);
 
-        Log.Information("GPS tracking stopped ({BreadcrumbCount} points collected)",
-            _breadcrumb.Count);
+        lock (_breadcrumbLock)
+        {
+            Log.Information("GPS tracking stopped ({BreadcrumbCount} points collected)",
+                _breadcrumb.Count);
+        }
     }
 
     /// <summary>Clear the breadcrumb trail.</summary>

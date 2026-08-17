@@ -66,7 +66,7 @@ public class OverpassRoadClosureProvider : IRoadClosureProvider
 
     /// <inheritdoc />
     public async Task<RoadClosureCheckResult> CheckRouteAsync(
-        IReadOnlyList<Coordinate> routeCoords,
+        IReadOnlyList<Coordinate>? routeCoords,
         double corridorMeters,
         CancellationToken cancellationToken = default)
     {

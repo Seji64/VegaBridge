@@ -105,7 +105,7 @@ public class GpxService : IGpxService
     public Task<Stream> ExportGpxAsync(SavedRoute route)
     {
         return ExportPointsAsync(
-            route.Name ?? "Route",
+            route.Name,
             route.Waypoints ?? [],
             asTrack: true);
     }
