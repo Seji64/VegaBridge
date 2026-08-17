@@ -285,7 +285,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             switch (action)
             {
                 case "move":
-                    _pendingMoveWaypoint = pin.Value.Waypoint;
+                    _pendingMoveWaypoint = pin.Waypoint;
                     Snackbar.Add(L["MapClickMoveHint"], Severity.Info);
                     break;
                 case "delete":
