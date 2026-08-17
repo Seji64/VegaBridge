@@ -194,7 +194,15 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE INPUT: icon={input.ManeuverIcon}, instr={input.InstructionText}, street={input.StreetName}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h, remDist={input.RemainingDistanceKm:F1}km, idx={input.CurrentManeuverIndex}/{input.TotalManeuvers}");
 
-        await _sendGate.WaitAsync();
+        // The gate serializes BLE writes; a write that stalls (dead link,
+        // iOS suspend) must not freeze navigation forever. With a timeout
+        // the coordinator drops the stuck update instead of queuing behind
+        // it – the next GPS tick will send a fresh one.
+        if (!await _sendGate.WaitAsync(TimeSpan.FromSeconds(10)))
+        {
+            Log.Warning("Send gate busy for 10s – dropping stale navigation update");
+            return;
+        }
         try
         {
             await _bleManager.ExecuteNavigationActionAsync(
