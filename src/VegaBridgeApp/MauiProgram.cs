@@ -1,7 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Logging;
-using MudBlazor;
 using MudBlazor.Services;
 using MudExtensions.Services;
 using CommunityToolkit.Maui;

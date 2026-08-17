@@ -134,7 +134,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     {
         try
         {
-            IReadOnlyList<BleServiceInfo> services = await peripheral.GetServices().FirstOrDefaultAsync();
+            IReadOnlyList<BleServiceInfo>? services = await peripheral.GetServices().FirstOrDefaultAsync();
             if (services is null || services.Count == 0)
             {
                 Log.Warning("BLE: no GATT services found for {Uuid} – plugin fallback failed", peripheral.Uuid);

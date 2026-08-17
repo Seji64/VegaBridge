@@ -2,13 +2,9 @@ using Microsoft.AspNetCore.Components;
 
 using MudBlazor;
 using Serilog;
-using System.Text;
-using CommunityToolkit.Maui.Storage;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
-using VegaBridgeApp.Services.BLE.Plugins;
 using VegaBridgeApp.Models.BLE.MvAgusta;
-using VegaBridgeApp.Services.Closures;
 using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Components.Pages;
@@ -191,7 +187,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         Preferences.Set("off_route_threshold", _offRouteThreshold);
     }
 
-    private async Task<IEnumerable<GeoResult>>? HomeSearchAsync(string? query, CancellationToken ct)
+    private async Task<IEnumerable<GeoResult>> HomeSearchAsync(string? query, CancellationToken ct)
     {
         return await GeocodingService.SuggestAsync(query, ct: ct);
     }

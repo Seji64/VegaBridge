@@ -11,7 +11,6 @@ using Serilog;
 using Shiny.Locations;
 using VegaBridgeApp.Models.Utils;
 using VegaBridgeApp.Services.Navigation;
-using VegaBridgeApp.Services.Closures;
 using VegaBridgeApp.Models.Closures;
 using VegaBridgeApp.Utils;
 using Coordinate = VegaBridgeApp.Models.Valhalla.Coordinate;
@@ -47,7 +46,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private bool _isSaving;
     private RouteResponse? _currentRouteResponse;
     private string? _savedRouteId;
-    private bool _mapLoaded = false;
+    private bool _mapLoaded;
     // Remember the user's zoom level so recalculating a route or a reroute
     // does not reset the view. Only user zooms after the first route display
     // are remembered (the initial Zoom="8" on first load must not win).
@@ -253,7 +252,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (_actionsDialogOpen) return;
 
         (WaypointViewModel Waypoint, Marker Marker)? pin = _waypointPins.FirstOrDefault(p => p.Marker == marker);
-        if (pin == null || pin.Value.Waypoint.Location == null) return;
+        if (pin.Value.Waypoint.Location == null) return;
 
         int index = _waypoints.IndexOf(pin.Value.Waypoint);
         if (index < 0) return;
@@ -408,7 +407,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 reading.Position.Latitude,
                 reading.Position.Longitude,
                 "current");
-            try { await InvokeAsync(StateHasChanged); } catch { }
+            try { await InvokeAsync(StateHasChanged); }
+            catch
+            {
+                // ignored
+            }
         }
 
         // Update position marker & breadcrumb on the map (via JS interop, no Blazor re-render)
@@ -764,7 +767,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     /// </summary>
     private async Task SelectPinAsync(MudAutocomplete<GeoResult> auto, GeoResult pin)
     {
-        if (auto == null) return;
         await auto.SelectOptionAsync(pin);
     }
 
@@ -976,7 +978,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             // Pass the intermediate waypoints to the navigation service so a
             // reroute (off-route or skip-waypoint) keeps driving through the
             // remaining waypoints instead of dropping them all.
-            List<Models.Valhalla.Location> viaLocations = _waypoints
+            List<Location> viaLocations = _waypoints
                 .Where(w => w.Location != null)
                 .Select(w => CreateLocation(w.Location!, "break"))
                 .ToList();
@@ -1405,8 +1407,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             map.MarkersList.Add(new Marker(
                 MarkerType.MarkerFlag,
                 new OpenLayers.Blazor.Coordinate(closure.Longitude, closure.Latitude),
-                "⚠",
-                PinColor.Red));
+                "⚠"));
         }
 
         // 2. Yellow overlay: highlight the route segment around each closure

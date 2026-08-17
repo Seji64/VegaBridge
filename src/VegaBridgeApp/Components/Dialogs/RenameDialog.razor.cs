@@ -19,11 +19,15 @@ public partial class RenameDialog
 
     private void Cancel()
     {
-        try { MudDialog?.Cancel(); } catch { /* dialog may already be closed */ }
+        try { MudDialog.Cancel(); } catch { /* dialog may already be closed */ }
     }
 
     private void Submit()
     {
-        try { MudDialog?.Close(DialogResult.Ok(_newName)); } catch { }
+        try { MudDialog.Close(DialogResult.Ok(_newName)); }
+        catch
+        {
+            // ignored
+        }
     }
 }

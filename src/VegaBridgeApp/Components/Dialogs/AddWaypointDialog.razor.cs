@@ -22,11 +22,15 @@ public partial class AddWaypointDialog
 
     private void Cancel()
     {
-        try { MudDialog?.Cancel(); } catch { /* dialog may already be closed */ }
+        try { MudDialog.Cancel(); } catch { /* dialog may already be closed */ }
     }
 
     private void Add()
     {
-        try { MudDialog?.Close(DialogResult.Ok(true)); } catch { }
+        try { MudDialog.Close(DialogResult.Ok(true)); }
+        catch
+        {
+            // ignored
+        }
     }
 }

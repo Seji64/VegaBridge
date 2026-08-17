@@ -28,7 +28,6 @@ public partial class WaypointAutocomplete
 
     private async Task SelectPinAsync(GeoResult pin)
     {
-        if (_auto == null) return;
         await _auto.SelectOptionAsync(pin);
     }
 }

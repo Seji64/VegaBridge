@@ -69,8 +69,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     public bool IsCompatible(BleDeviceInfo device)
     {
         // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
-        return device.Name?.Contains("MV", StringComparison.OrdinalIgnoreCase) == true ||
-               device.Name?.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase) == true;
+        return device.Name.Contains("MV", StringComparison.OrdinalIgnoreCase) ||
+               device.Name.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)
@@ -417,7 +417,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         ms.WriteByte(Cr);
         ms.Write(Encoding.UTF8.GetBytes(command));
 
-        foreach (var field in fields)
+        foreach (string? field in fields)
         {
             ms.WriteByte(Rs);
             byte[] fieldBytes = field != null

@@ -23,16 +23,24 @@ public partial class WaypointActionsDialog
 
     private void Cancel()
     {
-        try { MudDialog?.Cancel(); } catch { /* dialog may already be closed */ }
+        try { MudDialog.Cancel(); } catch { /* dialog may already be closed */ }
     }
 
     private void Move()
     {
-        try { MudDialog?.Close(DialogResult.Ok("move")); } catch { }
+        try { MudDialog.Close(DialogResult.Ok("move")); }
+        catch
+        {
+            // ignored
+        }
     }
 
     private void Delete()
     {
-        try { MudDialog?.Close(DialogResult.Ok("delete")); } catch { }
+        try { MudDialog.Close(DialogResult.Ok("delete")); }
+        catch
+        {
+            // ignored
+        }
     }
 }
