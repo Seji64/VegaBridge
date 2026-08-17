@@ -68,9 +68,13 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 
     public bool IsCompatible(BleDeviceInfo device)
     {
+        // BleDeviceInfo.Name is declared `required string`, but OS-connected
+        // peripherals can still surface with a null name before iOS has read
+        // it (see UpdateDeviceList: Name = p.Name!). Defensive null-checks
+        // are required at runtime despite the non-nullable declaration.
         // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
-        return device.Name.Contains("MV", StringComparison.OrdinalIgnoreCase) ||
-               device.Name.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase);
+        return device.Name?.Contains("MV", StringComparison.OrdinalIgnoreCase) == true ||
+               device.Name?.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     public async Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)

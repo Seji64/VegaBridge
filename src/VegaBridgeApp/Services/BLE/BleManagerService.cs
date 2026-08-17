@@ -668,7 +668,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     BleDeviceInfo deviceInfo = new()
                     {
                         Uuid = Guid.Parse(p.Uuid),
-                        Name = p.Name!,
+                        // OS-connected peripherals may not have a name yet
+                        // (iOS reads it on connect). Never pass null into
+                        // the non-nullable Name property – "Unknown" keeps
+                        // plugin matching null-safe.
+                        Name = string.IsNullOrWhiteSpace(p.Name) ? "Unknown" : p.Name,
                         IsConnected = p.IsConnected(),
                         LastSeen = DateTime.Now
                     };

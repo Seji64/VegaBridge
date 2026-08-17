@@ -12,7 +12,7 @@ namespace VegaBridgeApp.Components;
 /// </summary>
 public partial class WaypointAutocomplete
 {
-    private MudAutocomplete<GeoResult> _auto = null!;
+    private MudAutocomplete<GeoResult>? _auto;
 
     [Parameter] public GeoResult? Location { get; set; }
 
@@ -28,6 +28,9 @@ public partial class WaypointAutocomplete
 
     private async Task SelectPinAsync(GeoResult pin)
     {
+        // _auto is an @ref field – null before the first render; the
+        // callback can fire from the pinned-locations template.
+        if (_auto == null) return;
         await _auto.SelectOptionAsync(pin);
     }
 }
