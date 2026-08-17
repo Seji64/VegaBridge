@@ -81,7 +81,8 @@ The `IBleDevicePlugin` interface allows supporting additional motorcycle brands 
 Navigation uses a **deterministic state machine** (`NavigationService`) that reacts to GPS position changes and triggers re‑routing when the rider deviates from the planned path.
 
 ---
-
+## Download
+Join the beta via TestFlight: [Link Placeholder]
 ## Building
 
 ```bash
@@ -90,9 +91,6 @@ cd VegaBridge
 
 # Build for iOS Simulator (debug)
 dotnet build src/VegaBridgeApp -f net10.0-ios
-
-# Build for Mac Catalyst (debug)
-dotnet build src/VegaBridgeApp -f net10.0-maccatalyst
 
 # Release build for iOS (requires signing)
 dotnet build src/VegaBridgeApp -f net10.0-ios -c Release
@@ -103,6 +101,9 @@ dotnet publish src/VegaBridgeApp -f net10.0-ios -c Release
 
 > **Note:** Release builds require a valid Apple Distribution certificate and provisioning profile configured in the `.csproj` (`CodesignKey` / `CodesignProvision`).
 
+---
+## Contributions
+Interested in adding support for other motorcycle brands? Check out the `IBleDevicePlugin` interface to implement a new manufacturer protocol.
 ---
 ## License
 
