@@ -189,7 +189,9 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     private async Task<IEnumerable<GeoResult>> HomeSearchAsync(string? query, CancellationToken ct)
     {
-        return await GeocodingService.SuggestAsync(query, ct: ct);
+        // MudAutocomplete passes null for empty input – SuggestAsync requires
+        // a non-null query string.
+        return await GeocodingService.SuggestAsync(query ?? string.Empty, ct: ct);
     }
 
     private void OnHomeSelected(GeoResult? location)

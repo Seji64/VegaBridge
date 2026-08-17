@@ -93,7 +93,7 @@ public partial class MyRoutes : ComponentBase
                 IDialogReference dialog = await DialogService.ShowAsync<GpxImportDialog>("", parameters);
                 DialogResult? result = await dialog.Result;
 
-                if (result?.Canceled == true || result.Data is not GpxImportChoice choice)
+                if (result is not { Canceled: false, Data: GpxImportChoice choice })
                     return;
 
                 points = choice.UseTrack ? parsed.TrackPoints : parsed.RoutePoints;
@@ -136,7 +136,7 @@ public partial class MyRoutes : ComponentBase
             IDialogReference dialog = await DialogService.ShowAsync<GpxExportDialog>("");
             DialogResult? result = await dialog.Result;
 
-            if (result?.Canceled == true || result.Data is not string choice)
+            if (result is not { Canceled: false, Data: string choice })
                 return;
 
             bool asTrack = choice == "track";
