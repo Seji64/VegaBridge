@@ -429,9 +429,23 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         Log.Information("BLE-LOGGER: {Line}", $"NAV ACTION: {action}");
 
+        // The classic "stuck navigation" failure mode: iOS dropped the link
+        // while the phone was in the pocket (screen off, app suspended) but
+        // no disconnect event arrived. Writing into a dead link then blocks
+        // for the write timeout (~10s+), stalls the send gate, and every
+        // subsequent update queues behind it – the display freezes on the
+        // last instruction. Verify the link is actually alive first; if it
+        // is not, rebuild it (or fail fast) instead of writing blindly.
         try
         {
-            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+            if (!await EnsureConnectedAsync())
+            {
+                Log.Warning("ExecuteNavigationActionAsync {Action}: link not healthy, skipping write", action);
+                UpdateError("Connection lost. Reconnection attempts failed.", isCritical: false);
+                return;
+            }
+
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral!, _activePlugin);
 
             switch (action)
             {
@@ -487,7 +501,15 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         try
         {
-            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+            // Same link-health guard as ExecuteNavigationActionAsync: do not
+            // write FINISH into a dead link (blocks the whole send path).
+            if (!await EnsureConnectedAsync())
+            {
+                Log.Warning("ExecuteNavigationFinishAsync: link not healthy, skipping write");
+                return;
+            }
+
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral!, _activePlugin);
             await _activePlugin.SendNavigationFinishAsync(wrapper);
         }
         catch (Exception ex)
@@ -508,7 +530,14 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         try
         {
-            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+            // Same link-health guard as ExecuteNavigationActionAsync.
+            if (!await EnsureConnectedAsync())
+            {
+                Log.Warning("ExecuteNavigationStopAsync: link not healthy, skipping write");
+                return;
+            }
+
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral!, _activePlugin);
             await _activePlugin.SendNavigationStopAsync(wrapper);
         }
         catch (Exception ex)

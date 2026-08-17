@@ -97,11 +97,25 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         // Test frame: sends a WhatsApp‑style MSG command so the user sees a readable message on the bike.
         // The MSG format is: ⏎MSG⏝<appId>⏝<message>⏝<title>⏎
         // Using "whatsapp" as the appId mirrors the real MV Ride app behaviour and guarantees a visible payload.
-        byte[] frame = BuildFrame(Commands.MSG, "whatsapp", "Test from VegaBridge", "VegaBridge");
-        // Log the raw frame for debugging
-        Log.Information("BLE-LOGGER: {Line}", $"SEND MSG frame: {BitConverter.ToString(frame)}");
-        // Write‑without‑Response is fine for MSG – the bike only needs to display the payload.
-        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+        byte[] frame;
+        try
+        {
+            frame = BuildFrame(Commands.MSG, "whatsapp", "Test from VegaBridge", "VegaBridge");
+            // Log the raw frame for debugging
+            Log.Information("BLE-LOGGER: {Line}", $"SEND MSG frame: {BitConverter.ToString(frame)}");
+            // Write‑without‑Response is fine for MSG – the bike only needs to display the payload.
+            await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+        }
+        catch (Exception ex)
+        {
+            // Same failure path as SendAsync: a write timeout is the classic
+            // sign that iOS dropped the link. Firing WriteFailed lets the
+            // manager invalidate and reconnect instead of leaving the
+            // connection in a zombie state.
+            Log.Error(ex, "MV Agusta: SEND MSG (test) failed");
+            WriteFailed?.Invoke(ex);
+            throw;
+        }
     }
 
     // ─── Semantic Navigation Implementation ──────────────────────────────
