@@ -19,7 +19,7 @@ public sealed class DebugLogSink : ILogEventSink
 
     private readonly StringBuilder _sb = new();
     private readonly object _lock = new();
-    private const int MaxChars = 1_000_000; // ~20 min at 45KB/min – covers most rides
+    private const int MaxChars = 2_000_000; // ~40 min at 45KB/min – covers long rides
     private long _totalLinesWritten;
     private long _totalCharsWritten;
 
