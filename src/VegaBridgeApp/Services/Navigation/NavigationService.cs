@@ -94,7 +94,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private int _gpsTickCount;
 
     private const int MapMatchBufferLimit = 5;
-    private const int MapMatchTickInterval = 3;
     private const double GpsSmoothingAlpha = 0.7; // EMA: newest reading gets 70% weight (less lag)
 
     // ── Off-Route Detection (Gated Topology Matching) ────────────────────

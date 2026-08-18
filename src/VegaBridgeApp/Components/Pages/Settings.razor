@@ -133,15 +133,6 @@
             <MudCardContent>
                 <MudText Typo="Typo.subtitle2" Class="mb-3">@L["NavSection"]</MudText>
 
-                <MudNumericField T="double"
-                                 Label="@L["OffRouteThreshold"]"
-                                 Variant="Variant.Outlined"
-                                 @bind-Value="_offRouteThreshold"
-                                 @bind-Value:after="SaveOffRouteThreshold"
-                                 Min="5" Max="200"
-                                 HelperText="@L["OffRouteHelp"]"
-                                 Class="mb-4" />
-
                 <MudText Typo="Typo.subtitle2" Class="mb-2">@L["HomeSection"]</MudText>
                 <MudAutocomplete T="GeoResult"
                                  Label="@L["HomeSearchLabel"]"

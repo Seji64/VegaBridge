@@ -27,7 +27,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private bool IsConnected => BleManager.IsAnyDeviceConnected;
     private bool IsScanning => ConnectionState == BleConnectionState.Scanning;
     
-    private double _offRouteThreshold = 10;
     private GeoResult? _homeLocation;
     
     // ── Long-duration connection test state ──
@@ -43,7 +42,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     protected override async Task OnInitializedAsync()
     {
-        _offRouteThreshold = Preferences.Get("off_route_threshold", 10.0);
 
         // Home aus Preferences laden
         string homeLabel = Preferences.Get("home_label", "");
@@ -182,10 +180,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         }
     }
 
-    private void SaveOffRouteThreshold()
-    {
-        Preferences.Set("off_route_threshold", _offRouteThreshold);
-    }
 
     private async Task<IEnumerable<GeoResult>> HomeSearchAsync(string? query, CancellationToken ct)
     {

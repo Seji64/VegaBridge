@@ -136,8 +136,6 @@
 
   <!-- Settings -->
   <data name="NavSection" xml:space="preserve"><value>Navigation</value></data>
-  <data name="OffRouteThreshold" xml:space="preserve"><value>Off-route threshold (meters)</value></data>
-  <data name="OffRouteHelp" xml:space="preserve"><value>Distance from the route at which automatic rerouting is triggered.</value></data>
   <data name="HomeSection" xml:space="preserve"><value>Home</value></data>
   <data name="HomeSearchLabel" xml:space="preserve"><value>Search home address…</value></data>
 
