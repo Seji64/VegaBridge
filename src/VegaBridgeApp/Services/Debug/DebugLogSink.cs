@@ -5,23 +5,22 @@ using Serilog.Events;
 namespace VegaBridgeApp.Services.Debug;
 
 /// <summary>
-/// In-memory Serilog sink that appends every log line to a StringBuilder so
-/// it can be exported from the UI. Console output is not reliably visible in
-/// MAUI (device/simulator), so this is the primary way to inspect logs while
-/// testing. Capped – the oldest lines are dropped first on long rides.
+/// In-memory Serilog sink backed by a fixed-size ring buffer.
+/// Oldest lines are dropped when the buffer is full (O(1), no copying).
 /// Collecting only runs while <see cref="IsEnabled"/> is true, so the app
 /// does not pay for buffering during normal use.
+/// Thread-safe: all public methods are guarded by a single lock.
 /// </summary>
-public sealed class DebugLogSink : ILogEventSink
+public sealed class DebugLogSink(int maxLines = 20_000) : ILogEventSink
 {
     /// <summary>Shared instance; wired into Serilog and DI at startup.</summary>
     public static DebugLogSink Instance { get; } = new();
 
-    private readonly StringBuilder _sb = new();
-    private readonly object _lock = new();
-    private const int MaxChars = 2_000_000; // ~40 min at 45KB/min – covers long rides
+    private readonly string[] _buffer = new string[maxLines];
+    private int _head;   // next write position
+    private int _count;  // current number of lines in buffer
     private long _totalLinesWritten;
-    private long _totalCharsWritten;
+    private readonly object _lock = new();
 
     /// <summary>
     /// When false, Emit discards events immediately (no buffering cost).
@@ -30,19 +29,18 @@ public sealed class DebugLogSink : ILogEventSink
     public bool IsEnabled { get; private set; } =
         Preferences.Default.Get("debug_logging_enabled", false);
 
-    /// <summary>Approximate line count in current buffer.</summary>
-    public int LineCount { get { lock (_lock) return _sb.ToString().Count(c => c == '\n'); } }
+    /// <summary>Number of lines currently in the buffer.</summary>
+    public int LineCount { get { lock (_lock) return _count; } }
 
     /// <summary>Total lines written since last Clear (including dropped).</summary>
-    public long TotalLinesWritten => _totalLinesWritten;
+    public long TotalLinesWritten { get { lock (_lock) return _totalLinesWritten; } }
 
     public void SetEnabled(bool enabled)
     {
         lock (_lock)
         {
             IsEnabled = enabled;
-            if (!enabled)
-                _sb.Clear();
+            if (!enabled) ClearBuffer();
         }
         Preferences.Default.Set("debug_logging_enabled", enabled);
     }
@@ -51,24 +49,81 @@ public sealed class DebugLogSink : ILogEventSink
     {
         if (!IsEnabled) return;
 
-        string line = $"{logEvent.Timestamp:HH:mm:ss.fff} {logEvent.Level}: {logEvent.RenderMessage()}";
+        string line;
+        try
+        {
+            line = $"{logEvent.Timestamp:HH:mm:ss.fff} {logEvent.Level}: {logEvent.RenderMessage()}";
+        }
+        catch (Exception)
+        {
+            return; // RenderMessage can throw on malformed properties
+        }
+
         lock (_lock)
         {
-            _sb.AppendLine(line);
+            _buffer[_head] = line;
+            _head = (_head + 1) % maxLines;
+            if (_count < maxLines) _count++;
             _totalLinesWritten++;
-            _totalCharsWritten += line.Length;
-            if (_sb.Length > MaxChars)
-                _sb.Remove(0, _sb.Length - MaxChars);
         }
     }
 
+    /// <summary>
+    /// Returns the buffered log lines as a single string (oldest first).
+    /// Allocates a string proportional to buffer size — call only for export.
+    /// </summary>
     public string GetLog()
     {
-        lock (_lock) return _sb.ToString();
+        lock (_lock)
+        {
+            if (_count == 0) return string.Empty;
+
+            // Estimate ~120 chars/line to reduce reallocations
+            StringBuilder sb = new StringBuilder(_count * 120);
+
+            // Start from the oldest line
+            int start = _count < maxLines ? 0 : _head;
+            for (int i = 0; i < _count; i++)
+            {
+                int idx = (start + i) % maxLines;
+                sb.AppendLine(_buffer[idx]);
+            }
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Returns buffered lines as a list (avoids one giant string allocation).
+    /// Useful for streaming export or chunked sharing.
+    /// </summary>
+    public List<string> GetLines()
+    {
+        lock (_lock)
+        {
+            if (_count == 0) return [];
+
+            List<string> result = new List<string>(_count);
+            int start = _count < maxLines ? 0 : _head;
+            for (int i = 0; i < _count; i++)
+            {
+                int idx = (start + i) % maxLines;
+                result.Add(_buffer[idx]);
+            }
+            return result;
+        }
     }
 
     public void Clear()
     {
-        lock (_lock) { _sb.Clear(); _totalLinesWritten = 0; _totalCharsWritten = 0; }
+        lock (_lock) ClearBuffer();
+    }
+
+    private void ClearBuffer()
+    {
+        // Clear references to allow GC of strings
+        Array.Clear(_buffer, 0, maxLines);
+        _head = 0;
+        _count = 0;
+        _totalLinesWritten = 0;
     }
 }
