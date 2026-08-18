@@ -85,34 +85,44 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             // iOS quirk: once the OS has established a connection (e.g. via
             // state restoration) the peripheral often stops advertising, so
-            // a pure scan never sees it again. RetrieveConnectedPeripherals
-            // finds exactly those devices. Add them to the list so the user
-            // can re-select / re-attach to a device that iOS knows about.
-            try
-            {
-                foreach (IPeripheral connected in bleManager.GetConnectedPeripherals())
-                {
-                    _discoveredPeripherals[connected.Uuid.ToUpper()] = connected;
-                    Log.Information("BLE: OS-connected peripheral found without advertising: {Uuid} ({Name})",
-                        connected.Uuid, connected.Name ?? "Unknown");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "BLE: GetConnectedPeripherals failed (non-fatal)");
-            }
+            // a pure scan never sees it again. Poll periodically during the
+            // scan to catch peripherals that iOS connected in the background.
+            _scanTimeoutCts = new CancellationTokenSource();
+            CancellationToken scanToken = _scanTimeoutCts.Token;
 
-            // The list must be rebuilt now – an OS-connected peripheral that
-            // doesn't advertise will never trigger UpdateDeviceFromScanResult.
-            UpdateDeviceList();
+            _ = Task.Run(async () =>
+            {
+                while (!scanToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        foreach (IPeripheral connected in bleManager.GetConnectedPeripherals())
+                        {
+                            string key = connected.Uuid.ToUpper();
+                            if (!_discoveredPeripherals.ContainsKey(key))
+                            {
+                                _discoveredPeripherals[key] = connected;
+                                Log.Information("BLE: OS-connected peripheral found: {Uuid} ({Name})",
+                                    connected.Uuid, connected.Name ?? "Unknown");
+                                UpdateDeviceList();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Debug(ex, "BLE: GetConnectedPeripherals poll failed (non-fatal)");
+                    }
+                    await Task.Delay(TimeSpan.FromSeconds(5), scanToken);
+                }
+            }, scanToken);
+
+            // Initial check (immediate)
+            RefreshConnectedPeripherals();
 
             Log.Information("BLE scanning started");
-            
             _scanSubscription = bleManager.ScanForUniquePeripherals().Subscribe(UpdateDeviceFromScanResult);
             
-            _scanTimeoutCts = new CancellationTokenSource();
-            
-            await Task.Delay(TimeSpan.FromSeconds(30), _scanTimeoutCts.Token);
+            await Task.Delay(TimeSpan.FromSeconds(30), scanToken);
             if (CurrentState == BleConnectionState.Scanning)
             {
                 Log.Information("BLE scan automatic timeout reached");
@@ -557,6 +567,28 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         {
             Log.Error(ex, "Failed to send navigation stop");
             UpdateError($"Navigation stop failed: {ex.Message}", isCritical: false);
+        }
+    }
+
+    private void RefreshConnectedPeripherals()
+    {
+        try
+        {
+            foreach (IPeripheral connected in bleManager.GetConnectedPeripherals())
+            {
+                string key = connected.Uuid.ToUpper();
+                if (!_discoveredPeripherals.ContainsKey(key))
+                {
+                    _discoveredPeripherals[key] = connected;
+                    Log.Information("BLE: OS-connected peripheral found: {Uuid} ({Name})",
+                        connected.Uuid, connected.Name ?? "Unknown");
+                }
+            }
+            UpdateDeviceList();
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "BLE: RefreshConnectedPeripherals failed (non-fatal)");
         }
     }
 
