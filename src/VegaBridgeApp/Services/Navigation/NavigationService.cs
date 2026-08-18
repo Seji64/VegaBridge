@@ -661,15 +661,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 // ON_ROUTE: local geometry confirms rider is close to route.
                 // No API call needed. Clear off-route state.
                 _offRouteCounter = 0;
-            _topologyOffRouteCounter = 0;
-            _routeWayIds = [];
                 _topologyOffRouteCounter = 0;
                 _isOffRoute = false;
             }
             else
             {
                 // SUSPECT: XTE exceeds threshold. Use hysteresis before calling locate.
-                _offRouteCounter++;
+                if (_offRouteCounter < 10) _offRouteCounter++; // cap to avoid unbounded growth
                 if (_offRouteCounter >= 2) // 2 consecutive suspect ticks
                 {
                     // SLOW PATH: call locate API (throttled)
@@ -966,13 +964,14 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 if (onRoute)
                 {
                     // Rider is on a road that's part of the route.
-                    // Reset off-route state.
+                    // Reset off-route state. Set counter to -10 so the next
+                    // 10 SUSPECT ticks don't re-trigger VerifyTopologyAsync.
+                    // Prevents API spam when XTE oscillates around threshold
+                    // in curves (e.g. 35m for 4 seconds).
                     if (_isOffRoute)
                         Log.Information("Back on route (topology verified: way_id match)");
                     _isOffRoute = false;
-                    _offRouteCounter = 0;
-            _topologyOffRouteCounter = 0;
-            _routeWayIds = [];
+                    _offRouteCounter = -10;
                     _topologyOffRouteCounter = 0;
                 }
                 else
