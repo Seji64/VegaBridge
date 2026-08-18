@@ -44,4 +44,16 @@ public static class GeoMath
 
     /// <summary>Radians to degrees.</summary>
     public static double ToDeg(double radians) => radians * 180.0 / Math.PI;
+
+    /// <summary>Initial bearing (great-circle) from point A to point B, in degrees 0-360.</summary>
+    public static double BearingDeg(double lat1, double lon1, double lat2, double lon2)
+    {
+        double phi1 = ToRad(lat1);
+        double phi2 = ToRad(lat2);
+        double dLon = ToRad(lon2 - lon1);
+        double y = Math.Sin(dLon) * Math.Cos(phi2);
+        double x = Math.Cos(phi1) * Math.Sin(phi2) -
+                   Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
+        return (ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
+    }
 }
