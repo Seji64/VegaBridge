@@ -45,12 +45,10 @@ public class ValhallaClient : IValhallaClient
                 locations = points.Select(p => new { lat = p.Lat, lon = p.Lon }).ToArray(),
                 costing = "motorcycle"
             };
-            string json = await _flurlClient
+            var results = await _flurlClient
                 .Request("locate")
                 .PostJsonAsync(request, cancellationToken: cancellationToken)
-                .ReceiveString();
-            // locate returns a JSON array, one object per input location
-            var results = System.Text.Json.JsonSerializer.Deserialize<List<LocateResponse?>>(json);
+                .ReceiveJson<List<LocateResponse?>>();
             return results ?? [];
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
