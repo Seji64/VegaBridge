@@ -94,36 +94,18 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private int _gpsTickCount;
     private bool _verifyInFlight;
 
-    private const double OffRouteThresholdDefaultM = 10.0;
     private const int MapMatchBufferLimit = 5;
     private const int MapMatchTickInterval = 3;
     private const double GpsSmoothingAlpha = 0.7; // EMA: newest reading gets 70% weight (less lag)
 
-    // ── Off-Route Detection (3-layer architecture) ────────────────────────
-    // Layer 1: Map-Matching (primary) – Valhalla trace_route every 3s.
-    //          Understands road geometry, curves, GPS noise. Most reliable.
-    // Layer 2: Heading Divergence (secondary) – local, fills gaps between
-    //          map-match calls. Detects riding away from route within 3s.
-    // Layer 3: Cumulative Distance (fallback) – 50m+, only when network down.
-    //          5+ consecutive points far from route = definite off-route.
-    // Any layer can trigger off-route (OR logic).
-
-    // Layer 1: Map-matching
-    private const int MapMatchOffRouteHysteresis = 2; // 2 consecutive map-match results
-    private int _mapMatchOffRouteCounter;
-
-    // Layer 2: Heading divergence
-    private const int HeadingOffRouteHysteresis = 3; // 3 consecutive divergent points
-    private const double HeadingDivergenceThresholdDeg = 90.0; // heading vs bearing-to-route
-    private const double HeadingMinSpeedMs = 1.4; // ~5 km/h – below this, heading is unreliable
-    private int _headingOffRouteCounter;
-
-    // Layer 3: Cumulative distance (emergency fallback)
-    private const double EmergencyOffRouteThresholdM = 50.0;
-    private const int CumulativeOffRouteHysteresis = 5; // 5 consecutive points > 50m
-    private int _cumulativeOffRouteCounter;
-
-    // Shared state
+    // Off-Route Detection
+    // Standard threshold for straight road segments.
+    // Maneuver threshold is higher because GPS points during turns
+    // deviate 30-40m from the route polyline (curve vs straight segments).
+    private const double OffRouteThresholdM = 25.0;
+    private const double OffRouteManeuverThresholdM = 50.0;
+    private const int OffRouteHysteresisCount = 2; // 2 consecutive points
+    private int _offRouteCounter;
     private bool _isOffRoute;
 
     // Current travel direction (0-359°, 0 = north, clockwise). Updated on
@@ -133,8 +115,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     // actual travel direction instead of picking an arbitrary first edge.
     private double _currentHeadingDeg = -1;
     private const double RerouteHeadingToleranceDeg = 45.0;
-
-    private double _offRouteThresholdM = OffRouteThresholdDefaultM;
 
     // ── Properties ───────────────────────────────────────────────────────
     public bool IsNavigating => _isNavigating;
@@ -234,9 +214,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _destination = destination;
             _viaLocations = viaLocations is { Count: > 0 } ? [.. viaLocations] : [];
             _isNavigating = true;
-            _mapMatchOffRouteCounter = 0;
-            _headingOffRouteCounter = 0;
-            _cumulativeOffRouteCounter = 0;
+            _offRouteCounter = 0;
+            
+            
             _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
             _gpsTickCount = 0;
@@ -299,9 +279,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _maneuvers = [];
             _destination = null;
             _viaLocations = [];
-            _mapMatchOffRouteCounter = 0;
-            _headingOffRouteCounter = 0;
-            _cumulativeOffRouteCounter = 0;
+            _offRouteCounter = 0;
+            
+            
             _currentHeadingDeg = -1;
             _verifyInFlight = false;
         }
@@ -434,9 +414,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
             _isOffRoute = false;
-            _mapMatchOffRouteCounter = 0;
-            _headingOffRouteCounter = 0;
-            _cumulativeOffRouteCounter = 0;
+            _offRouteCounter = 0;
+            
+            
             _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
             _verifyInFlight = false;
@@ -513,7 +493,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         _maneuvers = maneuvers;
         UpdateCumulativeDistances();
         // Cache the threshold once per route instead of reading Preferences per GPS tick.
-        _offRouteThresholdM = Preferences.Get("off_route_threshold", OffRouteThresholdDefaultM);
+        // Threshold is now a constant, no longer user-configurable;
 
         // 1. Precomputed list of indices of relevant maneuvers (non-straight)
         _relevantManeuverIndices = maneuvers
@@ -542,11 +522,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             if (!_isNavigating || _routeCoords.Count < 2) return;
 
-            // ── Off-Route Detection (3-layer) ────────────────────────────────
-            // Layer 1: Map-Matching (primary) – handled in VerifyRouteAsync
-            // Layer 2: Heading Divergence (secondary) – local, fills gaps
-            // Layer 3: Cumulative Distance (fallback) – 50m+, network loss only
-            // ─────────────────────────────────────────────────────────────────
+            // Off-Route Detection
+            //
+            // Two thresholds: 25m on straight segments, 50m during maneuvers.
+            // Turns cause 30-40m GPS deviation from route polyline (curve vs
+            // straight segments). Without the higher maneuver threshold,
+            // every left/right turn triggers false off-route.
+            // ───────────────────────────────────────────────────────────────
 
             // EMA smoothing
             double smoothLat = reading.Position.Latitude;
@@ -558,7 +540,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             }
             _lastSmoothedPosition = new Coordinate(smoothLat, smoothLon, null);
 
-            // Update buffer for map-matching
             _gpsTickCount++;
             _gpsBuffer.Add(new Coordinate(smoothLat, smoothLon, null));
             if (_gpsBuffer.Count > MapMatchBufferLimit) _gpsBuffer.RemoveAt(0);
@@ -576,67 +557,47 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             double navLat = smoothLat;
             double navLon = smoothLon;
 
-            // Snap current position to route (for UI/Maneuvers)
+            // Snap to route
             (int snappedIndex, double distanceMeters) = FindNearestRouteIndex(navLat, navLon);
             if (snappedIndex < 0) return;
 
-            // ── Layer 3: Cumulative Distance (emergency fallback) ──────────
-            // Only fires at 50m+ when map-matching can't reach the server.
-            if (distanceMeters > EmergencyOffRouteThresholdM)
+            // Determine if we're inside a maneuver span (turning).
+            // During turns, GPS deviates 30-40m from the route polyline.
+            bool inManeuverSpan = false;
+            foreach (Maneuver m in _maneuvers)
             {
-                _cumulativeOffRouteCounter++;
-                if (_cumulativeOffRouteCounter >= CumulativeOffRouteHysteresis && !_isOffRoute)
+                if (snappedIndex >= m.BeginShapeIndex && snappedIndex <= m.EndShapeIndex)
+                {
+                    inManeuverSpan = true;
+                    break;
+                }
+            }
+            double effectiveThreshold = inManeuverSpan ? OffRouteManeuverThresholdM : OffRouteThresholdM;
+
+            // Off-route check
+            if (distanceMeters > effectiveThreshold)
+            {
+                _offRouteCounter++;
+                if (_offRouteCounter >= OffRouteHysteresisCount && !_isOffRoute)
                 {
                     _isOffRoute = true;
-                    Log.Warning("Off route (cumulative)! {Dist:F1}m from route, {Count} consecutive points",
-                        distanceMeters, _cumulativeOffRouteCounter);
+                    Log.Warning("Off route! {Dist:F1}m from route, threshold={Threshold:F1}m, maneuver={Man}",
+                        distanceMeters, effectiveThreshold, inManeuverSpan);
                     _ = NotifySinksAsync(s => s.OnOffRouteAsync(navLat, navLon, distanceMeters));
                 }
                 if (_isOffRoute) return;
             }
             else
             {
-                _cumulativeOffRouteCounter = 0;
+                _offRouteCounter = 0;
             }
 
-            // ── Layer 2: Heading Divergence ────────────────────────────────
-            // Detects riding AWAY from the route between map-match calls.
-            // In a curve: heading follows the road, bearing-to-route points
-            // along the road → small angle. When lost: heading points away
-            // from the route → large angle (>90°).
-            if (_currentHeadingDeg > 0 && reading.Speed >= HeadingMinSpeedMs && snappedIndex >= 0)
+            // Back on route
+            if (!_isOffRoute || distanceMeters <= effectiveThreshold)
             {
-                Coordinate snapPoint = _routeCoords[snappedIndex];
-                double bearingToRoute = GeoMath.BearingDeg(navLat, navLon, snapPoint.Latitude, snapPoint.Longitude);
-                double headingDiff = Math.Abs(_currentHeadingDeg - bearingToRoute);
-                if (headingDiff > 180) headingDiff = 360 - headingDiff;
-
-                if (headingDiff > HeadingDivergenceThresholdDeg)
-                {
-                    _headingOffRouteCounter++;
-                    if (_headingOffRouteCounter >= HeadingOffRouteHysteresis && !_isOffRoute)
-                    {
-                        _isOffRoute = true;
-                        Log.Warning("Off route (heading)! heading={H:F0}° bearing={B:F0}° diff={D:F0}° dist={Dist:F1}m",
-                            _currentHeadingDeg, bearingToRoute, headingDiff, distanceMeters);
-                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(navLat, navLon, distanceMeters));
-                    }
-                    if (_isOffRoute) return;
-                }
-                else
-                {
-                    _headingOffRouteCounter = 0;
-                }
+                _isOffRoute = false;
+                _offRouteCounter = 0;
             }
-            else
-            {
-                _headingOffRouteCounter = 0;
-            }
-
-            // Not off-route (local checks passed) – clear state
-            _isOffRoute = false;
-            _cumulativeOffRouteCounter = 0;
-            _headingOffRouteCounter = 0;
 
             // Periodic Off-Route Verification via API (one in-flight at a time)
             if (_gpsTickCount % MapMatchTickInterval == 0 && !_verifyInFlight)
@@ -925,25 +886,20 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             {
                 if (!_isNavigating) return;
 
-                // Layer 1: Map-Matching off-route detection
-                if (distToRoute > _offRouteThresholdM)
+                // Map-matching verification: only used to reset off-route state
+                // when the rider is confirmed back on the route. NOT used as
+                // off-route trigger (map-matching polyline distance is unreliable
+                // — 17-75m deviation even when on-route).
+                if (distToRoute <= OffRouteThresholdM)
                 {
-                    _mapMatchOffRouteCounter++;
-                    if (_mapMatchOffRouteCounter >= MapMatchOffRouteHysteresis && !_isOffRoute)
+                    if (_isOffRoute)
                     {
-                        _isOffRoute = true;
-                        Log.Warning("Off route (map-match)! {Dist:F1}m from route", distToRoute);
-                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lastSnapped.Latitude, lastSnapped.Longitude, distToRoute));
+                        _isOffRoute = false;
+                        _offRouteCounter = 0;
+                        Log.Information("Back on route (map-match verified)");
                     }
                 }
-                else
-                {
-                    _mapMatchOffRouteCounter = 0;
-                    // Don't clear _isOffRoute here – the local heading check
-                    // owns that. Map-matching false-positives were resetting
-                    // off-route state, causing repeated RENAVI writes.
-                    Log.Debug("Map-matched position: {Lat}, {Lon} (verify only, not used for nav)", lastSnapped.Latitude, lastSnapped.Longitude);
-                }
+                Log.Debug("Map-matched position: {Lat}, {Lon} (verify only, not used for nav)", lastSnapped.Latitude, lastSnapped.Longitude);
             }
         }
         catch (Exception ex)
