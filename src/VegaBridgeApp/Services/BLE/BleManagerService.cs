@@ -27,6 +27,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     
     private readonly IEnumerable<IBleDevicePlugin> _plugins = plugins;
 
+    // Cooldown: prevent reconnect storms when BLE writes fail repeatedly.
+    private DateTimeOffset _lastInvalidateAt = DateTimeOffset.MinValue;
+    private static readonly TimeSpan InvalidateCooldown = TimeSpan.FromSeconds(15);
     // Expose active plugin for advanced access (e.g., session ID)
     public IBleDevicePlugin? ActivePlugin => _activePlugin;
 
@@ -346,6 +349,16 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         IPeripheral? lost = _activePeripheral;
         if (lost == null) return;
 
+        // Cooldown: prevent reconnect storms. Without this, each failed BLE
+        // write triggers a reconnect → next write also fails → reconnect again
+        // every 3-7s, preventing the link from ever stabilizing.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (now - _lastInvalidateAt < InvalidateCooldown)
+        {
+            Log.Debug("InvalidateConnectionAndReconnect: cooldown active – skipping");
+            return;
+        }
+        _lastInvalidateAt = now;
         Log.Warning("Forcing connection state to Idle after write failure");
         _connectionSubscription?.Dispose();
         _connectionSubscription = null;
