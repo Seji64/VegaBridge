@@ -114,6 +114,20 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private bool _isOffRoute;
     private int _offRouteCounter; // local XTE hysteresis
 
+    // Wrong-way detection: heading vs route bearing
+    private const double WrongWayHeadingThresholdDeg = 135.0;
+    private const double WrongWayMinSpeedMs = 2.78; // 10 km/h
+    private int _wrongWayCounter;
+    private const int WrongWayHysteresisCount = 3;
+
+    // Telemetry
+    private int _telemetryTicksTotal;
+    private int _telemetryTicksIgnored;
+    private int _telemetryTicksOnRoute;
+    private int _telemetryTicksSuspect;
+    private int _telemetryLocateCalls;
+    private int _telemetryLocateCallsSkipped;
+
     // Current travel direction (0-359°, 0 = north, clockwise). Updated on
     // every GPS tick: GPS course if valid, otherwise derived from the
     // smoothed position buffer. Used for reroute requests (heading +
@@ -269,6 +283,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             totalDistanceKm, totalTimeMin, maneuvers.Count, _routeCoords.Count);
         // Build way_id index for topology-aware off-route detection
         _ = BuildRouteWayIdIndex();
+        ResetTelemetry();
         FireCurrentManeuver();
     }
 
@@ -299,6 +314,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         if (wasNavigating)
         {
             await gps.StopTrackingAsync();
+            LogTelemetry();
             Log.Information("Navigation cancelled by user");
             _ = NotifySinksAsync(s => s.OnCancelAsync());
         }
@@ -609,10 +625,15 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             if (!_isNavigating || _routeCoords.Count < 2) return;
 
+            // GPS Accuracy Guard: ignore ticks with poor accuracy (tunnel,
+            // forest, urban canyon). Don't touch any counters — just hold state.
+            if (reading.PositionAccuracy > 40.0)
+            {
+                _telemetryTicksIgnored++;
+                return;
+            }
             // ── Gated Off-Route Detection ──────────────────────────────────
-            // Fast path: local XTE check (no API call).
-            // Slow path: Valhalla locate → way_id comparison (throttled).
-            // ───────────────────────────────────────────────────────────────
+            _telemetryTicksTotal++;
 
             // EMA smoothing
             double smoothLat = reading.Position.Latitude;
@@ -644,7 +665,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             (int snappedIndex, double distanceMeters) = FindNearestRouteIndex(navLat, navLon);
             if (snappedIndex < 0) return;
 
-            // FAST PATH: local XTE check
+            // Maneuver span check
             bool inManeuverSpan = false;
             foreach (Maneuver m in _maneuvers)
             {
@@ -656,21 +677,48 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             }
             double suspectThreshold = inManeuverSpan ? SuspectManeuverXteM : SuspectXteM;
 
-            if (distanceMeters <= suspectThreshold)
+            // ── Wrong-Way Detection ────────────────────────────────────
+            // Even if XTE is small (same road), heading in opposite direction
+            // means the rider made a U-turn. Check heading vs route bearing.
+            bool isWrongWay = false;
+            if (_currentHeadingDeg > 0 && reading.Speed >= WrongWayMinSpeedMs && snappedIndex < _routeCoords.Count - 1)
             {
-                // ON_ROUTE: local geometry confirms rider is close to route.
-                // No API call needed. Clear off-route state.
-                _offRouteCounter = 0;
-                _topologyOffRouteCounter = 0;
-                _isOffRoute = false;
+                Coordinate nextPoint = _routeCoords[Math.Min(snappedIndex + 5, _routeCoords.Count - 1)];
+                double routeBearing = GeoMath.BearingDeg(navLat, navLon, nextPoint.Latitude, nextPoint.Longitude);
+                double headingDiff = Math.Abs(_currentHeadingDeg - routeBearing);
+                if (headingDiff > 180) headingDiff = 360 - headingDiff;
+                if (headingDiff > WrongWayHeadingThresholdDeg)
+                {
+                    _wrongWayCounter++;
+                    if (_wrongWayCounter >= WrongWayHysteresisCount)
+                        isWrongWay = true;
+                }
+                else
+                {
+                    _wrongWayCounter = 0;
+                }
             }
             else
             {
-                // SUSPECT: XTE exceeds threshold. Use hysteresis before calling locate.
-                if (_offRouteCounter < 10) _offRouteCounter++; // cap to avoid unbounded growth
-                if (_offRouteCounter >= 2) // 2 consecutive suspect ticks
+                _wrongWayCounter = 0;
+            }
+
+            // ── Fast Path: XTE + Wrong-Way check ──────────────────────
+            if (distanceMeters <= suspectThreshold && !isWrongWay)
+            {
+                // ON_ROUTE
+                _offRouteCounter = 0;
+                _topologyOffRouteCounter = 0;
+                _isOffRoute = false;
+                _telemetryTicksOnRoute++;
+            }
+            else
+            {
+                // SUSPECT (either XTE too high or wrong way)
+                _telemetryTicksSuspect++;
+                if (_offRouteCounter < 10) _offRouteCounter++;
+                if (_offRouteCounter >= 2)
                 {
-                    // SLOW PATH: call locate API (throttled)
                     _ = VerifyTopologyAsync(navLat, navLon, distanceMeters);
                 }
                 if (_isOffRoute) return;
@@ -713,6 +761,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (newManeuverIndex < 0 && _maneuvers.Count > 0)
             {
                 Log.Information("Destination reached!");
+                LogTelemetry();
                 gps.ReadingReceived -= OnGpsReading;
                 _isNavigating = false;
                 _ = Task.Run(async () =>
@@ -929,33 +978,38 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     {
         // Throttle: max 1 locate call per 2 seconds
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        if ((now - _lastLocateAt).TotalSeconds < LocateThrottleSec) return;
+        if ((now - _lastLocateAt).TotalSeconds < LocateThrottleSec)
+        {
+            _telemetryLocateCallsSkipped++;
+            return;
+        }
         _lastLocateAt = now;
+        _telemetryLocateCalls++;
 
         try
         {
             var results = await valhallaClient.LocateAsync([(lat, lon)]);
             if (results.Count == 0 || results[0]?.Edges is not { Count: > 0 })
-            {
-                Log.Debug("Locate: no edges found");
                 return;
-            }
 
-            // Get way_ids the rider is currently on
             HashSet<long> riderWayIds = results[0]!.Edges!
                 .Where(e => e.EdgeInfo?.WayId > 0)
                 .Select(e => e.EdgeInfo!.WayId)
                 .ToHashSet();
 
-            if (riderWayIds.Count == 0)
-            {
-                Log.Debug("Locate: no way_ids returned");
-                return;
-            }
+            if (riderWayIds.Count == 0) return;
 
-            // Check if any rider way_id is in the route's way_id set
-            HashSet<long> routeWaySet = [.. _routeWayIds];
-            bool onRoute = riderWayIds.Any(w => routeWaySet.Contains(w));
+            // Sliding window: only check way_ids AHEAD of current position.
+            // Prevents false matches on overlapping routes (figure-8, loops).
+            // Find the nearest way_id in the route to determine our position,
+            // then look ahead up to 10 distinct way_ids.
+            int routeWindowStart = FindRouteWayWindowStart(riderWayIds);
+            int windowEnd = Math.Min(routeWindowStart + 10, _routeWayIds.Count);
+            HashSet<long> routeWindow = _routeWayIds
+                .Skip(routeWindowStart)
+                .Take(windowEnd - routeWindowStart)
+                .ToHashSet();
+            bool onRoute = riderWayIds.Any(w => routeWindow.Contains(w));
 
             lock (_lock)
             {
@@ -963,26 +1017,20 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
                 if (onRoute)
                 {
-                    // Rider is on a road that's part of the route.
-                    // Reset off-route state. Set counter to -10 so the next
-                    // 10 SUSPECT ticks don't re-trigger VerifyTopologyAsync.
-                    // Prevents API spam when XTE oscillates around threshold
-                    // in curves (e.g. 35m for 4 seconds).
                     if (_isOffRoute)
-                        Log.Information("Back on route (topology verified: way_id match)");
+                        Log.Information("Back on route (topology: way_id match)");
                     _isOffRoute = false;
-                    _offRouteCounter = -10;
+                    _offRouteCounter = -10; // cooldown before next locate
                     _topologyOffRouteCounter = 0;
                 }
                 else
                 {
-                    // Rider is on a DIFFERENT road (not part of route).
                     _topologyOffRouteCounter++;
                     if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
                     {
                         _isOffRoute = true;
-                        Log.Warning("Off route (topology)! way_ids={Ways}, route has {Route} ways, dist={Dist:F1}m",
-                            string.Join(",", riderWayIds), _routeWayIds.Count, distanceMeters);
+                        Log.Warning("Off route (topology)! ways={Ways}, dist={Dist:F1}m",
+                            string.Join(",", riderWayIds), distanceMeters);
                         _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
                     }
                 }
@@ -990,8 +1038,41 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "Topology verification failed (non-fatal)");
+            Log.Debug(ex, "Topology verification failed");
         }
+    }
+
+    /// <summary>
+    /// Find where in the route's way_id list the rider currently is.
+    /// Returns the index of the first way_id that matches any of the rider's
+    /// current way_ids. Falls back to 0 if no match (conservative: check all).
+    /// </summary>
+    private int FindRouteWayWindowStart(HashSet<long> riderWayIds)
+    {
+        for (int i = 0; i < _routeWayIds.Count; i++)
+        {
+            if (riderWayIds.Contains(_routeWayIds[i]))
+                return i;
+        }
+        return 0; // no match → check from start (conservative)
+    }
+
+    private void LogTelemetry()
+    {
+        Log.Information(
+            "OffRouteDetector: {Total} ticks, {OnRoute} on-route, {Suspect} suspect, {Ignored} ignored (accuracy), {Calls} locate calls, {Skipped} throttled",
+            _telemetryTicksTotal, _telemetryTicksOnRoute, _telemetryTicksSuspect,
+            _telemetryTicksIgnored, _telemetryLocateCalls, _telemetryLocateCallsSkipped);
+    }
+
+    private void ResetTelemetry()
+    {
+        _telemetryTicksTotal = 0;
+        _telemetryTicksIgnored = 0;
+        _telemetryTicksOnRoute = 0;
+        _telemetryTicksSuspect = 0;
+        _telemetryLocateCalls = 0;
+        _telemetryLocateCallsSkipped = 0;
     }
 
     // ── Maneuver change notification ─────────────────────────────────────
