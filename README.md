@@ -82,7 +82,7 @@ Navigation uses a **deterministic state machine** (`NavigationService`) that rea
 
 ---
 ## Download
-Join the beta via TestFlight: [Link Placeholder]
+Join the beta via TestFlight: [Join TestFlight](https://testflight.apple.com/join/bzVYsT1u)
 ## Building
 
 ```bash
