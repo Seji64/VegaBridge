@@ -33,6 +33,32 @@ public class ValhallaClient : IValhallaClient
         return await PostAsync("trace_route", request, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<List<LocateResponse?>> LocateAsync(List<(double Lat, double Lon)> points, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Log.Debug("Locating {Count} points", points.Count);
+        try
+        {
+            var request = new
+            {
+                locations = points.Select(p => new { lat = p.Lat, lon = p.Lon }).ToArray(),
+                costing = "motorcycle"
+            };
+            string json = await _flurlClient
+                .Request("locate")
+                .PostJsonAsync(request, cancellationToken: cancellationToken)
+                .ReceiveString();
+            // locate returns a JSON array, one object per input location
+            var results = System.Text.Json.JsonSerializer.Deserialize<List<LocateResponse?>>(json);
+            return results ?? [];
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warning(ex, "Locate API failed");
+            return [];
+        }
+    }
     private async Task<Result> PostAsync<TRequest>(string endpoint, TRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -21,4 +21,9 @@ public interface IValhallaClient
     /// <param name="cancellationToken">Optional cancellation token.</param>
     /// <returns>Result with matched route.</returns>
     Task<Result> GetMapMatchAsync(TraceRequest request, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Locate edges (road segments) near GPS points. Returns way_id (OSM Way ID)
+    /// for topology-aware off-route detection.
+    /// </summary>
+    Task<List<LocateResponse?>> LocateAsync(List<(double Lat, double Lon)> points, CancellationToken cancellationToken = default);
 }
