@@ -77,7 +77,7 @@
         <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="9.1.0" />
         <PackageReference Include="CommunityToolkit.Maui" Version="15.0.0" />
         <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.90" />
-        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.90" />
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.100" />
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.11" />
         <PackageReference Include="Microsoft.AspNetCore.WebUtilities" Version="10.0.11" />
         <PackageReference Include="MudBlazor" Version="9.8.0" />
