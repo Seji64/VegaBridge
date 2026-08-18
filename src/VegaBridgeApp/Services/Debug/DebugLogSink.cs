@@ -19,7 +19,9 @@ public sealed class DebugLogSink : ILogEventSink
 
     private readonly StringBuilder _sb = new();
     private readonly object _lock = new();
-    private const int MaxChars = 200_000;
+    private const int MaxChars = 1_000_000; // ~20 min at 45KB/min – covers most rides
+    private long _totalLinesWritten;
+    private long _totalCharsWritten;
 
     /// <summary>
     /// When false, Emit discards events immediately (no buffering cost).
@@ -27,6 +29,12 @@ public sealed class DebugLogSink : ILogEventSink
     /// </summary>
     public bool IsEnabled { get; private set; } =
         Preferences.Default.Get("debug_logging_enabled", false);
+
+    /// <summary>Approximate line count in current buffer.</summary>
+    public int LineCount { get { lock (_lock) return _sb.ToString().Count(c => c == '\n'); } }
+
+    /// <summary>Total lines written since last Clear (including dropped).</summary>
+    public long TotalLinesWritten => _totalLinesWritten;
 
     public void SetEnabled(bool enabled)
     {
@@ -47,6 +55,8 @@ public sealed class DebugLogSink : ILogEventSink
         lock (_lock)
         {
             _sb.AppendLine(line);
+            _totalLinesWritten++;
+            _totalCharsWritten += line.Length;
             if (_sb.Length > MaxChars)
                 _sb.Remove(0, _sb.Length - MaxChars);
         }
@@ -59,6 +69,6 @@ public sealed class DebugLogSink : ILogEventSink
 
     public void Clear()
     {
-        lock (_lock) _sb.Clear();
+        lock (_lock) { _sb.Clear(); _totalLinesWritten = 0; _totalCharsWritten = 0; }
     }
 }
