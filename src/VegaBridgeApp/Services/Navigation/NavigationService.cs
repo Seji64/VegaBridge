@@ -489,7 +489,43 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
     private void InitializeRouteData(string mergedShape, List<Maneuver> maneuvers, double totalDistanceKm, double totalTimeMin)
     {
-        _routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
+        List<Coordinate> rawCoords = PolylineEncoder.DecodePolyline6(mergedShape);
+
+        // Build index map: for each raw index, what's the densified index?
+        // Needed because densification inserts points between originals,
+        // shifting maneuver shape indices.
+        List<int> rawToDensified = [0];
+        List<Coordinate> densified = [rawCoords[0]];
+        const double maxSegM = 20.0;
+        for (int i = 1; i < rawCoords.Count; i++)
+        {
+            Coordinate a = rawCoords[i - 1];
+            Coordinate b = rawCoords[i];
+            double dist = GeoMath.DistanceMeters(a.Latitude, a.Longitude, b.Latitude, b.Longitude);
+            if (dist > maxSegM)
+            {
+                int n = (int)Math.Ceiling(dist / maxSegM);
+                for (int j = 1; j < n; j++)
+                {
+                    double t = (double)j / n;
+                    densified.Add(new Coordinate(
+                        a.Latitude + t * (b.Latitude - a.Latitude),
+                        a.Longitude + t * (b.Longitude - a.Longitude), null));
+                }
+            }
+            densified.Add(b);
+            rawToDensified.Add(densified.Count - 1);
+        }
+        _routeCoords = densified;
+
+        // Remap maneuver shape indices to densified polyline
+        foreach (Maneuver m in maneuvers)
+        {
+            if (m.BeginShapeIndex < rawToDensified.Count)
+                m.BeginShapeIndex = rawToDensified[m.BeginShapeIndex];
+            if (m.EndShapeIndex < rawToDensified.Count)
+                m.EndShapeIndex = rawToDensified[m.EndShapeIndex];
+        }
         _maneuvers = maneuvers;
         UpdateCumulativeDistances();
         // Cache the threshold once per route instead of reading Preferences per GPS tick.

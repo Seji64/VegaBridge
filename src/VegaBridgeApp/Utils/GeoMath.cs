@@ -56,4 +56,36 @@ public static class GeoMath
                    Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
         return (ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
     }
+
+    /// <summary>
+    /// Inserts intermediate points on long polyline segments so no segment
+    /// exceeds <paramref name="maxSegmentM"/> meters. Reduces chord error
+    /// in curves — without this, a 100m curve segment can be 30-40m from
+    /// the actual road, causing false off-route detection.
+    /// </summary>
+    public static List<Coordinate> DensifyPolyline(IReadOnlyList<Coordinate> coords, double maxSegmentM = 20.0)
+    {
+        if (coords.Count < 2) return [.. coords];
+
+        List<Coordinate> result = [coords[0]];
+        for (int i = 1; i < coords.Count; i++)
+        {
+            Coordinate a = coords[i - 1];
+            Coordinate b = coords[i];
+            double dist = DistanceMeters(a.Latitude, a.Longitude, b.Latitude, b.Longitude);
+            if (dist > maxSegmentM)
+            {
+                int n = (int)Math.Ceiling(dist / maxSegmentM);
+                for (int j = 1; j < n; j++)
+                {
+                    double t = (double)j / n;
+                    double lat = a.Latitude + t * (b.Latitude - a.Latitude);
+                    double lon = a.Longitude + t * (b.Longitude - a.Longitude);
+                    result.Add(new Coordinate(lat, lon, null));
+                }
+            }
+            result.Add(b);
+        }
+        return result;
+    }
 }
