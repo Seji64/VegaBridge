@@ -236,8 +236,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _offRouteCounter = 0;
             _topologyOffRouteCounter = 0;
             _routeWayIds = [];
-            
-            
             _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
             _gpsTickCount = 0;
@@ -305,8 +303,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _offRouteCounter = 0;
             _topologyOffRouteCounter = 0;
             _routeWayIds = [];
-            
-            
             _currentHeadingDeg = -1;
         }
 
@@ -442,8 +438,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _offRouteCounter = 0;
             _topologyOffRouteCounter = 0;
             _routeWayIds = [];
-            
-            
             _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
         }
@@ -723,8 +717,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 if (_isOffRoute) return;
             }
 
-            // Periodic Off-Route Verification via API (one in-flight at a time)
-
             // Upcoming action: first maneuver whose begin is at/ahead of the
             // snap. Valhalla maneuvers describe the action at their BEGIN
             // (the turn happens at begin_shape_index, e.g. "Turn left onto
@@ -862,16 +854,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 a.Latitude, a.Longitude, b.Latitude, b.Longitude);
             if (distM < 10.0)
                 continue;
-
-            // Initial bearing (great-circle) from a to b = movement direction.
-            double phi1 = GeoMath.ToRad(a.Latitude);
-            double phi2 = GeoMath.ToRad(b.Latitude);
-            double dLon = GeoMath.ToRad(b.Longitude - a.Longitude);
-            double y = Math.Sin(dLon) * Math.Cos(phi2);
-            double x = Math.Cos(phi1) * Math.Sin(phi2) -
-                       Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
-            double bearingDeg = (GeoMath.ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
-            return bearingDeg;
+            return GeoMath.BearingDeg(a.Latitude, a.Longitude, b.Latitude, b.Longitude);
         }
         return null;
     }
