@@ -2,7 +2,7 @@
 <!--
 Privacy manifest for VegaBridgeApp.
 Required by Apple for App Store and TestFlight distribution since May 2024.
-Covers: .NET MAUI SDK defaults + location + user defaults (Shiny).
+Covers: .NET MAUI SDK defaults + user defaults (Shiny).
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -39,14 +39,6 @@ Covers: .NET MAUI SDK defaults + location + user defaults (Shiny).
             <key>NSPrivacyAccessedAPITypeReasons</key>
             <array>
                 <string>CA92.1</string>
-            </array>
-        </dict>
-        <dict>
-            <key>NSPrivacyAccessedAPIType</key>
-            <string>NSPrivacyAccessedAPICategoryLocation</string>
-            <key>NSPrivacyAccessedAPITypeReasons</key>
-            <array>
-                <string>DDA9.1</string>
             </array>
         </dict>
     </array>
