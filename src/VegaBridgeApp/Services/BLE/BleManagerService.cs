@@ -503,7 +503,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             // Retry once after a short delay. The BLE write queue might be
             // full (CanSendWriteWithoutResponse = False). A brief wait lets
-            // the queue drain. Only reconnect if the retry also fails.
+            // the queue drain.
             try
             {
                 await Task.Delay(500);
@@ -521,17 +521,17 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                         break;
                 }
                 Log.Information("Retry succeeded for {Action}", action);
-                return; // success on retry, don't reconnect
+                return;
             }
             catch (Exception retryEx)
             {
-                Log.Error(retryEx, "Retry also failed for {Action}", action);
+                Log.Warning(retryEx, "Retry also failed for {Action} – will recover on next tick", action);
             }
 
-            if (_activePeripheral != null)
-            {
-                InvalidateConnectionAndReconnect();
-            }
+            // Don't reconnect here. Let Shiny's WhenDisconnected() /
+            // WhenConnectionFailed() handle actual connection loss.
+            // A write failure might just mean the queue is full – the
+            // connection could still be alive. Next tick will try again.
         }
     }
 
