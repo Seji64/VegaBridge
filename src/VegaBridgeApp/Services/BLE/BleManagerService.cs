@@ -619,8 +619,23 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     private void SetupConnectionMonitoring(IPeripheral peripheral)
     {
         _connectionSubscription?.Dispose();
-        _connectionSubscription = peripheral.WhenDisconnected()
+
+        // Monitor both disconnects and connection failures
+        var disconnectSub = peripheral.WhenDisconnected()
             .Subscribe(_ => HandleUnexpectedDisconnection(peripheral));
+        var failSub = peripheral.WhenConnectionFailed()
+            .Subscribe(ex =>
+            {
+                Log.Warning("Connection failed for {Uuid}: {Error}", peripheral.Uuid, ex.Message);
+                HandleUnexpectedDisconnection(peripheral);
+            });
+
+        // Combine into single disposable for cleanup
+        _connectionSubscription = System.Reactive.Disposables.Disposable.Create(() =>
+        {
+            disconnectSub.Dispose();
+            failSub.Dispose();
+        });
     }
 
     private void SetupNotifications(IPeripheral peripheral)
