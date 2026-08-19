@@ -22,7 +22,9 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     private readonly TimeSpan _statusThrottleInterval = TimeSpan.FromMilliseconds(500);
 
     // Serializes BLE frame writes so concurrent update chains cannot interleave.
-    private readonly SemaphoreSlim _sendGate = new(1, 1);
+    // Send-Gate: if 1, a BLE write is in progress. New frames are discarded
+    // immediately (backpressure) instead of queuing behind a stuck write.
+    private int _isWriting = 0;
 
     // Current context
     private NavigationManeuverInfo? _currentManeuver;
@@ -57,7 +59,6 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
-        _sendGate.Dispose();
     }
 
     // ─── INavigationSink ─────────────────────────────────────────────────
@@ -204,13 +205,12 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE INPUT: icon={input.ManeuverIcon}, instr={input.InstructionText}, street={input.StreetName}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h, remDist={input.RemainingDistanceKm:F1}km, idx={input.CurrentManeuverIndex}/{input.TotalManeuvers}");
 
-        // The gate serializes BLE writes; a write that stalls (dead link,
-        // iOS suspend) must not freeze navigation forever. With a timeout
-        // the coordinator drops the stuck update instead of queuing behind
-        // it – the next GPS tick will send a fresh one.
-        if (!await _sendGate.WaitAsync(TimeSpan.FromSeconds(10)))
+        // Send-Gate: if a BLE write is already in progress, discard this frame
+        // immediately. A 1-second-old navi update is useless — it would only
+        // clog the buffer for the next fresh update.
+        if (Interlocked.Exchange(ref _isWriting, 1) == 1)
         {
-            Log.Warning("Send gate busy for 10s – dropping stale navigation update");
+            Log.Debug("Send gate busy – discarding stale navigation update");
             return;
         }
         try
@@ -220,7 +220,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         }
         finally
         {
-            _sendGate.Release();
+            Interlocked.Exchange(ref _isWriting, 0);
         }
     }
 
