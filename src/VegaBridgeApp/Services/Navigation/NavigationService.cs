@@ -972,7 +972,19 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             var results = await valhallaClient.LocateAsync([(lat, lon)], speedMs, heading);
             if (results.Count == 0 || results[0]?.Edges is not { Count: > 0 })
             {
+                // Topology inconclusive — no edges at all. Count like mismatch.
                 Log.Debug("Locate: no edges at ({Lat:F6},{Lon:F6})", lat, lon);
+                lock (_lock)
+                {
+                    if (!_isNavigating) return;
+                    _topologyOffRouteCounter++;
+                    if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
+                    {
+                        _isOffRoute = true;
+                        Log.Warning("Off route (topology)! no edges found, dist={Dist:F1}m", distanceMeters);
+                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
+                    }
+                }
                 return;
             }
 
@@ -989,7 +1001,22 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             if (edges.Count == 0)
             {
+                // Topology inconclusive — rider is suspect by distance AND
+                // locate found no road. Count this like a way_id mismatch.
                 Log.Debug("Locate: no way_ids at ({Lat:F6},{Lon:F6})", lat, lon);
+                lock (_lock)
+                {
+                    if (!_isNavigating) return;
+                    _topologyOffRouteCounter++;
+                    Log.Information("Locate: off-route candidate ({Count}/{Threshold}), reason=no_road_found",
+                        _topologyOffRouteCounter, OffRouteConfirmCount);
+                    if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
+                    {
+                        _isOffRoute = true;
+                        Log.Warning("Off route (topology)! no road found, dist={Dist:F1}m", distanceMeters);
+                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
+                    }
+                }
                 return;
             }
 
