@@ -190,25 +190,20 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
             intersectionName);
         Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
+        await Task.Delay(200); // Leaky Bucket: space writes evenly instead of burst
 
-        // Send SM (Status/Motion) frame with current metrics
+        // SM (Status/Motion) frame
         await SendStatusFrameAsync(device, input.RemainingDistanceKm * 1000, input.DistanceToTurnM);
-        
-        // Send SM1 countdown frame when approaching a turn (within ~300m for left, ~250m for right)
-        // MV Ride sends SM1 with type 902 (left turns) or 901 (right turns) and a countdown value.
-        // The countdown decreases from ~7 to 0 as you approach the turn.
+        await Task.Delay(200);
+
+        // SM1 countdown when approaching a turn
         if (input.DistanceToTurnM is <= 300 and > 0)
         {
-            // Determine SM1 type based on maneuver icon
             string sm1Type = input.ManeuverIcon.Contains("left", StringComparison.OrdinalIgnoreCase) ? "902" : "901";
-            // Countdown: 7 at ~300m, decreasing to 0 at the turn
             int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
             await SendSm1CountdownAsync(device, sm1Type, countdown);
+            await Task.Delay(200);
         }
-        
-        // Add a slight delay to give the bike time to process the user‑visible frames
-        await Task.Delay(250); // 250 ms – experimentally safe for most MV phones
-        
         // Log the navigation update for debugging
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE: idx={input.CurrentManeuverIndex}, icon={input.ManeuverIcon}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h");
     }
@@ -412,8 +407,6 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
             distanceToTurnM.ToString("F0"));
         Log.Information("BLE-LOGGER: {Line}", $"SEND SM frame: {BitConverter.ToString(smFrame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, smFrame, withResponse: false);
-        
-        await Task.Delay(150);
     }
 
     private byte[] BuildFrame(string command, params string[] fields)
@@ -493,7 +486,6 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         byte[] frame = BuildFrame(Commands.SM1, sm1Type, countdown.ToString(), "");
         Log.Information("BLE-LOGGER: {Line}", $"SEND SM1 frame: {BitConverter.ToString(frame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
-        await Task.Delay(100);
     }
 
     // ─── IAsyncDisposable Implementation ───────────────────────────────────────
