@@ -30,7 +30,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     private string? _lastBikeSessionId;
     private IBleConnectedDevice? _connectedDevice; // Store for GUI1 responses
     private bool _isDisposed;
-
+    private DateTimeOffset _lastNavUpdateAt = DateTimeOffset.MinValue;
     // Whether the keepalive SHOULD be running (set on nav start, cleared on
     // nav stop / disconnect). After a BLE reconnect the manager calls
     // EnsurePingRunning to restart the loop without a new navigation start.
@@ -189,6 +189,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
             navigationGuide,
             intersectionName);
         Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
+        _lastNavUpdateAt = DateTimeOffset.UtcNow;
         await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
         await Task.Delay(200); // Leaky Bucket: space writes evenly instead of burst
 
@@ -275,6 +276,11 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
                 while (await _pingTimer.WaitForNextTickAsync(token))
                 {
                     if (_isDisposed) break;
+                    // Skip PING if a nav update was sent recently (within 5s).
+                    // NAVI+SM frames already act as keepalive. PING + NAVI
+                    // within 23ms fills the BLE queue and causes write failures.
+                    if (DateTimeOffset.UtcNow - _lastNavUpdateAt < TimeSpan.FromSeconds(5))
+                        continue;
                     await SendPingAsync(device);
                 }
             }
