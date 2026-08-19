@@ -499,13 +499,35 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Failed to execute navigation action {Action}", action);
-            UpdateError($"Navigation command failed: {ex.Message}", isCritical: false);
+            Log.Warning(ex, "Write failed for {Action}, retrying in 500ms", action);
 
-            // Write timeouts (Arg_TimeoutException) are the classic sign that
-            // iOS dropped the BLE link while the app was in the background –
-            // without a disconnect event. Rebuild the connection instead of
-            // silently failing every subsequent frame.
+            // Retry once after a short delay. The BLE write queue might be
+            // full (CanSendWriteWithoutResponse = False). A brief wait lets
+            // the queue drain. Only reconnect if the retry also fails.
+            try
+            {
+                await Task.Delay(500);
+                if (_activePeripheral == null || _activePlugin == null) return;
+                BleConnectedDeviceWrapper retryWrapper = new(_activePeripheral, _activePlugin);
+                switch (action)
+                {
+                    case "SendNavigationUpdateAsync":
+                        if (input is NavigationUpdateInput u)
+                            await _activePlugin.SendNavigationUpdateAsync(retryWrapper, u);
+                        break;
+                    case "SendOffRouteAlertAsync":
+                        if (input is OffRouteAlertInput a)
+                            await _activePlugin.SendOffRouteAlertAsync(retryWrapper, a);
+                        break;
+                }
+                Log.Information("Retry succeeded for {Action}", action);
+                return; // success on retry, don't reconnect
+            }
+            catch (Exception retryEx)
+            {
+                Log.Error(retryEx, "Retry also failed for {Action}", action);
+            }
+
             if (_activePeripheral != null)
             {
                 InvalidateConnectionAndReconnect();
