@@ -443,6 +443,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         }
 
         FireCurrentManeuver();
+        _ = BuildRouteWayIdIndex();
         Log.Information(
             "Route rerouted: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers",
             totalDistanceKm, totalTimeMin, maneuvers.Count);
@@ -919,7 +920,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     }
 
 
-    // TODO: integrate Valhalla map‑matching confidence weighting
     private double CalculateDistanceToNextTurn(int currentRouteIndex, int displayIndex)
     {
         if (displayIndex < 0 || displayIndex >= _maneuvers.Count) return 0;
@@ -974,17 +974,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             {
                 // Topology inconclusive — no edges at all. Count like mismatch.
                 Log.Debug("Locate: no edges at ({Lat:F6},{Lon:F6})", lat, lon);
-                lock (_lock)
-                {
-                    if (!_isNavigating) return;
-                    _topologyOffRouteCounter++;
-                    if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
-                    {
-                        _isOffRoute = true;
-                        Log.Warning("Off route (topology)! no edges found, dist={Dist:F1}m", distanceMeters);
-                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
-                    }
-                }
+                lock (_lock) { if (_isNavigating) CountTopologyOffRouteCandidate("no_edges", lat, lon, distanceMeters); }
                 return;
             }
 
@@ -1004,19 +994,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 // Topology inconclusive — rider is suspect by distance AND
                 // locate found no road. Count this like a way_id mismatch.
                 Log.Debug("Locate: no way_ids at ({Lat:F6},{Lon:F6})", lat, lon);
-                lock (_lock)
-                {
-                    if (!_isNavigating) return;
-                    _topologyOffRouteCounter++;
-                    Log.Information("Locate: off-route candidate ({Count}/{Threshold}), reason=no_road_found",
-                        _topologyOffRouteCounter, OffRouteConfirmCount);
-                    if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
-                    {
-                        _isOffRoute = true;
-                        Log.Warning("Off route (topology)! no road found, dist={Dist:F1}m", distanceMeters);
-                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
-                    }
-                }
+                lock (_lock) { if (_isNavigating) CountTopologyOffRouteCandidate("no_road_found", lat, lon, distanceMeters); }
                 return;
             }
 
@@ -1068,17 +1046,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 }
                 else
                 {
-                    _topologyOffRouteCounter++;
-                    Log.Information("Locate: off-route candidate ({Count}/{Threshold}), reason={Reason}",
-                        _topologyOffRouteCounter, OffRouteConfirmCount,
-                        !wayIdMatch ? "no_way_match" : "percent_along_suspicious");
-                    if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
-                    {
-                        _isOffRoute = true;
-                        Log.Warning("Off route (topology)! ways={Ways}, dist={Dist:F1}m",
-                            string.Join(",", riderWayIds), distanceMeters);
-                        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
-                    }
+                    CountTopologyOffRouteCandidate(
+                        !wayIdMatch ? "no_way_match" : "percent_along_suspicious",
+                        lat, lon, distanceMeters);
                 }
             }
         }
@@ -1101,6 +1071,19 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 return i;
         }
         return 0; // no match → check from start (conservative)
+    }
+
+    private void CountTopologyOffRouteCandidate(string reason, double lat, double lon, double distanceMeters)
+    {
+        _topologyOffRouteCounter++;
+        Log.Information("Locate: off-route candidate ({Count}/{Threshold}), reason={Reason}",
+            _topologyOffRouteCounter, OffRouteConfirmCount, reason);
+        if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
+        {
+            _isOffRoute = true;
+            Log.Warning("Off route (topology)! {Reason}, dist={Dist:F1}m", reason, distanceMeters);
+            _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
+        }
     }
 
     private void LogTelemetry()
