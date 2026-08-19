@@ -499,39 +499,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Write failed for {Action}, retrying in 500ms", action);
-
-            // Retry once after a short delay. The BLE write queue might be
-            // full (CanSendWriteWithoutResponse = False). A brief wait lets
-            // the queue drain.
-            try
-            {
-                await Task.Delay(500);
-                if (_activePeripheral == null || _activePlugin == null) return;
-                BleConnectedDeviceWrapper retryWrapper = new(_activePeripheral, _activePlugin);
-                switch (action)
-                {
-                    case "SendNavigationUpdateAsync":
-                        if (input is NavigationUpdateInput u)
-                            await _activePlugin.SendNavigationUpdateAsync(retryWrapper, u);
-                        break;
-                    case "SendOffRouteAlertAsync":
-                        if (input is OffRouteAlertInput a)
-                            await _activePlugin.SendOffRouteAlertAsync(retryWrapper, a);
-                        break;
-                }
-                Log.Information("Retry succeeded for {Action}", action);
-                return;
-            }
-            catch (Exception retryEx)
-            {
-                Log.Warning(retryEx, "Retry also failed for {Action} – will recover on next tick", action);
-            }
-
-            // Don't reconnect here. Let Shiny's WhenDisconnected() /
-            // WhenConnectionFailed() handle actual connection loss.
-            // A write failure might just mean the queue is full – the
-            // connection could still be alive. Next tick will try again.
+            // Write failed. Don't retry (500ms blocks the gate for the
+            // entire 1s tick) and don't reconnect (let Shiny's disconnect
+            // events handle real connection loss). Just log and let the
+            // next GPS tick send a fresh frame.
+            Log.Debug(ex, "Write failed for {Action} – next tick will retry", action);
         }
     }
 
