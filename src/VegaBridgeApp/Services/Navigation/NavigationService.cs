@@ -712,7 +712,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 if (_offRouteCounter < 10) _offRouteCounter++;
                 if (_offRouteCounter >= 2)
                 {
-                    _ = VerifyTopologyAsync(navLat, navLon, distanceMeters);
+                    _ = VerifyTopologyAsync(navLat, navLon, distanceMeters, reading.Speed, _currentHeadingDeg);
                 }
                 if (_isOffRoute) return;
             }
@@ -956,7 +956,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// Only called when local XTE check is SUSPECT (not every tick).
     /// Throttled to max 1 call per 2 seconds.
     /// </summary>
-    private async Task VerifyTopologyAsync(double lat, double lon, double distanceMeters)
+    private async Task VerifyTopologyAsync(double lat, double lon, double distanceMeters, double speedMs = 0, double heading = 0)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         if ((now - _lastLocateAt).TotalSeconds < LocateThrottleSec)
@@ -969,7 +969,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
         try
         {
-            var results = await valhallaClient.LocateAsync([(lat, lon)]);
+            var results = await valhallaClient.LocateAsync([(lat, lon)], speedMs, heading);
             if (results.Count == 0 || results[0]?.Edges is not { Count: > 0 })
             {
                 Log.Debug("Locate: no edges at ({Lat:F6},{Lon:F6})", lat, lon);

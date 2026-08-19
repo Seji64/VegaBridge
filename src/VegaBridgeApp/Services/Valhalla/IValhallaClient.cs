@@ -25,5 +25,8 @@ public interface IValhallaClient
     /// Locate edges (road segments) near GPS points. Returns way_id (OSM Way ID)
     /// for topology-aware off-route detection.
     /// </summary>
-    Task<List<LocateResponse?>> LocateAsync(List<(double Lat, double Lon)> points, CancellationToken cancellationToken = default);
+    /// <param name="points">GPS coordinates to locate.</param>
+    /// <param name="speedMs">Current speed in m/s. Used for dynamic search radius.</param>
+    /// <param name="heading">Current heading in degrees (0-360). Helps Valhalla match correct edge.</param>
+    Task<List<LocateResponse?>> LocateAsync(List<(double Lat, double Lon)> points, double speedMs = 0, double heading = 0, CancellationToken cancellationToken = default);
 }

@@ -34,15 +34,34 @@ public class ValhallaClient : IValhallaClient
     }
 
     /// <inheritdoc />
-    public async Task<List<LocateResponse?>> LocateAsync(List<(double Lat, double Lon)> points, CancellationToken cancellationToken = default)
+    public async Task<List<LocateResponse?>> LocateAsync(List<(double Lat, double Lon)> points, double speedMs = 0, double heading = 0, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Log.Debug("Locating {Count} points", points.Count);
+        Log.Debug("Locating {Count} points (speed={Speed:F1}m/s, heading={Heading:F0}°)", points.Count, speedMs, heading);
         try
         {
+            // Dynamic search radius based on speed:
+            // < 15 km/h (city/traffic lights): 15m – prevents snapping to cross-streets
+            // 15-60 km/h (city riding): 35m
+            // > 60 km/h (highway/country): 60m – absorbs high-speed GPS drift
+            double speedKmh = speedMs * 3.6;
+            int radius = speedKmh switch
+            {
+                < 15 => 15,
+                < 60 => 35,
+                _ => 60
+            };
+
             var request = new
             {
-                locations = points.Select(p => new { lat = p.Lat, lon = p.Lon }).ToArray(),
+                locations = points.Select(p => new
+                {
+                    lat = p.Lat,
+                    lon = p.Lon,
+                    radius,
+                    heading = heading > 0 ? heading : (double?)null,
+                    heading_tolerance = heading > 0 ? 60 : (double?)null
+                }).ToArray(),
                 costing = "motorcycle"
             };
             var results = await _flurlClient
