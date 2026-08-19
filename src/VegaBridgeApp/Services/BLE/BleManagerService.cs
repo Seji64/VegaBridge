@@ -94,24 +94,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             {
                 while (!scanToken.IsCancellationRequested)
                 {
-                    try
-                    {
-                        foreach (IPeripheral connected in bleManager.GetConnectedPeripherals())
-                        {
-                            string key = connected.Uuid.ToUpper();
-                            if (!_discoveredPeripherals.ContainsKey(key))
-                            {
-                                _discoveredPeripherals[key] = connected;
-                                Log.Information("BLE: OS-connected peripheral found: {Uuid} ({Name})",
-                                    connected.Uuid, connected.Name ?? "Unknown");
-                                UpdateDeviceList();
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Debug(ex, "BLE: GetConnectedPeripherals poll failed (non-fatal)");
-                    }
+                    RefreshConnectedPeripherals();
                     await Task.Delay(TimeSpan.FromSeconds(5), scanToken);
                 }
             }, scanToken);
@@ -673,6 +656,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     {
         const int maxRetries = 3;
         int attempt = 0;
+        _retryCts?.Cancel();
+        _retryCts?.Dispose();
         _retryCts = new CancellationTokenSource();
         CancellationToken token = _retryCts.Token;
 
