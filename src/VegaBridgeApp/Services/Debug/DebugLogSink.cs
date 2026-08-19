@@ -11,7 +11,7 @@ namespace VegaBridgeApp.Services.Debug;
 /// does not pay for buffering during normal use.
 /// Thread-safe: all public methods are guarded by a single lock.
 /// </summary>
-public sealed class DebugLogSink(int maxLines = 20_000) : ILogEventSink
+public sealed class DebugLogSink(int maxLines = 60_000) : ILogEventSink // ~100 min at 10 lines/sec
 {
     /// <summary>Shared instance; wired into Serilog and DI at startup.</summary>
     public static DebugLogSink Instance { get; } = new();

@@ -958,7 +958,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// </summary>
     private async Task VerifyTopologyAsync(double lat, double lon, double distanceMeters)
     {
-        // Throttle: max 1 locate call per 2 seconds
         DateTimeOffset now = DateTimeOffset.UtcNow;
         if ((now - _lastLocateAt).TotalSeconds < LocateThrottleSec)
         {
@@ -972,30 +971,65 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             var results = await valhallaClient.LocateAsync([(lat, lon)]);
             if (results.Count == 0 || results[0]?.Edges is not { Count: > 0 })
+            {
+                Log.Debug("Locate: no edges at ({Lat:F6},{Lon:F6})", lat, lon);
                 return;
+            }
 
-            HashSet<long> riderWayIds = results[0]!.Edges!
+            // Collect ALL edge info for logging
+            var edges = results[0]!.Edges!
                 .Where(e => e.EdgeInfo?.WayId > 0)
-                .Select(e => e.EdgeInfo!.WayId)
-                .ToHashSet();
+                .Select(e => new {
+                    WayId = e.EdgeInfo!.WayId,
+                    Names = e.EdgeInfo.Names ?? [],
+                    PercentAlong = e.PercentAlong,
+                    Side = e.SideOfStreet
+                })
+                .ToList();
 
-            if (riderWayIds.Count == 0) return;
+            if (edges.Count == 0)
+            {
+                Log.Debug("Locate: no way_ids at ({Lat:F6},{Lon:F6})", lat, lon);
+                return;
+            }
 
-            // Sliding window: only check way_ids AHEAD of current position.
-            // Prevents false matches on overlapping routes (figure-8, loops).
-            // Find the nearest way_id in the route to determine our position,
-            // then look ahead up to 10 distinct way_ids.
+            HashSet<long> riderWayIds = edges.Select(e => e.WayId).ToHashSet();
+
+            // Log what the rider is on
+            string edgeSummary = string.Join("; ", edges.Select(e =>
+                $"way={e.WayId} [{string.Join(",", e.Names)}] along={e.PercentAlong:F2} side={e.Side}"));
+            Log.Information("Locate: rider on {Count} edges: {Summary}", edges.Count, edgeSummary);
+
+            // Sliding window
             int routeWindowStart = FindRouteWayWindowStart(riderWayIds);
             int windowEnd = Math.Min(routeWindowStart + 10, _routeWayIds.Count);
             HashSet<long> routeWindow = _routeWayIds
                 .Skip(routeWindowStart)
                 .Take(windowEnd - routeWindowStart)
                 .ToHashSet();
-            bool onRoute = riderWayIds.Any(w => routeWindow.Contains(w));
+            bool wayIdMatch = riderWayIds.Any(w => routeWindow.Contains(w));
+
+            // percent_along validation: if the rider is at the very start
+            // (near 0.0) or very end (near 1.0) of a road segment, they might
+            // be on a parallel road that shares the same OSM way_id.
+            // Only matters if we're SUSPECT (XTE > threshold).
+            bool percentAlongSuspicious = false;
+            if (wayIdMatch && distanceMeters > SuspectXteM)
+            {
+                // Check if ALL matching edges have suspicious percent_along
+                var matchingEdges = edges.Where(e => routeWindow.Contains(e.WayId)).ToList();
+                percentAlongSuspicious = matchingEdges.All(e =>
+                    e.PercentAlong < 0.05 || e.PercentAlong > 0.95);
+            }
+
+            Log.Information("Locate: wayIdMatch={Match}, percentAlongSuspicious={Suspicious}, window=[{Start}..{End}], routeWays={RouteWays}",
+                wayIdMatch, percentAlongSuspicious, routeWindowStart, windowEnd, _routeWayIds.Count);
 
             lock (_lock)
             {
                 if (!_isNavigating) return;
+
+                bool onRoute = wayIdMatch && !percentAlongSuspicious;
 
                 if (onRoute)
                 {
@@ -1008,6 +1042,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 else
                 {
                     _topologyOffRouteCounter++;
+                    Log.Information("Locate: off-route candidate ({Count}/{Threshold}), reason={Reason}",
+                        _topologyOffRouteCounter, OffRouteConfirmCount,
+                        !wayIdMatch ? "no_way_match" : "percent_along_suspicious");
                     if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
                     {
                         _isOffRoute = true;
