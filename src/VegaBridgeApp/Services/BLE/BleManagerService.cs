@@ -335,7 +335,6 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             // Connecting, etc.) means we must rebuild it.
             if (_activePeripheral.Status == ConnectionState.Connected)
             {
-                Log.Debug("BLE connection still alive (EnsureConnected)");
                 return true;
             }
 
