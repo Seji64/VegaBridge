@@ -192,17 +192,24 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
         await Task.Delay(200); // Leaky Bucket: space writes evenly instead of burst
 
-        // SM (Status/Motion) frame
-        await SendStatusFrameAsync(device, input.RemainingDistanceKm * 1000, input.DistanceToTurnM);
-        await Task.Delay(200);
+        // SM and SM1 are non-critical (status display). If the BLE queue
+        // is full after NAVI, skip them instead of throwing. NAVI is the
+        // frame that shows the actual instruction on the bike display.
+        try
+        {
+            await SendStatusFrameAsync(device, input.RemainingDistanceKm * 1000, input.DistanceToTurnM);
+        }
+        catch { /* SM failed – queue full, skip */ }
 
-        // SM1 countdown when approaching a turn
         if (input.DistanceToTurnM is <= 300 and > 0)
         {
-            string sm1Type = input.ManeuverIcon.Contains("left", StringComparison.OrdinalIgnoreCase) ? "902" : "901";
-            int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
-            await SendSm1CountdownAsync(device, sm1Type, countdown);
-            await Task.Delay(200);
+            try
+            {
+                string sm1Type = input.ManeuverIcon.Contains("left", StringComparison.OrdinalIgnoreCase) ? "902" : "901";
+                int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
+                await SendSm1CountdownAsync(device, sm1Type, countdown);
+            }
+            catch { /* SM1 failed – queue full, skip */ }
         }
         // Log the navigation update for debugging
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE: idx={input.CurrentManeuverIndex}, icon={input.ManeuverIcon}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h");
