@@ -160,15 +160,16 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (_currentManeuverIndex >= _maneuvers.Count)
                 return _maneuvers.Count - 1;
 
-            // If the current maneuver is NOT 'straight', show it.
-            if (!IsStraightManeuver(_maneuvers[_currentManeuverIndex]))
+            // If the current maneuver is worth showing, show it.
+            if (!IsSkippableForDisplay(_currentManeuverIndex))
             {
                 return _currentManeuverIndex;
             }
 
-            // If it is 'straight', find the next relevant (non-straight) maneuver.
+            // If it is skippable, find the next relevant maneuver.
             foreach (int candidateIndex in _relevantManeuverIndices.Where(candidateIndex => candidateIndex > _currentManeuverIndex))
             {
+                if (IsSkippableForDisplay(candidateIndex)) continue;
                 return candidateIndex;
             }
 
@@ -181,6 +182,21 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     {
         // Uses shared neutral mapping instead of MV Agusta plugin
         return NavigationConstants.IsStraightManeuver(m.Type);
+    }
+
+    /// <summary>
+    /// Maneuvers that are not worth displaying on their own:
+    /// straight-ish maneuvers AND intermediate waypoint arrivals
+    /// (Valhalla "arrive" type 4 that is not the final maneuver –
+    /// "Ziel erreicht." at a waypoint read like a broken display).
+    /// The real destination arrival is never skipped.
+    /// </summary>
+    private bool IsSkippableForDisplay(int index)
+    {
+        if (index < 0 || index >= _maneuvers.Count) return false;
+        Maneuver m = _maneuvers[index];
+        if (IsStraightManeuver(m)) return true;
+        return m.Type == 4 && index < _maneuvers.Count - 1; // intermediate waypoint arrival
     }
 
     /// <summary>
@@ -711,7 +727,12 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 // SUSPECT (either XTE too high or wrong way)
                 _telemetryTicksSuspect++;
                 if (_offRouteCounter < 10) _offRouteCounter++;
-                if (_offRouteCounter >= 2)
+                // Verify on the FIRST suspect tick, not the second: the slow
+                // path (2s throttle + OffRouteConfirmCount + 10-tick
+                // cooldown) is the stability mechanism, so starting it one
+                // tick earlier is free. A single glitch tick costs at most
+                // one locate call and cannot trigger RENAVI on its own.
+                if (_offRouteCounter >= 1)
                 {
                     _ = VerifyTopologyAsync(navLat, navLon, distanceMeters, reading.Speed, _currentHeadingDeg);
                 }

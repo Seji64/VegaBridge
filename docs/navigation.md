@@ -77,7 +77,7 @@ GpsService.ReadingReceived → OnGpsReading()
   │   ├─ FAST PATH: XTE ≤ 20m (40m in maneuvers) → ON_ROUTE
   │   │   └─ Wrong-Way check: heading vs route bearing > 135° → SUSPECT
   │   │
-  │   └─ SLOW PATH: XTE > 20m for 2+ ticks → SUSPECT
+  │   └─ SLOW PATH: XTE > 20m for 1+ ticks → SUSPECT
   │       └─ VerifyTopologyAsync (throttled, 1/2s)
   │           └─ Valhalla /locate → way_id comparison
   │               ├─ Match → ON_ROUTE (10-tick cooldown)
