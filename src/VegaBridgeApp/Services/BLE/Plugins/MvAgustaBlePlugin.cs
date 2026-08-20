@@ -28,9 +28,12 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     private CancellationTokenSource? _pingCts;
     private Task? _pingTask;
     private string? _lastBikeSessionId;
-    private IBleConnectedDevice? _connectedDevice; // Store for GUI1 responses
     private bool _isDisposed;
     private DateTimeOffset _lastNavUpdateAt = DateTimeOffset.MinValue;
+    // Bumped on every StartPingAsync. A superseded (replaced) keepalive loop
+    // must not fire WriteFailed – its in-flight failure must not trigger a
+    // reconnect of the freshly rebuilt link (F2).
+    private int _pingGeneration;
     // Whether the keepalive SHOULD be running (set on nav start, cleared on
     // nav stop / disconnect). After a BLE reconnect the manager calls
     // EnsurePingRunning to restart the loop without a new navigation start.
@@ -54,15 +57,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     }
 
     /// <summary>
-    /// Global switch for the GUI1-echo response.
-    /// DEFAULT: OFF – the official MV Ride capture (mvride_nav.txt) shows 0 GUI1 writes
-    /// from the phone; PING keepalive + NAVI/SM traffic keep the session alive.
-    /// Only enable for A/B testing when investigating session drops on the bike.
-    /// </summary>
-    public static bool Gui1ResponseEnabled { get; set; }
-
-    /// <summary>
     /// Gets the last GUI1 session ID received from the bike (for reference only).
+    /// The phone never writes GUI1 – PING keepalive + NAVI/SM traffic keep the
+    /// session alive (official MV Ride capture shows 0 GUI1 writes from the phone).
     /// </summary>
     public string? LastBikeSessionId => _lastBikeSessionId;
 
@@ -84,8 +81,6 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         {
             byte[] frame = BuildFrame(command, fields);
             Log.Information("BLE-LOGGER: {Line}", $"SEND {command} frame: {BitConverter.ToString(frame)}");
-            // Remember device so GUI1 responses to bike notifications can be sent
-            _connectedDevice = device;
             // Use Write-without-Response for this characteristic as the device does not support response writes
             await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
         }
@@ -129,10 +124,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     {
         Log.Debug("MV Agusta: Navigation Start - {Distance:F1}km, {Time:F0}min", input.TotalDistanceKm, input.TotalTimeMin);
         Log.Information("BLE-LOGGER: {Line}", $"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={input.UpcomingManeuvers?.Count ?? 0}");
-        
-        // Store device for GUI1 responses (bike sends GUI1 notifications, we must respond)
-        _connectedDevice = device;
-        
+
         // DEST format (from pklg capture): DEST|\x1e|lon\x1e|lat\x1e|
         // Field 1 (address) is empty in the official MV Ride app.
         // Field 2 = longitude, field 3 = latitude (both 6 decimal places).
@@ -200,7 +192,13 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         {
             await SendStatusFrameAsync(device, input.RemainingDistanceKm * 1000, input.DistanceToTurnM);
         }
-        catch { /* SM failed – queue full, skip */ }
+        catch (Exception ex)
+        {
+            // SM failed after NAVI was delivered (queue full or link flapping).
+            // Log it – otherwise the bike's status display goes silently stale
+            // and the root cause is invisible in the field.
+            Log.Debug(ex, "SM frame failed – skipping (NAVI already delivered)");
+        }
 
         if (input.DistanceToTurnM is <= 300 and > 0)
         {
@@ -210,7 +208,13 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
                 int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
                 await SendSm1CountdownAsync(device, sm1Type, countdown);
             }
-            catch { /* SM1 failed – queue full, skip */ }
+            catch (Exception ex)
+            {
+                // Same as SM: non-critical frame, NAVI already delivered. Log for
+                // field diagnostics – a persistent failure here means the bike's
+                // status display is going stale.
+                Log.Debug(ex, "SM1 frame failed – skipping (NAVI already delivered)");
+            }
         }
         // Log the navigation update for debugging
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE: idx={input.CurrentManeuverIndex}, icon={input.ManeuverIcon}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h");
@@ -267,7 +271,12 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         _pingCts = new CancellationTokenSource();
         CancellationToken token = _pingCts.Token; // capture once – StopPingAsync disposes/nullifies the CTS
         _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // Official app sends PING once in capture, but keepalive every ~15s
-        
+
+        // Generation guard: when a reconnect starts a new keepalive loop,
+        // this loop is superseded. Its in-flight write failure must NOT
+        // fire WriteFailed – that would tear down the freshly rebuilt link.
+        int generation = ++_pingGeneration;
+
         // Start the ping loop and store the task for proper disposal
         _pingTask = Task.Run(async () =>
         {
@@ -281,7 +290,26 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
                     // within 23ms fills the BLE queue and causes write failures.
                     if (DateTimeOffset.UtcNow - _lastNavUpdateAt < TimeSpan.FromSeconds(5))
                         continue;
-                    await SendPingAsync(device);
+                    try
+                    {
+                        await SendPingAsync(device);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (generation == _pingGeneration && !_isDisposed)
+                        {
+                            // Current loop: the link is dead (iOS silently dropped it
+                            // in the background) – let the manager reconnect.
+                            Log.Error(ex, "MV Agusta: Failed to send PING keepalive – link likely dead");
+                            WriteFailed?.Invoke(ex);
+                        }
+                        else
+                        {
+                            // Superseded loop (reconnect already started): ignore,
+                            // the new loop owns the keepalive now.
+                            Log.Debug(ex, "MV Agusta: PING failure on superseded keepalive loop – ignoring");
+                        }
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -328,54 +356,16 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 
     /// <summary>
     /// Sends a PING keepalive frame (official MV Ride keepalive mechanism).
-    /// PING format: \rPING\u001E\u001E\u001E\r (4 fields, all empty after command)
+    /// PING format: \rPING\u001E\u001E\u001E\r (4 fields, all empty after command).
+    /// Failures propagate to the calling loop, which decides (generation guard)
+    /// whether to trigger a reconnect or ignore a superseded loop.
     /// </summary>
     private async Task SendPingAsync(IBleConnectedDevice device)
     {
-        try
-        {
-            byte[] frame = BuildFrame(Commands.PING, "", "", "");
-            Log.Information("BLE-LOGGER: {Line}", $"SEND PING frame: {BitConverter.ToString(frame)}");
-            await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
-            Log.Debug("MV Agusta: Sent PING keepalive");
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "MV Agusta: Failed to send PING keepalive");
-            // The link is dead (iOS silently dropped it in the background) –
-            // let the manager reconnect instead of pinging into the void.
-            WriteFailed?.Invoke(ex);
-        }
-    }
-
-    /// <summary>
-    /// Sends a GUI1 response frame (Write with Response) to acknowledge the bike's GUI1 notification.
-    /// This is CRITICAL for keeping the navigation session alive.
-    /// The bike sends GUI1 notifications on handle 0x002A with a session ID.
-    /// We must respond with a GUI1 Write on the SAME handle (0x002A) using withResponse: true.
-    /// </summary>
-    private async Task SendGui1ResponseAsync(string bikeSessionId)
-    {
-        try
-        {
-            // GUI1 response format: \rGUI1\x1e<session_id>\x1e\x1e\r
-            // Use the bike's session ID (echo pattern - confirmed working in 08.08 test)
-            byte[] frame = BuildFrame(Commands.GUI1, bikeSessionId, "", "");
-            Log.Information("BLE-LOGGER: {Line}", $"SEND GUI1 RESPONSE frame: {BitConverter.ToString(frame)}");
-            
-            // IMPORTANT: Write WITH Response on the GUI1 characteristic (0x002A)
-            // Use the stored connected device
-            if (_connectedDevice != null)
-            {
-                await _connectedDevice.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: true);
-            }
-            
-            Log.Debug("MV Agusta: Sent GUI1 response for session {SessionId}", bikeSessionId);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "MV Agusta: Failed to send GUI1 response");
-        }
+        byte[] frame = BuildFrame(Commands.PING, "", "", "");
+        Log.Information("BLE-LOGGER: {Line}", $"SEND PING frame: {BitConverter.ToString(frame)}");
+        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
+        Log.Debug("MV Agusta: Sent PING keepalive");
     }
 
     // ─── Incoming Data Handling ──────────────────────────────────────────
@@ -384,18 +374,14 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     {
         if (TryParseFrame(data, out string command, out string[] fields))
         {
-            // Handle GUI1 heartbeat from bike - update session ID AND respond with GUI1 write (with response)
+            // GUI1 notification from the bike: capture the session ID for
+            // reference/logging only. The phone intentionally never writes
+            // GUI1 back – PING keepalive + NAVI/SM frames keep the session alive
+            // (official MV Ride capture shows 0 GUI1 writes from the phone).
             if (command == "GUI1" && fields.Length > 0)
             {
                 _lastBikeSessionId = fields[0];
                 Log.Information("BLE-LOGGER: {Line}", $"RECV GUI1 frame: {BitConverter.ToString(data)}, sessionId={fields[0]}");
-
-                // GUI1 response is OPTIONAL (A/B test switch). The official MV Ride capture
-                // shows the phone NEVER writes GUI1 – PING + NAVI/SM frames suffice.
-                if (Gui1ResponseEnabled)
-                {
-                    _ = Task.Run(() => SendGui1ResponseAsync(fields[0]));
-                }
             }
             // Logic to handle the parsed frame
             // In a real scenario, this might trigger an event or update a state machine.
