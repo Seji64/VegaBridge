@@ -614,8 +614,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _routeWayIds = results
                 .Where(r => r?.Edges is { Count: > 0 })
                 .SelectMany(r => r!.Edges!
-                    .Where(e => e.EdgeInfo?.WayId > 0)
-                    .Select(e => e.EdgeInfo!.WayId))
+                    .Where(e => e.WayId > 0)
+                    .Select(e => e.WayId))
                 .Distinct()
                 .ToList();
             Log.Information("Route way_id index: {Count} unique ways from {Samples} samples",
@@ -1001,10 +1001,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             // Collect ALL edge info for logging
             var edges = results[0]!.Edges!
-                .Where(e => e.EdgeInfo?.WayId > 0)
+                .Where(e => e.WayId > 0)
                 .Select(e => new {
-                    WayId = e.EdgeInfo!.WayId,
-                    Names = e.EdgeInfo.Names ?? [],
+                    WayId = e.WayId,
                     PercentAlong = e.PercentAlong,
                     Side = e.SideOfStreet
                 })
@@ -1023,7 +1022,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             // Log what the rider is on
             string edgeSummary = string.Join("; ", edges.Select(e =>
-                $"way={e.WayId} [{string.Join(",", e.Names)}] along={e.PercentAlong:F2} side={e.Side}"));
+                $"way={e.WayId} along={e.PercentAlong:F2} side={e.Side}"));
             Log.Information("Locate: rider on {Count} edges: {Summary}", edges.Count, edgeSummary);
 
             // Sliding window
