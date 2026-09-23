@@ -21,6 +21,22 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     private DateTimeOffset _lastStatusSent = DateTimeOffset.MinValue;
     private readonly TimeSpan _statusThrottleInterval = TimeSpan.FromMilliseconds(500);
 
+    // ── Send policy: on-change + backup interval ──────────────────────────
+    // Field log 2026-09-23: sustained ~2–3 frames/s (NAVI+SM per GPS tick)
+    // coincided with the peripheral's W2R queue clogging for 2.5–4.3 min.
+    // The official MV app is event-driven (NAVI on maneuver change, SM on
+    // status change) – our 1 Hz updates were VegaBridge's own traffic.
+    // New policy: NAVI only when the instruction itself changes, SM only
+    // when a value crosses its display bucket, plus one full resend every
+    // 30 s as backup. PING (15 s) is the only constant traffic.
+    private string _lastNaviSignature = "";
+    private int _lastSmRemBucket = int.MinValue;
+    private int _lastSmDistTurnBucket = int.MinValue;
+    private DateTimeOffset _lastFullUpdateAt = DateTimeOffset.MinValue;
+    private static readonly TimeSpan BackupUpdateInterval = TimeSpan.FromSeconds(30);
+    private const int SmRemBucketM = 100;     // SM f2: remaining distance, 100 m buckets
+    private const int SmDistTurnBucketM = 25;  // SM f3: distance to turn, 25 m buckets
+
     // Serializes BLE frame writes so concurrent update chains cannot interleave.
     // Send-Gate: if 1, a BLE write is in progress. New frames are discarded
     // immediately (backpressure) instead of queuing behind a stuck write.
@@ -72,6 +88,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         _isNavigating = true;
         _currentStatus = null;
+        ResetSendPolicyState(); // new session – first update must always send
 
         NavigationStartInput input = new()
         {
@@ -112,6 +129,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     /// Re-sends the current maneuver + status to the bike after a reconnect.
     /// Called when the app returns to the foreground and the BLE link was
     /// rebuilt – the display otherwise keeps showing stale instructions.
+    /// force: true bypasses the on-change dedup.
     /// </summary>
     public async Task ResendCurrentStateAsync()
     {
@@ -119,7 +137,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             return;
 
         Log.Information("Resending navigation state after reconnect");
-        await SendUpdateAsync();
+        await SendUpdateAsync(force: true);
     }
 
     /// <inheritdoc />
@@ -144,6 +162,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
+        ResetSendPolicyState();
 
         await _bleManager.ExecuteNavigationFinishAsync();
     }
@@ -154,6 +173,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
+        ResetSendPolicyState();
 
         await _bleManager.ExecuteNavigationStopAsync();
     }
@@ -167,7 +187,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
     // -- Helpers
 
-    private async Task SendUpdateAsync()
+    private async Task SendUpdateAsync(bool force = false)
     {
         if (!_isNavigating || _currentManeuver == null || _currentStatus == null)
             return;
@@ -203,6 +223,25 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             IsFinal = maneuver.Index >= maneuver.Total - 1 && status.DistanceToNextTurnM <= 0
         };
 
+        // On-change dedup + 30 s backup resend (send-policy comment above).
+        // force=true (reconnect/foreground) always sends – the bike's
+        // display may be stale.
+        string naviSignature = $"{maneuver.Index}:{input.ManeuverIcon}:{input.InstructionText}:{street}";
+        int remBucket = (int)(status.RemainingDistanceKm * 1000) / SmRemBucketM;
+        int distTurnBucket = (int)(status.DistanceToNextTurnM / SmDistTurnBucketM);
+        double sinceBackup = (DateTimeOffset.UtcNow - _lastFullUpdateAt).TotalSeconds;
+
+        if (!force &&
+            naviSignature == _lastNaviSignature &&
+            remBucket == _lastSmRemBucket &&
+            distTurnBucket == _lastSmDistTurnBucket &&
+            sinceBackup < BackupUpdateInterval.TotalSeconds)
+        {
+            Log.Debug("Navigation update skipped – no NAVI/SM change (backup in {S:F0}s)",
+                BackupUpdateInterval.TotalSeconds - sinceBackup);
+            return;
+        }
+
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE INPUT: icon={input.ManeuverIcon}, instr={input.InstructionText}, street={input.StreetName}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h, remDist={input.RemainingDistanceKm:F1}km, idx={input.CurrentManeuverIndex}/{input.TotalManeuvers}");
 
         // Send-Gate: if a BLE write is already in progress, discard this frame
@@ -217,11 +256,27 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         {
             await _bleManager.ExecuteNavigationActionAsync(
                 "SendNavigationUpdateAsync", input);
+
+            // Remember what went out. Even if the write failed, the 30 s
+            // backup interval re-sends – a stuck queue cannot starve the
+            // display between resends.
+            _lastNaviSignature = naviSignature;
+            _lastSmRemBucket = remBucket;
+            _lastSmDistTurnBucket = distTurnBucket;
+            _lastFullUpdateAt = DateTimeOffset.UtcNow;
         }
         finally
         {
             Interlocked.Exchange(ref _isWriting, 0);
         }
+    }
+
+    private void ResetSendPolicyState()
+    {
+        _lastNaviSignature = "";
+        _lastSmRemBucket = int.MinValue;
+        _lastSmDistTurnBucket = int.MinValue;
+        _lastFullUpdateAt = DateTimeOffset.MinValue;
     }
 
     // -- Helpers
