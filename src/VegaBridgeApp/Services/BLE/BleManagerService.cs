@@ -30,6 +30,14 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     // Cooldown: prevent reconnect storms when BLE writes fail repeatedly.
     private DateTimeOffset _lastInvalidateAt = DateTimeOffset.MinValue;
     private static readonly TimeSpan InvalidateCooldown = TimeSpan.FromSeconds(15);
+
+    // Stale-write watchdog (see ReportNavWriteStale): consecutive failed
+    // navigation writes are counted; after ~30 s the peripheral is known
+    // to be stuck (W2R queue clogged) and the rider needs to know.
+    private int _consecutiveNavWriteFailures;
+    private DateTimeOffset _navWriteStreakStartUtc = DateTimeOffset.MinValue;
+    private bool _navWriteDegradedReported;
+    private static readonly TimeSpan NavWriteStaleThreshold = TimeSpan.FromSeconds(30);
     // Expose active plugin for advanced access (e.g., session ID)
     public IBleDevicePlugin? ActivePlugin => _activePlugin;
 
@@ -478,6 +486,20 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     Log.Warning("Unknown navigation action: {Action}", action);
                     break;
             }
+
+            // A successful write means the peripheral accepts frames again –
+            // any stale-write streak is over (watchdog).
+            if (_consecutiveNavWriteFailures > 0)
+            {
+                if (_navWriteDegradedReported)
+                {
+                    Log.Information("MV Agusta: navigation writes recovered after {Count} consecutive failures", _consecutiveNavWriteFailures);
+                    UpdateError(string.Empty, isCritical: false);
+                }
+                _consecutiveNavWriteFailures = 0;
+                _navWriteStreakStartUtc = DateTimeOffset.MinValue;
+                _navWriteDegradedReported = false;
+            }
         }
         catch (Exception ex)
         {
@@ -485,8 +507,42 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             // entire 1s tick) and don't reconnect (let Shiny's disconnect
             // events handle real connection loss). Just log and let the
             // next GPS tick send a fresh frame.
-            Log.Debug(ex, "Write failed for {Action} – next tick will retry", action);
+            _consecutiveNavWriteFailures++;
+            if (_consecutiveNavWriteFailures == 1)
+                _navWriteStreakStartUtc = DateTimeOffset.UtcNow;
+            Log.Debug(ex, "Write failed for {Action} ({Count} consecutive) – next tick will retry", action, _consecutiveNavWriteFailures);
+            ReportNavWriteStale();
         }
+    }
+
+    /// <summary>
+    /// Stale-write watchdog (field observation 2026-09-23, B10): the
+    /// peripheral can stop accepting W2R writes for 2.5–4.3 min without
+    /// any disconnect event – PINGs are suppressed while writes fail, so
+    /// nothing else detects the stuck queue and the display freezes on the
+    /// last instruction. After ~30 s of consecutive failed navigation
+    /// writes: escalate to Warning + non-critical UI status, then re-log
+    /// every 10th failure so long windows stay visible. Deliberate no
+    /// auto-reconnect: the field log proved a fresh GATT connect does not
+    /// clear the stuck queue (it self-recovered after ~4 min).
+    /// </summary>
+    private void ReportNavWriteStale()
+    {
+        if (_navWriteDegradedReported)
+        {
+            if (_consecutiveNavWriteFailures % 10 == 0)
+                Log.Warning("MV Agusta: still stale – {Count} consecutive failed navigation writes (~{Seconds:F0}s), display likely frozen on last instruction",
+                    _consecutiveNavWriteFailures, (DateTimeOffset.UtcNow - _navWriteStreakStartUtc).TotalSeconds);
+            return;
+        }
+
+        if (DateTimeOffset.UtcNow - _navWriteStreakStartUtc < NavWriteStaleThreshold) return;
+
+        _navWriteDegradedReported = true;
+        double seconds = (DateTimeOffset.UtcNow - _navWriteStreakStartUtc).TotalSeconds;
+        Log.Warning("MV Agusta: {Count} consecutive failed navigation writes (~{Seconds:F0}s) – peripheral not accepting W2R writes, display likely frozen on last instruction",
+            _consecutiveNavWriteFailures, seconds);
+        UpdateError("BLE link degraded – navigation updates may not reach the bike display.", isCritical: false);
     }
 
     /// <summary>

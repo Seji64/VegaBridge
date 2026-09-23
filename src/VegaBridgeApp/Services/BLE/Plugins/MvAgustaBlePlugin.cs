@@ -16,6 +16,15 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     private const byte Cr = 0x0D;
     private const byte Rs = 0x1E;
 
+    /// <summary>
+    /// PING keepalive cadence in seconds. The official iOS app sent PING only
+    /// once in 342 s of captured navigation traffic (spec §6.1) – a constant
+    /// 15 s loop was our own expansion. 30 s keeps bike-side session
+    /// keepalive + link-health detection (PING fail → reconnect) at half the
+    /// traffic of the former 15 s loop.
+    /// </summary>
+    private const int PingKeepaliveSeconds = 30;
+
     public string ManufacturerId => "MVAGUSTA";
     public string DisplayName => "MV Agusta";
     public string BrandName => "MV AGUSTA";
@@ -63,16 +72,36 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     /// </summary>
     public string? LastBikeSessionId => _lastBikeSessionId;
 
+    // BLE device names start with the class prefix the official MV Ride app
+    // uses for scanning (bike_classes.json, v1.4.3: 10 prefixes, 87 models,
+    // e.g. "BRUTALE_1000", "SUPERVELOCE_800", "LXP_"). "MV" stays as the
+    // generic catch-all; the ServiceUuid fallback (BleManagerService)
+    // covers OS-connected peripherals with unknown names.
+    private static readonly string[] DeviceNamePatterns =
+    [
+        "MV",
+        "BRUTALE",
+        "DRAGSTER_800",
+        "EV_",
+        "F3_800",
+        "LXP_",
+        "RUSH_1000",
+        "SUPERVELOCE",
+        "TURISMO_VELOCE"
+    ];
+
     public bool IsCompatible(BleDeviceInfo device)
     {
         // BleDeviceInfo.Name is declared `required string`, but OS-connected
         // peripherals can still surface with a null name before iOS has read
         // it (see UpdateDeviceList: Name = p.Name!). Defensive null-checks
         // are required at runtime despite the non-nullable declaration.
-        // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
+        string? name = device.Name;
+        if (string.IsNullOrWhiteSpace(name)) return false;
+
         // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
-        return device.Name?.Contains("MV", StringComparison.OrdinalIgnoreCase) == true ||
-               device.Name?.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase) == true;
+        return DeviceNamePatterns.Any(pattern =>
+                   name.Contains(pattern, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)
@@ -261,7 +290,11 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     }
 
     /// <summary>
-    /// Starts the PING keepalive timer (sends every ~15 seconds, matching official app behavior).
+    /// Starts the PING keepalive timer (sends every 30 s).
+    /// The official app sent PING only ONCE in the pklg capture – a 15 s loop
+    /// was VegaBridge's own expansion and our biggest deviation from the
+    /// official traffic profile (spec §6.1). 30 s keeps the bike-side
+    /// session-keepalive + link-health detection at half the traffic.
     /// </summary>
     private async Task StartPingAsync(IBleConnectedDevice device)
     {
@@ -270,7 +303,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         
         _pingCts = new CancellationTokenSource();
         CancellationToken token = _pingCts.Token; // capture once – StopPingAsync disposes/nullifies the CTS
-        _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // Official app sends PING once in capture, but keepalive every ~15s
+        _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(PingKeepaliveSeconds));
 
         // Generation guard: when a reconnect starts a new keepalive loop,
         // this loop is superseded. Its in-flight write failure must NOT
