@@ -16,6 +16,15 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     private const byte Cr = 0x0D;
     private const byte Rs = 0x1E;
 
+    /// <summary>
+    /// PING keepalive cadence in seconds. The official iOS app sent PING only
+    /// once in 342 s of captured navigation traffic (spec §6.1) – a constant
+    /// 15 s loop was our own expansion. 30 s keeps bike-side session
+    /// keepalive + link-health detection (PING fail → reconnect) at half the
+    /// traffic of the former 15 s loop.
+    /// </summary>
+    private const int PingKeepaliveSeconds = 30;
+
     public string ManufacturerId => "MVAGUSTA";
     public string DisplayName => "MV Agusta";
     public string BrandName => "MV AGUSTA";
@@ -281,7 +290,11 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     }
 
     /// <summary>
-    /// Starts the PING keepalive timer (sends every ~15 seconds, matching official app behavior).
+    /// Starts the PING keepalive timer (sends every 30 s).
+    /// The official app sent PING only ONCE in the pklg capture – a 15 s loop
+    /// was VegaBridge's own expansion and our biggest deviation from the
+    /// official traffic profile (spec §6.1). 30 s keeps the bike-side
+    /// session-keepalive + link-health detection at half the traffic.
     /// </summary>
     private async Task StartPingAsync(IBleConnectedDevice device)
     {
@@ -290,7 +303,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         
         _pingCts = new CancellationTokenSource();
         CancellationToken token = _pingCts.Token; // capture once – StopPingAsync disposes/nullifies the CTS
-        _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // Official app sends PING once in capture, but keepalive every ~15s
+        _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(PingKeepaliveSeconds));
 
         // Generation guard: when a reconnect starts a new keepalive loop,
         // this loop is superseded. Its in-flight write failure must NOT

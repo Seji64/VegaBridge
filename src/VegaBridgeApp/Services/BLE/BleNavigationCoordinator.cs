@@ -27,8 +27,9 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     // The official MV app is event-driven (NAVI on maneuver change, SM on
     // status change) – our 1 Hz updates were VegaBridge's own traffic.
     // New policy: NAVI only when the instruction itself changes, SM only
-    // when a value crosses its distance bucket, plus one full resend every
-    // 30 s as backup. PING (15 s) is the only constant traffic.
+    // when a value crosses its distance bucket (suppressed at standstill,
+    // mirroring the official app's standstill pause), plus one full resend
+    // every 30 s as backup. PING (30 s) is the only constant traffic.
     //
     // SM buckets are distance-adaptive (field requirement): within 2 km of
     // the next maneuver the display must stay fresh – 50 m buckets give
@@ -44,6 +45,11 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     private const int SmNearZoneM = 2000;  // approach zone: next maneuver within 2 km
     private const int SmNearBucketM = 50;  // approach zone: 50 m buckets
     private const int SmFarBucketM = 200;  // beyond 2 km: 200 m buckets
+    // Official app pauses SM/NAVI traffic when stopped (pklg gaps up to >10 s,
+    // spec §6.1). Below this speed, SM distance-bucket crossings (GPS jitter
+    // at a red light) are NOT a send trigger – only NAVI signature changes
+    // and the 30 s backup resend go out.
+    private const double StandstillKmh = 5;
 
     // Serializes BLE frame writes so concurrent update chains cannot interleave.
     // Send-Gate: if 1, a BLE write is in progress. New frames are discarded
@@ -240,15 +246,20 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         int remBucket = (int)(status.RemainingDistanceKm * 1000) / smBucketM;
         int distTurnBucket = (int)(status.DistanceToNextTurnM / smBucketM);
         double sinceBackup = (DateTimeOffset.UtcNow - _lastFullUpdateAt).TotalSeconds;
+        bool standstill = status.SpeedKmh < StandstillKmh;
+        bool smBucketChanged = remBucket != _lastSmRemBucket || distTurnBucket != _lastSmDistTurnBucket;
 
+        // Standstill throttle: while stopped, GPS jitter can cross distance
+        // buckets – those are no send trigger. NAVI changes and the 30 s
+        // backup resend still flow, so the display stays fresh and the link
+        // keeps its periodic health check.
         if (!force &&
             naviSignature == _lastNaviSignature &&
-            remBucket == _lastSmRemBucket &&
-            distTurnBucket == _lastSmDistTurnBucket &&
+            !(smBucketChanged && !standstill) &&
             sinceBackup < BackupUpdateInterval.TotalSeconds)
         {
-            Log.Debug("Navigation update skipped – no NAVI/SM change (backup in {S:F0}s)",
-                BackupUpdateInterval.TotalSeconds - sinceBackup);
+            Log.Debug("Navigation update skipped – no NAVI/SM change (backup in {S:F0}s, standstill={S})",
+                BackupUpdateInterval.TotalSeconds - sinceBackup, standstill);
             return;
         }
 
