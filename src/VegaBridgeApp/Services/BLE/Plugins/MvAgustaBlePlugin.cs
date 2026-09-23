@@ -63,16 +63,36 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     /// </summary>
     public string? LastBikeSessionId => _lastBikeSessionId;
 
+    // BLE device names start with the class prefix the official MV Ride app
+    // uses for scanning (bike_classes.json, v1.4.3: 10 prefixes, 87 models,
+    // e.g. "BRUTALE_1000", "SUPERVELOCE_800", "LXP_"). "MV" stays as the
+    // generic catch-all; the ServiceUuid fallback (BleManagerService)
+    // covers OS-connected peripherals with unknown names.
+    private static readonly string[] DeviceNamePatterns =
+    [
+        "MV",
+        "BRUTALE",
+        "DRAGSTER_800",
+        "EV_",
+        "F3_800",
+        "LXP_",
+        "RUSH_1000",
+        "SUPERVELOCE",
+        "TURISMO_VELOCE"
+    ];
+
     public bool IsCompatible(BleDeviceInfo device)
     {
         // BleDeviceInfo.Name is declared `required string`, but OS-connected
         // peripherals can still surface with a null name before iOS has read
         // it (see UpdateDeviceList: Name = p.Name!). Defensive null-checks
         // are required at runtime despite the non-nullable declaration.
-        // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
+        string? name = device.Name;
+        if (string.IsNullOrWhiteSpace(name)) return false;
+
         // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
-        return device.Name?.Contains("MV", StringComparison.OrdinalIgnoreCase) == true ||
-               device.Name?.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase) == true;
+        return DeviceNamePatterns.Any(pattern =>
+                   name.Contains(pattern, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)
