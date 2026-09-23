@@ -27,15 +27,23 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     // The official MV app is event-driven (NAVI on maneuver change, SM on
     // status change) – our 1 Hz updates were VegaBridge's own traffic.
     // New policy: NAVI only when the instruction itself changes, SM only
-    // when a value crosses its display bucket, plus one full resend every
+    // when a value crosses its distance bucket, plus one full resend every
     // 30 s as backup. PING (15 s) is the only constant traffic.
+    //
+    // SM buckets are distance-adaptive (field requirement): within 2 km of
+    // the next maneuver the display must stay fresh – 50 m buckets give
+    // ~1.8 s updates at 100 km/h, ~6 s at 30 km/h (high-frequency without
+    // the old 1 Hz overload). Beyond 2 km, 200 m is enough (~7 s at 100
+    // km/h, ~24 s at 30 km/h). The bucket-size change at the 2 km boundary
+    // changes the bucket index and triggers one immediate update.
     private string _lastNaviSignature = "";
     private int _lastSmRemBucket = int.MinValue;
     private int _lastSmDistTurnBucket = int.MinValue;
     private DateTimeOffset _lastFullUpdateAt = DateTimeOffset.MinValue;
     private static readonly TimeSpan BackupUpdateInterval = TimeSpan.FromSeconds(30);
-    private const int SmRemBucketM = 100;     // SM f2: remaining distance, 100 m buckets
-    private const int SmDistTurnBucketM = 25;  // SM f3: distance to turn, 25 m buckets
+    private const int SmNearZoneM = 2000;  // approach zone: next maneuver within 2 km
+    private const int SmNearBucketM = 50;  // approach zone: 50 m buckets
+    private const int SmFarBucketM = 200;  // beyond 2 km: 200 m buckets
 
     // Serializes BLE frame writes so concurrent update chains cannot interleave.
     // Send-Gate: if 1, a BLE write is in progress. New frames are discarded
@@ -225,10 +233,12 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         // On-change dedup + 30 s backup resend (send-policy comment above).
         // force=true (reconnect/foreground) always sends – the bike's
-        // display may be stale.
+        // display may be stale. SM buckets switch between 50 m (within
+        // 2 km of the next maneuver) and 200 m (beyond) – see constants.
         string naviSignature = $"{maneuver.Index}:{input.ManeuverIcon}:{input.InstructionText}:{street}";
-        int remBucket = (int)(status.RemainingDistanceKm * 1000) / SmRemBucketM;
-        int distTurnBucket = (int)(status.DistanceToNextTurnM / SmDistTurnBucketM);
+        int smBucketM = status.DistanceToNextTurnM <= SmNearZoneM ? SmNearBucketM : SmFarBucketM;
+        int remBucket = (int)(status.RemainingDistanceKm * 1000) / smBucketM;
+        int distTurnBucket = (int)(status.DistanceToNextTurnM / smBucketM);
         double sinceBackup = (DateTimeOffset.UtcNow - _lastFullUpdateAt).TotalSeconds;
 
         if (!force &&
