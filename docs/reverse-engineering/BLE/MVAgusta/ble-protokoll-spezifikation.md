@@ -267,6 +267,28 @@ Field 1 ist eine **Hex-Zeichenkette** = roher Dashboard-Payload: `HeaderByte` + 
 
 **Kein expliziter "Navigation Mode Activation" Befehl** — Navigation startet implizit mit DEST/NAVI/SM Frames.
 
+### 6.1 Gemessener Sende-Profile der offiziellen App (`mvride_nav.pklg`, 342,6 s Nav-Segment)
+
+Aus dem iPad-Capture der **offiziellen** MV Ride App (tshark, alle 621 Writes auf `0x002D`/`0x52`):
+
+| Befehl | Count | distinct Payloads | Verhalten |
+|--------|------:|------------------:|-----------|
+| `NAVI` | 289 | 8 | **~1 Hz im Pair mit SM**; Content bleibt oft gleich (nur 2,8 % der Sends tragen eine neue Anweisung) |
+| `SM` | 289 | 195 | 4 ms nach NAVI; Distanz-Feld läuft runter |
+| `SM1` | 11 | 6 | selten (Countdown) |
+| `RENAVI` / `DEST` / `REM` | 10 / 10 / 10 | – | Routing-/Ziel-Events |
+| `PING` | **1** | 1 | **einmalig** (t≈15 s), **kein** 15-s-Keepalive |
+| `FINISH` | 1 | 1 | Ende |
+| **Σ** | **621** | | **1,81 Frames/s Ø** |
+
+**NAVI-Pair-Lücken (n=288, Median 1,00 s):** 89,2 % in 0,5–1,5 s (Fahrtradio ≈1 Hz) · 8,3 % in 1,5–3 s · 1,7 % in 3–10 s · 0,3 % >10 s (Standpausen, z. B. Ampel).
+
+**Folgerungen für VegaBridge:**
+- Die offizielle App ist **kein** Delta-/On-Change-Sender: sie resendet das volle NAVI+SM-Paar ~1×/s, auch wenn sich die Anweisung nicht geändert hat (97 % identische NAVI-Sends). → Unsere **On-Change-Politik sendet weniger** als die offizielle App (gut für den Link).
+- Die offizielle App **pausiert bei Stand** (Lücken bis >10 s). Optional: `SendUpdateAsync` bei Speed≈0 drosseln, um dies zu spiegeln.
+- **PING 15-s-Loop ist VegaBridge-eigene Erweiterung** (offizielle App: genau 1× PING). Damit ist der PING-Loop unsere größte Abweichung vom offiziellen Traffic-Profil und reiner Zusatz-Traffic.
+- Da unsere frühere 1-Hz-Politik (NAVI+SM 1 Hz + PING) ≈2,1 Frames/s hatte und die offizielle App 1,81 Frames/s ohne Stau schafft, ist die Hypothese „wir senden zu viel" **nicht** der primäre Stau-Verdächtige; der Stuck-Queue ist eher ein transienter Link-Degradation (B10, 80–100 km/h), den Shiny-BLE schlecht verkraftet.
+
 ---
 
 ## 7. Off-Route Erkennung
