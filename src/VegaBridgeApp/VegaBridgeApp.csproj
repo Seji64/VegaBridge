@@ -87,7 +87,7 @@
         <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
         <PackageReference Include="Shiny.BluetoothLE" Version="5.7.2" />
-        <PackageReference Include="Shiny.Extensions.Stores" Version="5.1.5" />
+        <PackageReference Include="Shiny.Extensions.Stores" Version="5.2.1" />
         <PackageReference Include="Shiny.Hosting.Maui" Version="5.7.2" />
         <PackageReference Include="Shiny.Locations" Version="5.7.2" />
     </ItemGroup>
