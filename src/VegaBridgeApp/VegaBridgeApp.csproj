@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <PropertyGroup>
         <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
@@ -36,7 +36,7 @@
 
         <!-- Versions -->
         <ApplicationDisplayVersion>1.0.4</ApplicationDisplayVersion>
-        <ApplicationVersion>7</ApplicationVersion>
+        <ApplicationVersion>6</ApplicationVersion>
 
         <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
         <WindowsPackageType>None</WindowsPackageType>
@@ -75,21 +75,21 @@
 
     <ItemGroup>
         <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="9.1.0" />
-        <PackageReference Include="CommunityToolkit.Maui" Version="15.0.1" />
-        <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.110" />
-        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.110" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.12" />
-        <PackageReference Include="Microsoft.AspNetCore.WebUtilities" Version="10.0.12" />
-        <PackageReference Include="MudBlazor" Version="9.10.0" />
+        <PackageReference Include="CommunityToolkit.Maui" Version="15.0.0" />
+        <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.90" />
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.100" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.11" />
+        <PackageReference Include="Microsoft.AspNetCore.WebUtilities" Version="10.0.11" />
+        <PackageReference Include="MudBlazor" Version="9.8.0" />
         <PackageReference Include="OpenLayers.Blazor" Version="2.6.0" />
         <PackageReference Include="Flurl.Http" Version="4.0.2" />
-        <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.10.0" />
+        <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.9.0" />
         <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
-        <PackageReference Include="Shiny.BluetoothLE" Version="5.7.2" />
-        <PackageReference Include="Shiny.Extensions.Stores" Version="5.3.0" />
-        <PackageReference Include="Shiny.Hosting.Maui" Version="5.7.2" />
-        <PackageReference Include="Shiny.Locations" Version="5.7.2" />
+        <PackageReference Include="Shiny.BluetoothLE" Version="5.4.0" />
+        <PackageReference Include="Shiny.Extensions.Stores" Version="5.1.5" />
+        <PackageReference Include="Shiny.Hosting.Maui" Version="5.4.0" />
+        <PackageReference Include="Shiny.Locations" Version="5.4.0" />
     </ItemGroup>
 
 </Project>

@@ -53,11 +53,6 @@ public sealed class DebugLogSink(int maxLines = 60_000) : ILogEventSink // ~100 
         try
         {
             line = $"{logEvent.Timestamp:HH:mm:ss.fff} {logEvent.Level}: {logEvent.RenderMessage()}";
-            // RenderMessage() drops logEvent.Exception – without it, Shiny
-            // write failures were invisible in exported logs (field log
-            // 2026-09-23: 173 stuck W2R writes, no exception text anywhere).
-            if (logEvent.Exception is { } exception)
-                line += $" [{exception.GetType().Name}: {exception.Message}]";
         }
         catch (Exception)
         {

@@ -267,28 +267,6 @@ Field 1 ist eine **Hex-Zeichenkette** = roher Dashboard-Payload: `HeaderByte` + 
 
 **Kein expliziter "Navigation Mode Activation" Befehl** — Navigation startet implizit mit DEST/NAVI/SM Frames.
 
-### 6.1 Gemessener Sende-Profile der offiziellen App (`mvride_nav.pklg`, 342,6 s Nav-Segment)
-
-Aus dem iPad-Capture der **offiziellen** MV Ride App (tshark, alle 621 Writes auf `0x002D`/`0x52`):
-
-| Befehl | Count | distinct Payloads | Verhalten |
-|--------|------:|------------------:|-----------|
-| `NAVI` | 289 | 8 | **~1 Hz im Pair mit SM**; Content bleibt oft gleich (nur 2,8 % der Sends tragen eine neue Anweisung) |
-| `SM` | 289 | 195 | 4 ms nach NAVI; Distanz-Feld läuft runter |
-| `SM1` | 11 | 6 | selten (Countdown) |
-| `RENAVI` / `DEST` / `REM` | 10 / 10 / 10 | – | Routing-/Ziel-Events |
-| `PING` | **1** | 1 | **einmalig** (t≈15 s), **kein** 15-s-Keepalive |
-| `FINISH` | 1 | 1 | Ende |
-| **Σ** | **621** | | **1,81 Frames/s Ø** |
-
-**NAVI-Pair-Lücken (n=288, Median 1,00 s):** 89,2 % in 0,5–1,5 s (Fahrtradio ≈1 Hz) · 8,3 % in 1,5–3 s · 1,7 % in 3–10 s · 0,3 % >10 s (Standpausen, z. B. Ampel).
-
-**Folgerungen für VegaBridge:**
-- Die offizielle App ist **kein** Delta-/On-Change-Sender: sie resendet das volle NAVI+SM-Paar ~1×/s, auch wenn sich die Anweisung nicht geändert hat (97 % identische NAVI-Sends). → Unsere **On-Change-Politik sendet weniger** als die offizielle App (gut für den Link).
-- Die offizielle App **pausiert bei Stand** (Lücken bis >10 s). Optional: `SendUpdateAsync` bei Speed≈0 drosseln, um dies zu spiegeln.
-- **PING 15-s-Loop ist VegaBridge-eigene Erweiterung** (offizielle App: genau 1× PING). Damit ist der PING-Loop unsere größte Abweichung vom offiziellen Traffic-Profil und reiner Zusatz-Traffic.
-- Da unsere frühere 1-Hz-Politik (NAVI+SM 1 Hz + PING) ≈2,1 Frames/s hatte und die offizielle App 1,81 Frames/s ohne Stau schafft, ist die Hypothese „wir senden zu viel" **nicht** der primäre Stau-Verdächtige. **Korrektur v4.3:** Root-Cause ist der **Shiny-BLE 5.4.x W2R-Deadlock (GitHub #1657, fix in 5.6.3)**: ein Write-without-Response bei vollem CoreBluetooth-Sendepuffer hielt die Peripheral-Operation-Lock, weil der einmalige `peripheralIsReadyToSendWriteWithoutResponse`-Callback im Race zwischen Check und Subscribe verloren ging – alle späteren Reads/Writes/Notifications stauten sich bis zum Link-Reset (spontane Genesung). `Shiny.BluetoothLE` 5.4.0 → **5.7.2** (inkl. #1657 + #1653 Scan-Fix + #1652 Auto-Connect/Adapter-Power-Cycle).
-
 ---
 
 ## 7. Off-Route Erkennung
@@ -432,5 +410,3 @@ Detaillierte Anleitung für BLE-Analyse mit iPhone + LightBlue App:
 | 2026-08-09 | v3.4 | **NAVI Frame korrigiert**: 4 Felder (NAVI|icon|navigationGuide|intersectionName) mit 60-Zeichen-Limit. `navigationGuide` = `direction.getDescription()`, `intersectionName` = `direction.getRoadName()` (Straße **auf die** abgebogen wird). Plugin & Coordinator aktualisiert. Testsequenzen korrigiert. |
 | 2026-08-09 | v4.0 | **Frame-Formate aus pklg-Analyse (tshark) korrigiert**: DEST = `DEST|\x1e|lon\x1e|lat\x1e|` (Feld 1 leer!), REM = `REM|\x1e|<meter>\x1e|` (3 RS = 4 Felder, trailing empty), RENAVI = alle Felder leer, FINISH = 3 RS (4 Felder), PING = `PING|\x1e|\x1e|\x1e|` (einmalig im Capture). **Phone sendet NIEMALS GUI1** — alle GUI1 sind Bike→Phone Notifications. GUI1-Heartbeat entfernt, PING-Keepalive implementiert. MvAgustaBlePlugin: DEST/REM/RENAVI/FINISH/PING korrigiert, GUI1 Write entfernt. |
 | 2026-08-20 | v4.1 | **GUI1-Mystery gelöst (tshark × APK-Kreuzanalyse, §2/§4/§5.1/§5.10/§5.11/§6/§12):** GUI1 ist **kein** „Auth Keepalive“ mit Session-ID, sondern ein **bidirektionaler Dashboard-Kanal** (Header-Enum + Hex-Payload; Capture-Beispiele = Batteriespannung 12,10/12,20 V + Temperaturen 27/28 °C). Die App schreibt GUI1 sehr wohl: `GUI1 00` (Sync beim Connect / vor Riding-Mode) + Dashboard-Kommandos (z. B. Quick-Shift) — nur nicht während der Navigation (Sync lag vor Capture-Beginn). **PING** gehört nicht zum Android-Protokoll v1.4.3 (fehlt im `Command`-Enum); der 1×-PING im Capture stammt aus der iOS-App (iPad-Capture), der 15-s-Ping ist VegaBridge-eigene Erweiterung. HELLO-Felder korrigiert (`HELLO\|A\|<Manufacturer>\|<MAC>` + NEED-Handshake-Flow). UUID-Table mit APK-Korrektur + offener Handle↔UUID-Punkt. |
-| 2026-09-23 | v4.2 | **VegaBridge-Sendepolitik (Feldlog 2026-09-23, B10/A8): statt 1-Hz-Updates nur On-Change + Keepalive.** Beobachtung: Bei ~2–3 Frames/s (NAVI+SM pro GPS-Tick) staut sich die W2R-Queue des Peripheries 2,5–4,3 min (3 Fenster, ~60 Writes/Fenster, kein Disconnect, spontan genest). Offizielle App ist event-driven → `BleNavigationCoordinator` sendet NAVI nur bei Anweisungs-Wechsel (Signatur = Index+Icon+Text+Straße), SM mit **distanz-adaptiven Buckets**: innerhalb 2 km zum nächsten Manöver alle 50 m (~1,8 s bei 100 km/h, ~6 s bei 30), darüber alle 200 m (~7 s bei 100 km/h, ~24 s bei 30), plus Backup-Resend alle 30 s. PING (15 s) bleibt der einzige konstante Traffic (bike-seitiger Session-Keepalive + Link-Health-Detector; die GATT-Link hält iOS über `bluetooth-central`-Background-Mode – wir deklarieren `bluetooth-central` + `location` + `fetch` bereits in Info.plist, wie die offizielle App). Parallel: Stale-Write-Watchdog (30 s consecutive fails → Warning + UI-Status), Exception-Text im Debug-Log-Export, `IsCompatible` mit allen 10 offiziellen `bt_prefix`-Werten (aus `bike_classes.json` der iOS-IPA v1.4.3). |
-| 2026-09-28 | v4.3 | **Shiny.BluetoothLE 5.4.0 → 5.7.2 (Release 2026-09-18) + Sende-Profile der offiziellen App gemessen (§6.1).** Root-Cause des W2R-Queue-Staus identifiziert: Shiny-BLE #1657 (fix in 5.6.3) – W2R-Write bei vollem CoreBluetooth-Puffer Deadlockte die Peripheral-Operation-Lock, weil der einmalige Ready-to-Send-Callback im Race zwischen `CanSendWriteWithoutResponse`-Check und Subscribe verloren ging; alle späteren Operationen stauten bis zum Link-Reset (die „spontane Genesung“ des Feldlogs). Weitere relevante Fixes in 5.7.2: #1653 (Scan vor CoreBluetooth-PowerOn fand dauerhaft nichts – betrifft unseren Connect-Flow), #1652 (Adapter-Power-Cycle-Propagation + Auto-Connect). Parallel Sende-Profile der offiziellen iOS-App aus `mvride_nav.pklg` gemessen (§6.1): 621 Frames/342,6 s = 1,81 Frames/s Ø, NAVI+SM-Pair ~1 Hz bei Fahrt mit Standpausen, NAVI wird resends auch ohne Änderung (nur 2,8 % neue Anweisungen), **PING genau 1×** (kein 15-s-Keepalive) → VegaBridge: PING-Loop auf 30 s gedrosselt, SM-Distanz-Trigger bei Stand (< 5 km/h) unterdrückt (Stand-Drossel), On-Change-Scheme bleibt (sendet weniger als die offizielle App). |
