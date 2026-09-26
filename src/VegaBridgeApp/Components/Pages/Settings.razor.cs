@@ -5,6 +5,7 @@ using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
 using VegaBridgeApp.Models.BLE.MvAgusta;
+using VegaBridgeApp.Services.BLE;
 using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Components.Pages;
@@ -166,6 +167,36 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         await BleManager.DisconnectAsync();
         StatusMessage = L["BLEDisconnected"];
         StateHasChanged();
+    }
+
+    // ── W2R stress test ───────────────────────────────────────────────────
+
+    private bool _w2rTestRunning;
+    private string _w2rTestResult = string.Empty;
+
+    private async Task RunW2rStressTestAsync()
+    {
+        if (_w2rTestRunning || !IsConnected)
+            return;
+
+        _w2rTestRunning = true;
+        _w2rTestResult = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            BleManagerService.W2rStressTestResult result = await BleManager.RunW2rStressTestAsync();
+            _w2rTestResult = result.Summary;
+        }
+        catch (Exception ex)
+        {
+            _w2rTestResult = $"W2R test failed: {ex.Message}";
+        }
+        finally
+        {
+            _w2rTestRunning = false;
+            StateHasChanged();
+        }
     }
     
     private async Task HandleScanButtonClick()
