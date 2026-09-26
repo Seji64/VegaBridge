@@ -34,9 +34,20 @@
 | 7 | **Doku-Update** | `docs/.../ble-protokoll-spezifikation.md` | §6.1 (official traffic profile) neu + neuer Abschnitt „Tour 09-26: W2R-TX-Stall, sessionscope, Root-Cause-Korrektur“ (Changelog v4.4). |
 | 8 | **Kosmetik: Serilog-Bool-Format** | `BleNavigationCoordinator` | „backup in Trues/Falses“ (F0-Format an Bool in de-DE-Culture) → saubere Template-Ausgabe. |
 | 9 | **Version** | `VegaBridgeApp.csproj` | 1.0.4 Build 9 für nächste TestFlight-Runde. |
+| 10 | **W2R-Stress-Test-Button (implementiert ✅)** | `BleManagerService.RunW2rStressTestAsync`, `Settings` | Settings-Button „W2R Test (60×)“: sendet 60 Ticks (~1 Hz) den echten Nav-Frame-Flow (NAVI+SM, „W2R Test“ auf dem Display sichtbar). Jeder Failure-Tick + Summary landen im Log unter `BLE-WRITE-TEST` / `W2R STRESS TEST`. UI zeigt die Summary (ok/fail-Count, first-fail-Tick, max tick-ms). |
+
+## Entschieden (2026-09-26, User-Feedback)
+
+- **Kein RSSI-Sampling:** Verbindungstärke ist im Bike-Display sichtbar und dort konstant gut → RF-Interferenz wird nicht weiter als Arbeitshypothese verfolgt.
+- **Kein Cross-Test mit der offiziellen App / keine FW-Fehlermeldung an MV Agusta:** Die offizielle App funktioniert, die Bike-FW gilt als sauber. „Warum stallt der W2R-Consumer ab?“ wird nicht weiter über die Firmware-Hypothese verfolgt, sondern über den Stress-Test (Punkt 10) operational abgefangen: reproduzierbarer Stall → Trigger identifiziert; nie reproduzierbar stationär → Resilienz-Features (4+5) sind die Antwort.
+- **Wichtig (5.4.0-Asymmetrie):** Unter Shiny 5.4.0 (aktuelle Baseline) queueen Writes in einen gestauten W2R-Pfad statt Timeout zu werfen → der Stress-Test liest dann „0 failed“, selbst wenn das Display stale ist. Den Test als Detektor kann man erst mit Shiny 5.7.2+ (Punkt 6) nutzen; als **Reproduktions-Trigger** (kriegt der 1-Hz-Flow den Konsum gar erst ins Stallen?) funktioniert er in beiden Versionen.
 
 ## Testprotokoll (nach Implementierung)
 
+0. **W2R-Stress-Test (Settings, vor der Tour, stationär):** 1× „W2R Test (60×)“ ausführen.
+   - 60/60 ok → Link gesund, Tour starten.
+   - early fails (z. B. ab Tick 30) → Trigger-Pattern gefunden (Rate/Pattern-basiert) → „first fail tick“-Kennzahl in den Log.
+   - 60/60 ok, aber die Tour stallt trotzdem → Trigger braucht Fahrbetrieb (Ort/RF-Umfeld) → Resilienz-Features (4+5) tragen die Last.
 1. Kurze Testtour 20–30 min: mindestens 1 Nahbereich (< 2 km bis Manöver), 1 Stand ≥ 60 s, 1 Autobahn-Section.
 2. Prüfen:
    - Nahbereich (fahrend): Skip-Rate > 50 %, keine 1-Hz-Sendflut (Jitter-Hysterese wirkt).

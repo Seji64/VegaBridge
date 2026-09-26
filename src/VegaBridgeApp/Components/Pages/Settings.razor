@@ -45,6 +45,20 @@
                             OnClick="@(async () => await BleManager.SendTestFrameAsync())">
                             Test Connection
                         </MudButton>
+                        <MudButton
+                            Variant="Variant.Text"
+                            Color="Color.Warning"
+                            Size="Size.Small"
+                            Disabled="!IsConnected || _w2rTestRunning"
+                            StartIcon="@Icons.Material.Filled.Speed"
+                            FullWidth="true"
+                            OnClick="@RunW2rStressTestAsync">
+                            @(_w2rTestRunning ? "W2R Test l…" : "W2R Test (60×)")
+                        </MudButton>
+                        @if (!string.IsNullOrEmpty(_w2rTestResult))
+                        {
+                            <MudText Typo="Typo.caption" Style="font-family: monospace;">@_w2rTestResult</MudText>
+                        }
 
                         <!-- <MudButton
                             Variant="Variant.Outlined"
