@@ -429,6 +429,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             return new W2rRouteSimResult(0, 0, 0, 0, null, "W2R-SIM: no connected device");
 
         BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+        IPeripheral? wrapperPeripheral = _activePeripheral;
+        IBleDevicePlugin? wrapperPlugin = _activePlugin;
         IReadOnlyList<SimManeuver> profile = BuildW2rRouteProfile();
         double totalKm = profile.Sum(m => m.SpeedKmh * m.DurationSec / 3600.0);
         int totalSec = profile.Sum(m => m.DurationSec);
@@ -466,15 +468,23 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 {
                     rerouteSent = true;
                     remainingM += 1600; // the reroute adds 1.6 km
-                    Log.Information("BLE-LOGGER: {Line}",
-                        $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI sent (simulated off-route), new route via city-2, remaining +1.6 km");
-                    await _activePlugin.SendOffRouteAlertAsync(wrapper, new OffRouteAlertInput
+                    if (_activePlugin is not null)
                     {
-                        DistanceMeters = 0,
-                        Latitude = startLat ?? 0,
-                        Longitude = startLon ?? 0,
-                        DetectedAt = DateTimeOffset.UtcNow
-                    });
+                        Log.Information("BLE-LOGGER: {Line}",
+                            $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI sent (simulated off-route), new route via city-2, remaining +1.6 km");
+                        await _activePlugin.SendOffRouteAlertAsync(wrapper, new OffRouteAlertInput
+                        {
+                            DistanceMeters = 0,
+                            Latitude = startLat ?? 0,
+                            Longitude = startLon ?? 0,
+                            DetectedAt = DateTimeOffset.UtcNow
+                        });
+                    }
+                    else
+                    {
+                        Log.Information("BLE-LOGGER: {Line}",
+                            $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI skipped – no active connection");
+                    }
                     await Task.Delay(500, ct);
                 }
 
@@ -503,19 +513,60 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                         IsFinal = mi == profile.Count - 1
                     };
 
+                    // Reconnect-proofing: an in-session reconnect nulls and
+                    // reassigns _activePeripheral/_activePlugin mid-run. While
+                    // the link is down, skip the write (counted as a failed
+                    // tick); when a new connection appears, rebuild the
+                    // wrapper so ticks keep flowing on the live link instead
+                    // of NRE-ing on the dead objects (see run 20260927, tick 1259+).
+                    bool linkDown = _activePeripheral is null || _activePlugin is null;
+                    if (linkDown)
+                    {
+                        Log.Information("BLE-LOGGER: {Line}",
+                            $"W2R-SIM LINK DOWN t+{FormatSimTm(second)} seg={m.Segment} tick={ticks} – write skipped (reconnect in progress)");
+                    }
+                    else if (!ReferenceEquals(wrapperPeripheral, _activePeripheral) || !ReferenceEquals(wrapperPlugin, _activePlugin))
+                    {
+                        wrapper = new BleConnectedDeviceWrapper(_activePeripheral, _activePlugin);
+                        wrapperPeripheral = _activePeripheral;
+                        wrapperPlugin = _activePlugin;
+                        consecutive = 0;
+                        Log.Information("BLE-LOGGER: {Line}",
+                            $"W2R-SIM LINK REBUILT t+{FormatSimTm(second)} – continuing on the new connection");
+                    }
+
                     var sw = System.Diagnostics.Stopwatch.StartNew();
                     bool ok;
-                    try
-                    {
-                        await _activePlugin.SendNavigationUpdateAsync(wrapper, input);
-                        ok = true;
-                    }
-                    catch (Exception ex)
+                    if (linkDown)
                     {
                         ok = false;
                         failedTicks++;
-                        Log.Information("BLE-LOGGER: {Line}",
-                            $"W2R-SIM FAIL t+{FormatSimTm(second)} seg={m.Segment} tick={ticks} after {sw.ElapsedMilliseconds} ms ({ex.GetType().Name})");
+                    }
+                    else
+                    {
+                        // Local snapshot: a disconnect can still null the
+                        // field between the check above and this line.
+                        IBleDevicePlugin? plugin = _activePlugin;
+                        if (plugin is null)
+                        {
+                            ok = false;
+                            failedTicks++;
+                        }
+                        else
+                        {
+                            try
+                            {
+                                await plugin.SendNavigationUpdateAsync(wrapper, input);
+                                ok = true;
+                            }
+                            catch (Exception ex)
+                            {
+                                ok = false;
+                                failedTicks++;
+                                Log.Information("BLE-LOGGER: {Line}",
+                                    $"W2R-SIM FAIL t+{FormatSimTm(second)} seg={m.Segment} tick={ticks} after {sw.ElapsedMilliseconds} ms ({ex.GetType().Name})");
+                            }
+                        }
                     }
                     int drainMs = (int)sw.ElapsedMilliseconds;
                     sw.Stop();
@@ -559,7 +610,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 }
             }
 
-            await _activePlugin.SendNavigationFinishAsync(wrapper);
+            if (_activePlugin is not null)
+                await _activePlugin.SendNavigationFinishAsync(wrapper);
+            else
+                Log.Information("BLE-LOGGER: {Line}", "W2R-SIM: FINISH skipped – no active connection");
 
             string summary = $"W2R-SIM DONE: {ticks} ticks over {second}s, {slowTicks} slow / {failedTicks} failed"
                 + (firstAnomalySecond > 0
@@ -574,13 +628,20 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         catch (OperationCanceledException)
         {
             Log.Information("BLE-LOGGER: {Line}", $"W2R-SIM STOPPED (cancelled) at t+{FormatSimTm(second)} – sending FINISH");
-            try
+            if (_activePlugin is not null)
             {
-                await _activePlugin.SendNavigationFinishAsync(wrapper);
+                try
+                {
+                    await _activePlugin.SendNavigationFinishAsync(wrapper);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "W2R-SIM: FINISH after cancel failed");
+                }
             }
-            catch (Exception ex)
+            else
             {
-                Log.Warning(ex, "W2R-SIM: FINISH after cancel failed");
+                Log.Information("BLE-LOGGER: {Line}", "W2R-SIM: FINISH skipped – no active connection");
             }
             string summary = $"W2R-SIM STOPPED after {ticks} ticks / {second}s, {slowTicks} slow / {failedTicks} failed, max drain {maxDrainMs} ms";
             Log.Information("BLE-LOGGER: {Line}", summary);
