@@ -416,6 +416,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         const int ticks = 60;
         BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+        // The payload counts (instruction "W2R Test N/60" + SM distance countdown),
+        // so the bike display shows a visible counter: at the end of the test the
+        // display reading tells you how far delivery actually got. A stuck W2R
+        // consumer shows up as "display stuck at tick 37" even when the local
+        // writes were accepted (Shiny 5.4.0 queueing).
         var input = new NavigationUpdateInput
         {
             ManeuverIcon = "turn-left",
@@ -441,7 +446,14 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             bool ok;
             try
             {
-                await _activePlugin.SendNavigationUpdateAsync(wrapper, input);
+                // Vary the payload per tick so delivery progress is visible on the
+                // display (instruction counter + SM distance countdown 998 → 939 m).
+                var tickInput = input with
+                {
+                    InstructionText = $"W2R Test {tick}/60\nVegaBridge",
+                    DistanceToTurnM = 999 - tick
+                };
+                await _activePlugin.SendNavigationUpdateAsync(wrapper, tickInput);
                 ok = true;
             }
             catch (Exception ex)

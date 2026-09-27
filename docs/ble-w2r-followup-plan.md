@@ -34,7 +34,7 @@
 | 7 | **Doku-Update** | `docs/.../ble-protokoll-spezifikation.md` | §6.1 (official traffic profile) neu + neuer Abschnitt „Tour 09-26: W2R-TX-Stall, sessionscope, Root-Cause-Korrektur“ (Changelog v4.4). |
 | 8 | **Kosmetik: Serilog-Bool-Format** | `BleNavigationCoordinator` | „backup in Trues/Falses“ (F0-Format an Bool in de-DE-Culture) → saubere Template-Ausgabe. |
 | 9 | **Version** | `VegaBridgeApp.csproj` | 1.0.4 Build 9 für nächste TestFlight-Runde. |
-| 10 | **W2R-Stress-Test-Button (implementiert ✅)** | `BleManagerService.RunW2rStressTestAsync`, `Settings` | Settings-Button „W2R Test (60×)“: sendet 60 Ticks (~1 Hz) den echten Nav-Frame-Flow (NAVI+SM, „W2R Test“ auf dem Display sichtbar). Jeder Failure-Tick + Summary landen im Log unter `BLE-WRITE-TEST` / `W2R STRESS TEST`. UI zeigt die Summary (ok/fail-Count, first-fail-Tick, max tick-ms). |
+| 10 | **W2R-Stress-Test-Button (implementiert ✅)** | `BleManagerService.RunW2rStressTestAsync`, `Settings` | Settings-Button „W2R Test (60×)“: sendet 60 Ticks (~1 Hz) den echten Nav-Frame-Flow (NAVI+SM). Der Payload zählt mit (Anweisung „W2R Test N/60“, SM-Abzählung 998→939 m) → am Ende steht die erreichte Delivery auf dem Display. Jeder Failure-Tick + Summary landen im Log unter `BLE-WRITE-TEST` / `W2R STRESS TEST`. UI zeigt die Summary (ok/fail-Count, first-fail-Tick, max tick-ms). |
 
 ## Entschieden (2026-09-26, User-Feedback)
 
@@ -45,7 +45,8 @@
 ## Testprotokoll (nach Implementierung)
 
 0. **W2R-Stress-Test (Settings, vor der Tour, stationär):** 1× „W2R Test (60×)“ ausführen.
-   - 60/60 ok → Link gesund, Tour starten.
+   - 60/60 ok **und** am Test-Ende zeigt das Display „W2R Test 60/60“ / ~939 m → alle Frames geliefert, Link gesund, Tour starten.
+   - 60/60 ok, aber Display steht auf z. B. „37/60“ → lokaler Write-OK, **Delivery-Stall** (5.4.0-Queueing): ab Tick 37 kamen die Frames nicht mehr an.
    - early fails (z. B. ab Tick 30) → Trigger-Pattern gefunden (Rate/Pattern-basiert) → „first fail tick“-Kennzahl in den Log.
    - 60/60 ok, aber die Tour stallt trotzdem → Trigger braucht Fahrbetrieb (Ort/RF-Umfeld) → Resilienz-Features (4+5) tragen die Last.
 1. Kurze Testtour 20–30 min: mindestens 1 Nahbereich (< 2 km bis Manöver), 1 Stand ≥ 60 s, 1 Autobahn-Section.

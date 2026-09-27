@@ -1,0 +1,1626 @@
+08:38:44.332 Debug: Startup task 'Shiny.Hosting.IosLifecycleExecutor' ran successfully
+08:38:44.339 Debug: Startup task 'Shiny.Locations.GpsManager' ran successfully
+08:38:44.353 Information: BleNavigationCoordinator initializing and subscribing to events...
+08:38:44.353 Information: BleNavigationCoordinator is now active.
+08:38:44.543 Debug: Found 7 route files in "/var/mobile/Containers/Data/Application/2E3B48A1-B1F1-470D-9998-D686D735FFF6/Library/routes"
+08:38:44.569 Information: Loaded 7 saved routes
+08:38:45.984 Debug: New connection state: Idle
+08:38:46.034 Debug: Manager State Change: PoweredOn 
+08:38:46.035 Information: Stopping BLE scan
+08:38:46.035 Debug: New connection state: Scanning
+08:38:46.036 Information: BLE scanning started
+08:38:46.038 Debug: Scan started - service uuid filters: 0
+08:38:46.039 Debug: BLE adapter state changed: Available
+08:38:49.739 Debug: Found 7 route files in "/var/mobile/Containers/Data/Application/2E3B48A1-B1F1-470D-9998-D686D735FFF6/Library/routes"
+08:38:49.768 Information: Loaded 7 saved routes
+09:07:09.309 Information: App resumed – BLE connection "unavailable"
+09:07:09.316 Information: BLE scan automatic timeout reached
+09:07:09.316 Information: Stopping BLE scan
+09:07:10.862 Debug: New connection state: Idle
+09:07:10.862 Information: Stopping BLE scan
+09:07:10.862 Debug: New connection state: Scanning
+09:07:10.865 Information: BLE scanning started
+09:07:10.869 Debug: Scan started - service uuid filters: 0
+09:07:28.844 Debug: New connection state: Connecting
+09:07:28.845 Information: Attempting to connect to device 152e502a-f88c-9e5d-02a9-2d91cc4bd57c
+09:07:28.887 Debug: Peripheral State Change: "152E502A-F88C-9E5D-02A9-2D91CC4BD57C" - Connected: True - Error: "None" 
+09:07:28.888 Debug: New connection state: Connected
+09:07:28.888 Information: Successfully connected to 152e502a-f88c-9e5d-02a9-2d91cc4bd57c using plugin "MV Agusta"
+09:07:28.888 Information: Setting up notifications for "152E502A-F88C-9E5D-02A9-2D91CC4BD57C" using plugin "MV Agusta"
+09:07:28.890 Information: Initial Notification Hook: 00003719-0000-1000-8000-00805f9b34fb / 00001234-0000-1000-8000-00805f9b34fb
+09:07:28.890 Debug: Connection Detected - Attempting to hook: 00003719-0000-1000-8000-00805f9b34fb / 00001234-0000-1000-8000-00805f9b34fb
+09:07:28.892 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:28.892 Debug: [GetNativeService] past BLE operation lock
+09:07:28.899 Debug: BLE peripheral state changed: "152E502A-F88C-9E5D-02A9-2D91CC4BD57C" -> Connected
+09:07:28.900 Debug: Peripheral: "152E502A-F88C-9E5D-02A9-2D91CC4BD57C" - Service Count: 1
+09:07:28.903 Debug: [GetNativeService] release BLE operation lock
+09:07:28.905 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:28.905 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:28.909 Debug: [DiscoveredCharacteristics] 3719 - Error: NONE
+09:07:28.912 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:28.915 Debug: "Hooking Notification Characteristic" - "00003719-0000-1000-8000-00805f9b34fb" / "00001234-0000-1000-8000-00805f9b34fb"
+09:07:28.978 Debug: UpdatedNotificationState: "3719"/"1234" - ENABLED: True
+09:07:31.428 Information: BLE-LOGGER: "SEND TEST FRAME (via SendTestAsync)"
+09:07:31.429 Information: BLE-LOGGER: "SEND MSG frame: 0D-4D-53-47-1E-77-68-61-74-73-61-70-70-1E-54-65-73-74-20-66-72-6F-6D-20-56-65-67-61-42-72-69-64-67-65-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:31.431 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:31.431 Debug: [GetNativeService] past BLE operation lock
+09:07:31.432 Debug: [GetNativeService] release BLE operation lock
+09:07:31.433 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:31.433 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:31.440 Debug: [DiscoveredCharacteristics] 3719 - Error: NONE
+09:07:31.440 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:31.442 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:31.442 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:31.442 Debug: Writing characteristic without response
+09:07:31.443 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:31.443 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:36.823 Information: BLE-LOGGER: "W2R STRESS TEST START (60 ticks, ~1 Hz NAVI+SM)"
+09:07:36.823 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:36.824 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:36.825 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:36.825 Debug: [GetNativeService] past BLE operation lock
+09:07:36.825 Debug: [GetNativeService] release BLE operation lock
+09:07:36.825 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:36.825 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:36.825 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:36.826 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:36.826 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:36.826 Debug: Writing characteristic without response
+09:07:36.826 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:36.833 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:37.028 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:37.029 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:37.029 Debug: [GetNativeService] past BLE operation lock
+09:07:37.029 Debug: [GetNativeService] release BLE operation lock
+09:07:37.029 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:37.029 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:37.029 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:37.029 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:37.029 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:37.029 Debug: Writing characteristic without response
+09:07:37.030 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:37.030 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:37.031 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:38.031 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:38.031 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:38.032 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:38.032 Debug: [GetNativeService] past BLE operation lock
+09:07:38.032 Debug: [GetNativeService] release BLE operation lock
+09:07:38.032 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:38.032 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:38.032 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:38.032 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:38.032 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:38.032 Debug: Writing characteristic without response
+09:07:38.033 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:38.033 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:38.234 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:38.234 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:38.234 Debug: [GetNativeService] past BLE operation lock
+09:07:38.234 Debug: [GetNativeService] release BLE operation lock
+09:07:38.234 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:38.234 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:38.235 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:38.235 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:38.235 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:38.235 Debug: Writing characteristic without response
+09:07:38.235 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:38.235 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:38.235 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:39.237 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:39.237 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:39.238 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:39.238 Debug: [GetNativeService] past BLE operation lock
+09:07:39.238 Debug: [GetNativeService] release BLE operation lock
+09:07:39.238 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:39.238 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:39.238 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:39.238 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:39.238 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:39.238 Debug: Writing characteristic without response
+09:07:39.238 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:39.239 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:39.439 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:39.440 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:39.440 Debug: [GetNativeService] past BLE operation lock
+09:07:39.440 Debug: [GetNativeService] release BLE operation lock
+09:07:39.440 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:39.440 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:39.440 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:39.440 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:39.440 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:39.440 Debug: Writing characteristic without response
+09:07:39.441 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:39.441 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:39.441 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:40.443 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:40.443 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:40.443 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:40.443 Debug: [GetNativeService] past BLE operation lock
+09:07:40.443 Debug: [GetNativeService] release BLE operation lock
+09:07:40.444 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:40.444 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:40.444 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:40.444 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:40.444 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:40.444 Debug: Writing characteristic without response
+09:07:40.444 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:40.444 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:40.645 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:40.645 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:40.645 Debug: [GetNativeService] past BLE operation lock
+09:07:40.645 Debug: [GetNativeService] release BLE operation lock
+09:07:40.645 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:40.645 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:40.645 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:40.646 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:40.646 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:40.646 Debug: Writing characteristic without response
+09:07:40.646 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:40.646 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:40.646 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:41.648 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:41.648 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:41.648 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:41.648 Debug: [GetNativeService] past BLE operation lock
+09:07:41.648 Debug: [GetNativeService] release BLE operation lock
+09:07:41.649 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:41.649 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:41.649 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:41.649 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:41.649 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:41.649 Debug: Writing characteristic without response
+09:07:41.649 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:41.650 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:41.850 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:41.850 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:41.850 Debug: [GetNativeService] past BLE operation lock
+09:07:41.850 Debug: [GetNativeService] release BLE operation lock
+09:07:41.851 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:41.851 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:41.851 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:41.851 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:41.851 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:41.851 Debug: Writing characteristic without response
+09:07:41.851 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:41.851 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:41.851 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:42.852 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:42.852 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:42.852 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:42.852 Debug: [GetNativeService] past BLE operation lock
+09:07:42.852 Debug: [GetNativeService] release BLE operation lock
+09:07:42.852 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:42.852 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:42.852 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:42.852 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:42.852 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:42.852 Debug: Writing characteristic without response
+09:07:42.853 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:42.853 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:43.054 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:43.054 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:43.054 Debug: [GetNativeService] past BLE operation lock
+09:07:43.054 Debug: [GetNativeService] release BLE operation lock
+09:07:43.054 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:43.054 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:43.055 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:43.055 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:43.055 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:43.055 Debug: Writing characteristic without response
+09:07:43.055 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:43.055 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:43.055 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:44.056 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:44.056 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:44.056 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:44.056 Debug: [GetNativeService] past BLE operation lock
+09:07:44.056 Debug: [GetNativeService] release BLE operation lock
+09:07:44.056 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:44.056 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:44.056 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:44.056 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:44.056 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:44.056 Debug: Writing characteristic without response
+09:07:44.056 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:44.057 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:44.259 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:44.259 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:44.259 Debug: [GetNativeService] past BLE operation lock
+09:07:44.259 Debug: [GetNativeService] release BLE operation lock
+09:07:44.259 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:44.259 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:44.259 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:44.259 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:44.260 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:44.260 Debug: Writing characteristic without response
+09:07:44.260 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:44.260 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:44.260 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:45.262 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:45.262 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:45.262 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:45.262 Debug: [GetNativeService] past BLE operation lock
+09:07:45.262 Debug: [GetNativeService] release BLE operation lock
+09:07:45.262 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:45.262 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:45.262 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:45.262 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:45.262 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:45.262 Debug: Writing characteristic without response
+09:07:45.263 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:45.263 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:45.465 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:45.465 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:45.465 Debug: [GetNativeService] past BLE operation lock
+09:07:45.465 Debug: [GetNativeService] release BLE operation lock
+09:07:45.465 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:45.465 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:45.465 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:45.465 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:45.465 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:45.465 Debug: Writing characteristic without response
+09:07:45.466 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:45.466 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:45.466 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:46.467 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:46.467 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:46.467 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:46.467 Debug: [GetNativeService] past BLE operation lock
+09:07:46.468 Debug: [GetNativeService] release BLE operation lock
+09:07:46.468 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:46.468 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:46.468 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:46.468 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:46.468 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:46.468 Debug: Writing characteristic without response
+09:07:46.468 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:46.469 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:46.669 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:46.670 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:46.670 Debug: [GetNativeService] past BLE operation lock
+09:07:46.670 Debug: [GetNativeService] release BLE operation lock
+09:07:46.670 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:46.670 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:46.670 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:46.670 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:46.670 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:46.670 Debug: Writing characteristic without response
+09:07:46.670 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:46.671 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:46.671 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:47.672 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:47.672 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:47.673 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:47.673 Debug: [GetNativeService] past BLE operation lock
+09:07:47.673 Debug: [GetNativeService] release BLE operation lock
+09:07:47.673 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:47.673 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:47.673 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:47.673 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:47.673 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:47.673 Debug: Writing characteristic without response
+09:07:47.673 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:47.674 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:47.875 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:47.875 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:47.875 Debug: [GetNativeService] past BLE operation lock
+09:07:47.875 Debug: [GetNativeService] release BLE operation lock
+09:07:47.875 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:47.875 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:47.875 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:47.875 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:47.875 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:47.875 Debug: Writing characteristic without response
+09:07:47.875 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:47.875 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:47.876 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:48.876 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:48.876 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:48.877 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:48.877 Debug: [GetNativeService] past BLE operation lock
+09:07:48.877 Debug: [GetNativeService] release BLE operation lock
+09:07:48.877 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:48.877 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:48.877 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:48.877 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:48.877 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:48.877 Debug: Writing characteristic without response
+09:07:48.877 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:48.878 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:49.078 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:49.078 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:49.078 Debug: [GetNativeService] past BLE operation lock
+09:07:49.078 Debug: [GetNativeService] release BLE operation lock
+09:07:49.078 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:49.078 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:49.078 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:49.079 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:49.079 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:49.079 Debug: Writing characteristic without response
+09:07:49.079 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:49.079 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:49.079 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:50.080 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:50.080 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:50.080 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:50.080 Debug: [GetNativeService] past BLE operation lock
+09:07:50.081 Debug: [GetNativeService] release BLE operation lock
+09:07:50.081 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:50.081 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:50.081 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:50.081 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:50.081 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:50.081 Debug: Writing characteristic without response
+09:07:50.081 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:50.081 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:50.283 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:50.283 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:50.283 Debug: [GetNativeService] past BLE operation lock
+09:07:50.283 Debug: [GetNativeService] release BLE operation lock
+09:07:50.283 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:50.283 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:50.283 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:50.283 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:50.283 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:50.283 Debug: Writing characteristic without response
+09:07:50.284 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:50.284 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:50.284 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:51.285 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:51.285 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:51.285 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:51.285 Debug: [GetNativeService] past BLE operation lock
+09:07:51.285 Debug: [GetNativeService] release BLE operation lock
+09:07:51.286 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:51.286 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:51.286 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:51.286 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:51.286 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:51.286 Debug: Writing characteristic without response
+09:07:51.286 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:51.287 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:51.487 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:51.487 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:51.487 Debug: [GetNativeService] past BLE operation lock
+09:07:51.488 Debug: [GetNativeService] release BLE operation lock
+09:07:51.488 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:51.488 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:51.488 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:51.488 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:51.488 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:51.488 Debug: Writing characteristic without response
+09:07:51.488 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:51.488 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:51.488 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:52.489 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:52.489 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:52.489 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:52.489 Debug: [GetNativeService] past BLE operation lock
+09:07:52.489 Debug: [GetNativeService] release BLE operation lock
+09:07:52.489 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:52.489 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:52.490 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:52.490 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:52.490 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:52.490 Debug: Writing characteristic without response
+09:07:52.490 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:52.490 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:52.691 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:52.691 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:52.691 Debug: [GetNativeService] past BLE operation lock
+09:07:52.691 Debug: [GetNativeService] release BLE operation lock
+09:07:52.691 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:52.691 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:52.691 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:52.691 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:52.692 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:52.692 Debug: Writing characteristic without response
+09:07:52.692 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:52.692 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:52.692 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:53.693 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:53.693 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:53.693 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:53.693 Debug: [GetNativeService] past BLE operation lock
+09:07:53.693 Debug: [GetNativeService] release BLE operation lock
+09:07:53.693 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:53.693 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:53.693 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:53.693 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:53.693 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:53.693 Debug: Writing characteristic without response
+09:07:53.694 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:53.694 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:53.895 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:53.895 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:53.895 Debug: [GetNativeService] past BLE operation lock
+09:07:53.895 Debug: [GetNativeService] release BLE operation lock
+09:07:53.895 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:53.895 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:53.895 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:53.895 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:53.895 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:53.895 Debug: Writing characteristic without response
+09:07:53.896 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:53.896 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:53.896 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:54.898 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:54.898 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:54.898 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:54.898 Debug: [GetNativeService] past BLE operation lock
+09:07:54.898 Debug: [GetNativeService] release BLE operation lock
+09:07:54.898 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:54.898 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:54.898 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:54.898 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:54.898 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:54.898 Debug: Writing characteristic without response
+09:07:54.899 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:54.899 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:55.100 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:55.100 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:55.100 Debug: [GetNativeService] past BLE operation lock
+09:07:55.100 Debug: [GetNativeService] release BLE operation lock
+09:07:55.100 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:55.100 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:55.100 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:55.100 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:55.100 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:55.100 Debug: Writing characteristic without response
+09:07:55.101 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:55.101 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:55.102 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:56.102 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:56.102 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:56.103 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:56.103 Debug: [GetNativeService] past BLE operation lock
+09:07:56.103 Debug: [GetNativeService] release BLE operation lock
+09:07:56.103 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:56.103 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:56.103 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:56.103 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:56.103 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:56.103 Debug: Writing characteristic without response
+09:07:56.103 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:56.103 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:56.304 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:56.304 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:56.304 Debug: [GetNativeService] past BLE operation lock
+09:07:56.304 Debug: [GetNativeService] release BLE operation lock
+09:07:56.304 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:56.304 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:56.304 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:56.304 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:56.304 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:56.304 Debug: Writing characteristic without response
+09:07:56.305 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:56.305 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:56.305 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:57.306 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:57.306 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:57.307 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:57.307 Debug: [GetNativeService] past BLE operation lock
+09:07:57.307 Debug: [GetNativeService] release BLE operation lock
+09:07:57.307 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:57.307 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:57.307 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:57.307 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:57.307 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:57.307 Debug: Writing characteristic without response
+09:07:57.307 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:57.308 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:57.508 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:57.508 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:57.508 Debug: [GetNativeService] past BLE operation lock
+09:07:57.508 Debug: [GetNativeService] release BLE operation lock
+09:07:57.508 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:57.508 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:57.508 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:57.508 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:57.508 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:57.508 Debug: Writing characteristic without response
+09:07:57.508 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:57.508 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:57.509 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:58.509 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:58.509 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:58.509 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:58.509 Debug: [GetNativeService] past BLE operation lock
+09:07:58.510 Debug: [GetNativeService] release BLE operation lock
+09:07:58.510 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:58.510 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:58.510 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:58.510 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:58.510 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:58.510 Debug: Writing characteristic without response
+09:07:58.510 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:58.511 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:58.711 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:58.711 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:58.711 Debug: [GetNativeService] past BLE operation lock
+09:07:58.711 Debug: [GetNativeService] release BLE operation lock
+09:07:58.712 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:58.712 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:58.712 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:58.712 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:58.712 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:58.712 Debug: Writing characteristic without response
+09:07:58.712 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:58.712 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:58.712 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:59.713 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:07:59.713 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:07:59.713 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:59.713 Debug: [GetNativeService] past BLE operation lock
+09:07:59.714 Debug: [GetNativeService] release BLE operation lock
+09:07:59.714 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:59.714 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:59.714 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:59.714 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:59.714 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:59.714 Debug: Writing characteristic without response
+09:07:59.714 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:59.714 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:07:59.915 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:07:59.915 Debug: [GetNativeService] awaiting at BLE operation lock
+09:07:59.915 Debug: [GetNativeService] past BLE operation lock
+09:07:59.916 Debug: [GetNativeService] release BLE operation lock
+09:07:59.916 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:07:59.916 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:07:59.916 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:07:59.916 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:07:59.916 Debug: [WriteWithoutResponse] past BLE operation lock
+09:07:59.916 Debug: Writing characteristic without response
+09:07:59.916 Debug: [WriteWithoutResponse] release BLE operation lock
+09:07:59.916 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:07:59.916 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:00.917 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:00.917 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:00.918 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:00.918 Debug: [GetNativeService] past BLE operation lock
+09:08:00.918 Debug: [GetNativeService] release BLE operation lock
+09:08:00.918 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:00.918 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:00.918 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:00.918 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:00.918 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:00.918 Debug: Writing characteristic without response
+09:08:00.918 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:00.919 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:01.120 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:01.120 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:01.120 Debug: [GetNativeService] past BLE operation lock
+09:08:01.120 Debug: [GetNativeService] release BLE operation lock
+09:08:01.120 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:01.120 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:01.120 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:01.120 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:01.120 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:01.120 Debug: Writing characteristic without response
+09:08:01.120 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:01.121 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:01.121 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:02.122 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:02.122 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:02.122 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:02.122 Debug: [GetNativeService] past BLE operation lock
+09:08:02.122 Debug: [GetNativeService] release BLE operation lock
+09:08:02.123 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:02.123 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:02.123 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:02.123 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:02.123 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:02.123 Debug: Writing characteristic without response
+09:08:02.123 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:02.124 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:02.325 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:02.325 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:02.325 Debug: [GetNativeService] past BLE operation lock
+09:08:02.325 Debug: [GetNativeService] release BLE operation lock
+09:08:02.325 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:02.325 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:02.325 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:02.325 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:02.325 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:02.325 Debug: Writing characteristic without response
+09:08:02.326 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:02.326 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:02.326 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:03.327 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:03.327 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:03.328 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:03.328 Debug: [GetNativeService] past BLE operation lock
+09:08:03.328 Debug: [GetNativeService] release BLE operation lock
+09:08:03.328 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:03.328 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:03.328 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:03.328 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:03.328 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:03.328 Debug: Writing characteristic without response
+09:08:03.328 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:03.329 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:03.529 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:03.529 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:03.529 Debug: [GetNativeService] past BLE operation lock
+09:08:03.529 Debug: [GetNativeService] release BLE operation lock
+09:08:03.529 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:03.529 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:03.529 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:03.529 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:03.529 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:03.529 Debug: Writing characteristic without response
+09:08:03.530 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:03.530 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:03.530 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:04.531 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:04.531 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:04.531 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:04.531 Debug: [GetNativeService] past BLE operation lock
+09:08:04.532 Debug: [GetNativeService] release BLE operation lock
+09:08:04.532 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:04.532 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:04.532 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:04.532 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:04.532 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:04.532 Debug: Writing characteristic without response
+09:08:04.532 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:04.532 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:04.733 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:04.733 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:04.733 Debug: [GetNativeService] past BLE operation lock
+09:08:04.734 Debug: [GetNativeService] release BLE operation lock
+09:08:04.734 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:04.734 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:04.734 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:04.734 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:04.734 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:04.734 Debug: Writing characteristic without response
+09:08:04.734 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:04.734 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:04.734 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:05.735 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:05.735 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:05.735 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:05.735 Debug: [GetNativeService] past BLE operation lock
+09:08:05.736 Debug: [GetNativeService] release BLE operation lock
+09:08:05.736 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:05.736 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:05.736 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:05.736 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:05.736 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:05.736 Debug: Writing characteristic without response
+09:08:05.736 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:05.737 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:05.937 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:05.937 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:05.937 Debug: [GetNativeService] past BLE operation lock
+09:08:05.937 Debug: [GetNativeService] release BLE operation lock
+09:08:05.937 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:05.937 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:05.937 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:05.937 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:05.937 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:05.937 Debug: Writing characteristic without response
+09:08:05.938 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:05.938 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:05.938 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:06.939 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:06.939 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:06.939 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:06.939 Debug: [GetNativeService] past BLE operation lock
+09:08:06.939 Debug: [GetNativeService] release BLE operation lock
+09:08:06.940 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:06.942 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:06.942 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:06.942 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:06.942 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:06.943 Debug: Writing characteristic without response
+09:08:06.943 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:06.943 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:07.145 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:07.145 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:07.145 Debug: [GetNativeService] past BLE operation lock
+09:08:07.145 Debug: [GetNativeService] release BLE operation lock
+09:08:07.145 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:07.145 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:07.145 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:07.145 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:07.145 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:07.145 Debug: Writing characteristic without response
+09:08:07.145 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:07.145 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:07.146 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:08.147 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:08.147 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:08.147 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:08.147 Debug: [GetNativeService] past BLE operation lock
+09:08:08.147 Debug: [GetNativeService] release BLE operation lock
+09:08:08.147 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:08.147 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:08.147 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:08.147 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:08.147 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:08.147 Debug: Writing characteristic without response
+09:08:08.148 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:08.148 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:08.349 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:08.349 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:08.349 Debug: [GetNativeService] past BLE operation lock
+09:08:08.349 Debug: [GetNativeService] release BLE operation lock
+09:08:08.349 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:08.349 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:08.349 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:08.349 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:08.349 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:08.349 Debug: Writing characteristic without response
+09:08:08.350 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:08.350 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:08.350 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:09.352 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:09.352 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:09.352 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:09.352 Debug: [GetNativeService] past BLE operation lock
+09:08:09.352 Debug: [GetNativeService] release BLE operation lock
+09:08:09.352 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:09.352 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:09.352 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:09.352 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:09.352 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:09.352 Debug: Writing characteristic without response
+09:08:09.352 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:09.353 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:09.553 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:09.553 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:09.553 Debug: [GetNativeService] past BLE operation lock
+09:08:09.553 Debug: [GetNativeService] release BLE operation lock
+09:08:09.553 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:09.553 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:09.553 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:09.553 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:09.553 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:09.553 Debug: Writing characteristic without response
+09:08:09.553 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:09.554 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:09.554 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:10.555 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:10.555 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:10.555 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:10.555 Debug: [GetNativeService] past BLE operation lock
+09:08:10.555 Debug: [GetNativeService] release BLE operation lock
+09:08:10.556 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:10.556 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:10.556 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:10.556 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:10.556 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:10.556 Debug: Writing characteristic without response
+09:08:10.556 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:10.556 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:10.757 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:10.757 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:10.757 Debug: [GetNativeService] past BLE operation lock
+09:08:10.757 Debug: [GetNativeService] release BLE operation lock
+09:08:10.757 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:10.758 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:10.758 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:10.758 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:10.758 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:10.758 Debug: Writing characteristic without response
+09:08:10.758 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:10.758 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:10.758 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:11.759 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:11.759 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:11.759 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:11.759 Debug: [GetNativeService] past BLE operation lock
+09:08:11.760 Debug: [GetNativeService] release BLE operation lock
+09:08:11.760 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:11.760 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:11.760 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:11.760 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:11.760 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:11.760 Debug: Writing characteristic without response
+09:08:11.760 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:11.760 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:11.962 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:11.962 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:11.962 Debug: [GetNativeService] past BLE operation lock
+09:08:11.962 Debug: [GetNativeService] release BLE operation lock
+09:08:11.962 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:11.962 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:11.962 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:11.962 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:11.962 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:11.962 Debug: Writing characteristic without response
+09:08:11.962 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:11.962 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:11.963 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:12.963 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:12.966 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:12.967 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:12.967 Debug: [GetNativeService] past BLE operation lock
+09:08:12.967 Debug: [GetNativeService] release BLE operation lock
+09:08:12.967 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:12.967 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:12.967 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:12.967 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:12.967 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:12.967 Debug: Writing characteristic without response
+09:08:12.967 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:12.968 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:13.170 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:13.170 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:13.170 Debug: [GetNativeService] past BLE operation lock
+09:08:13.170 Debug: [GetNativeService] release BLE operation lock
+09:08:13.170 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:13.170 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:13.170 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:13.170 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:13.170 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:13.170 Debug: Writing characteristic without response
+09:08:13.170 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:13.170 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:13.170 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:14.171 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:14.171 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:14.171 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:14.171 Debug: [GetNativeService] past BLE operation lock
+09:08:14.172 Debug: [GetNativeService] release BLE operation lock
+09:08:14.172 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:14.172 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:14.172 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:14.172 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:14.172 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:14.172 Debug: Writing characteristic without response
+09:08:14.172 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:14.172 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:14.374 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:14.374 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:14.374 Debug: [GetNativeService] past BLE operation lock
+09:08:14.374 Debug: [GetNativeService] release BLE operation lock
+09:08:14.374 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:14.374 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:14.374 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:14.374 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:14.374 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:14.374 Debug: Writing characteristic without response
+09:08:14.374 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:14.375 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:14.375 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:15.376 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:15.376 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:15.376 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:15.376 Debug: [GetNativeService] past BLE operation lock
+09:08:15.377 Debug: [GetNativeService] release BLE operation lock
+09:08:15.377 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:15.377 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:15.377 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:15.377 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:15.377 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:15.377 Debug: Writing characteristic without response
+09:08:15.377 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:15.377 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:15.579 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:15.579 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:15.579 Debug: [GetNativeService] past BLE operation lock
+09:08:15.579 Debug: [GetNativeService] release BLE operation lock
+09:08:15.579 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:15.579 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:15.579 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:15.579 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:15.579 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:15.579 Debug: Writing characteristic without response
+09:08:15.579 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:15.579 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:15.580 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:16.581 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:16.581 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:16.581 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:16.581 Debug: [GetNativeService] past BLE operation lock
+09:08:16.581 Debug: [GetNativeService] release BLE operation lock
+09:08:16.581 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:16.581 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:16.581 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:16.581 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:16.581 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:16.581 Debug: Writing characteristic without response
+09:08:16.582 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:16.582 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:16.783 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:16.783 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:16.783 Debug: [GetNativeService] past BLE operation lock
+09:08:16.783 Debug: [GetNativeService] release BLE operation lock
+09:08:16.783 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:16.783 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:16.783 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:16.783 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:16.783 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:16.783 Debug: Writing characteristic without response
+09:08:16.784 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:16.784 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:16.784 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:17.785 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:17.785 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:17.785 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:17.785 Debug: [GetNativeService] past BLE operation lock
+09:08:17.785 Debug: [GetNativeService] release BLE operation lock
+09:08:17.785 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:17.785 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:17.786 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:17.786 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:17.786 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:17.786 Debug: Writing characteristic without response
+09:08:17.786 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:17.786 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:17.987 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:17.987 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:17.987 Debug: [GetNativeService] past BLE operation lock
+09:08:17.987 Debug: [GetNativeService] release BLE operation lock
+09:08:17.987 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:17.987 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:17.987 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:17.988 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:17.988 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:17.988 Debug: Writing characteristic without response
+09:08:17.988 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:17.988 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:17.988 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:18.990 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:18.990 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:18.990 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:18.990 Debug: [GetNativeService] past BLE operation lock
+09:08:18.990 Debug: [GetNativeService] release BLE operation lock
+09:08:18.990 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:18.990 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:18.990 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:18.990 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:18.990 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:18.990 Debug: Writing characteristic without response
+09:08:18.991 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:18.991 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:19.192 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:19.192 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:19.192 Debug: [GetNativeService] past BLE operation lock
+09:08:19.192 Debug: [GetNativeService] release BLE operation lock
+09:08:19.192 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:19.192 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:19.192 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:19.192 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:19.192 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:19.192 Debug: Writing characteristic without response
+09:08:19.192 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:19.193 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:19.193 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:20.194 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:20.194 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:20.194 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:20.194 Debug: [GetNativeService] past BLE operation lock
+09:08:20.194 Debug: [GetNativeService] release BLE operation lock
+09:08:20.194 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:20.195 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:20.195 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:20.195 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:20.195 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:20.195 Debug: Writing characteristic without response
+09:08:20.195 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:20.195 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:20.396 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:20.396 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:20.396 Debug: [GetNativeService] past BLE operation lock
+09:08:20.396 Debug: [GetNativeService] release BLE operation lock
+09:08:20.397 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:20.397 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:20.397 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:20.397 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:20.397 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:20.397 Debug: Writing characteristic without response
+09:08:20.397 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:20.397 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:20.397 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:21.398 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:21.398 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:21.398 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:21.398 Debug: [GetNativeService] past BLE operation lock
+09:08:21.398 Debug: [GetNativeService] release BLE operation lock
+09:08:21.398 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:21.398 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:21.398 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:21.399 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:21.399 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:21.399 Debug: Writing characteristic without response
+09:08:21.399 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:21.399 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:21.600 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:21.600 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:21.601 Debug: [GetNativeService] past BLE operation lock
+09:08:21.601 Debug: [GetNativeService] release BLE operation lock
+09:08:21.601 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:21.601 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:21.601 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:21.601 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:21.601 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:21.601 Debug: Writing characteristic without response
+09:08:21.601 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:21.601 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:21.601 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:22.602 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:22.602 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:22.602 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:22.602 Debug: [GetNativeService] past BLE operation lock
+09:08:22.602 Debug: [GetNativeService] release BLE operation lock
+09:08:22.602 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:22.602 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:22.603 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:22.603 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:22.603 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:22.603 Debug: Writing characteristic without response
+09:08:22.603 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:22.603 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:22.804 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:22.804 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:22.804 Debug: [GetNativeService] past BLE operation lock
+09:08:22.804 Debug: [GetNativeService] release BLE operation lock
+09:08:22.804 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:22.804 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:22.804 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:22.804 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:22.804 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:22.804 Debug: Writing characteristic without response
+09:08:22.805 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:22.805 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:22.805 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:23.807 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:23.807 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:23.807 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:23.807 Debug: [GetNativeService] past BLE operation lock
+09:08:23.807 Debug: [GetNativeService] release BLE operation lock
+09:08:23.807 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:23.807 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:23.807 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:23.807 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:23.807 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:23.807 Debug: Writing characteristic without response
+09:08:23.808 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:23.808 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:24.009 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:24.009 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:24.009 Debug: [GetNativeService] past BLE operation lock
+09:08:24.009 Debug: [GetNativeService] release BLE operation lock
+09:08:24.009 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:24.009 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:24.009 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:24.009 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:24.009 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:24.009 Debug: Writing characteristic without response
+09:08:24.010 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:24.010 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:24.010 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:25.011 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:25.011 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:25.012 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:25.012 Debug: [GetNativeService] past BLE operation lock
+09:08:25.012 Debug: [GetNativeService] release BLE operation lock
+09:08:25.012 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:25.012 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:25.012 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:25.012 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:25.012 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:25.012 Debug: Writing characteristic without response
+09:08:25.012 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:25.013 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:25.214 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:25.214 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:25.214 Debug: [GetNativeService] past BLE operation lock
+09:08:25.214 Debug: [GetNativeService] release BLE operation lock
+09:08:25.214 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:25.214 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:25.214 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:25.214 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:25.214 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:25.214 Debug: Writing characteristic without response
+09:08:25.214 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:25.214 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:25.214 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:26.215 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:26.216 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:26.216 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:26.216 Debug: [GetNativeService] past BLE operation lock
+09:08:26.216 Debug: [GetNativeService] release BLE operation lock
+09:08:26.216 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:26.216 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:26.216 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:26.216 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:26.216 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:26.216 Debug: Writing characteristic without response
+09:08:26.217 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:26.217 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:26.418 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:26.419 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:26.419 Debug: [GetNativeService] past BLE operation lock
+09:08:26.419 Debug: [GetNativeService] release BLE operation lock
+09:08:26.419 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:26.419 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:26.419 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:26.419 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:26.419 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:26.419 Debug: Writing characteristic without response
+09:08:26.419 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:26.420 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:26.420 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:27.421 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:27.421 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:27.421 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:27.421 Debug: [GetNativeService] past BLE operation lock
+09:08:27.422 Debug: [GetNativeService] release BLE operation lock
+09:08:27.422 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:27.422 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:27.422 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:27.422 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:27.422 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:27.422 Debug: Writing characteristic without response
+09:08:27.422 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:27.422 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:27.624 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:27.624 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:27.624 Debug: [GetNativeService] past BLE operation lock
+09:08:27.624 Debug: [GetNativeService] release BLE operation lock
+09:08:27.624 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:27.624 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:27.624 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:27.624 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:27.624 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:27.624 Debug: Writing characteristic without response
+09:08:27.624 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:27.624 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:27.625 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:28.626 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:28.626 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:28.626 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:28.626 Debug: [GetNativeService] past BLE operation lock
+09:08:28.626 Debug: [GetNativeService] release BLE operation lock
+09:08:28.626 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:28.626 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:28.626 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:28.626 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:28.626 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:28.627 Debug: Writing characteristic without response
+09:08:28.627 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:28.627 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:28.828 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:28.828 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:28.828 Debug: [GetNativeService] past BLE operation lock
+09:08:28.828 Debug: [GetNativeService] release BLE operation lock
+09:08:28.828 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:28.828 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:28.828 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:28.828 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:28.828 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:28.828 Debug: Writing characteristic without response
+09:08:28.829 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:28.829 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:28.829 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:29.831 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:29.831 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:29.831 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:29.831 Debug: [GetNativeService] past BLE operation lock
+09:08:29.831 Debug: [GetNativeService] release BLE operation lock
+09:08:29.831 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:29.831 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:29.831 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:29.831 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:29.831 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:29.831 Debug: Writing characteristic without response
+09:08:29.832 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:29.832 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:30.033 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:30.033 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:30.033 Debug: [GetNativeService] past BLE operation lock
+09:08:30.033 Debug: [GetNativeService] release BLE operation lock
+09:08:30.033 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:30.033 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:30.034 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:30.034 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:30.034 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:30.034 Debug: Writing characteristic without response
+09:08:30.034 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:30.034 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:30.034 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:31.035 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:31.035 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:31.035 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:31.035 Debug: [GetNativeService] past BLE operation lock
+09:08:31.035 Debug: [GetNativeService] release BLE operation lock
+09:08:31.035 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:31.035 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:31.035 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:31.036 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:31.036 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:31.036 Debug: Writing characteristic without response
+09:08:31.036 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:31.037 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:31.237 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:31.237 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:31.237 Debug: [GetNativeService] past BLE operation lock
+09:08:31.237 Debug: [GetNativeService] release BLE operation lock
+09:08:31.237 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:31.237 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:31.238 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:31.238 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:31.238 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:31.238 Debug: Writing characteristic without response
+09:08:31.238 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:31.241 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:31.241 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:32.242 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:32.242 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:32.242 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:32.242 Debug: [GetNativeService] past BLE operation lock
+09:08:32.242 Debug: [GetNativeService] release BLE operation lock
+09:08:32.242 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:32.242 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:32.242 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:32.242 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:32.242 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:32.243 Debug: Writing characteristic without response
+09:08:32.243 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:32.243 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:32.444 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:32.444 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:32.444 Debug: [GetNativeService] past BLE operation lock
+09:08:32.444 Debug: [GetNativeService] release BLE operation lock
+09:08:32.444 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:32.444 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:32.444 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:32.444 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:32.444 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:32.444 Debug: Writing characteristic without response
+09:08:32.445 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:32.445 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:32.445 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:33.447 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:33.447 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:33.447 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:33.447 Debug: [GetNativeService] past BLE operation lock
+09:08:33.447 Debug: [GetNativeService] release BLE operation lock
+09:08:33.447 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:33.447 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:33.447 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:33.447 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:33.447 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:33.447 Debug: Writing characteristic without response
+09:08:33.448 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:33.448 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:33.649 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:33.649 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:33.649 Debug: [GetNativeService] past BLE operation lock
+09:08:33.649 Debug: [GetNativeService] release BLE operation lock
+09:08:33.649 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:33.649 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:33.649 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:33.649 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:33.649 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:33.649 Debug: Writing characteristic without response
+09:08:33.650 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:33.650 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:33.650 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:34.651 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:34.651 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:34.651 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:34.651 Debug: [GetNativeService] past BLE operation lock
+09:08:34.651 Debug: [GetNativeService] release BLE operation lock
+09:08:34.651 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:34.651 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:34.651 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:34.652 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:34.652 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:34.652 Debug: Writing characteristic without response
+09:08:34.652 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:34.652 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:34.853 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:34.853 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:34.853 Debug: [GetNativeService] past BLE operation lock
+09:08:34.853 Debug: [GetNativeService] release BLE operation lock
+09:08:34.853 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:34.853 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:34.853 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:34.853 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:34.853 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:34.853 Debug: Writing characteristic without response
+09:08:34.854 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:34.854 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:34.854 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:35.856 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:35.856 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:35.856 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:35.856 Debug: [GetNativeService] past BLE operation lock
+09:08:35.856 Debug: [GetNativeService] release BLE operation lock
+09:08:35.856 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:35.856 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:35.856 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:35.856 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:35.856 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:35.856 Debug: Writing characteristic without response
+09:08:35.857 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:35.857 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:36.058 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:36.058 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:36.058 Debug: [GetNativeService] past BLE operation lock
+09:08:36.058 Debug: [GetNativeService] release BLE operation lock
+09:08:36.058 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:36.058 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:36.058 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:36.058 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:36.058 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:36.058 Debug: Writing characteristic without response
+09:08:36.061 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:36.061 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:36.061 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:37.062 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:37.062 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:37.062 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:37.063 Debug: [GetNativeService] past BLE operation lock
+09:08:37.063 Debug: [GetNativeService] release BLE operation lock
+09:08:37.063 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:37.063 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:37.063 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:37.063 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:37.063 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:37.063 Debug: Writing characteristic without response
+09:08:37.063 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:37.064 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:37.264 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:37.265 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:37.265 Debug: [GetNativeService] past BLE operation lock
+09:08:37.265 Debug: [GetNativeService] release BLE operation lock
+09:08:37.265 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:37.265 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:37.265 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:37.265 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:37.265 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:37.265 Debug: Writing characteristic without response
+09:08:37.265 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:37.265 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:37.265 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:38.265 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:38.265 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:38.266 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:38.266 Debug: [GetNativeService] past BLE operation lock
+09:08:38.266 Debug: [GetNativeService] release BLE operation lock
+09:08:38.266 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:38.266 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:38.266 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:38.266 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:38.266 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:38.266 Debug: Writing characteristic without response
+09:08:38.266 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:38.267 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:38.468 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:38.468 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:38.468 Debug: [GetNativeService] past BLE operation lock
+09:08:38.468 Debug: [GetNativeService] release BLE operation lock
+09:08:38.468 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:38.468 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:38.468 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:38.468 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:38.468 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:38.468 Debug: Writing characteristic without response
+09:08:38.469 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:38.469 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:38.469 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:39.470 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:39.470 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:39.470 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:39.471 Debug: [GetNativeService] past BLE operation lock
+09:08:39.471 Debug: [GetNativeService] release BLE operation lock
+09:08:39.471 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:39.471 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:39.471 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:39.471 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:39.471 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:39.471 Debug: Writing characteristic without response
+09:08:39.471 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:39.471 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:39.672 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:39.672 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:39.672 Debug: [GetNativeService] past BLE operation lock
+09:08:39.672 Debug: [GetNativeService] release BLE operation lock
+09:08:39.672 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:39.672 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:39.672 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:39.672 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:39.672 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:39.672 Debug: Writing characteristic without response
+09:08:39.673 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:39.673 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:39.673 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:40.674 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:40.674 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:40.674 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:40.674 Debug: [GetNativeService] past BLE operation lock
+09:08:40.674 Debug: [GetNativeService] release BLE operation lock
+09:08:40.674 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:40.674 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:40.675 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:40.675 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:40.675 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:40.675 Debug: Writing characteristic without response
+09:08:40.675 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:40.675 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:40.876 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:40.876 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:40.876 Debug: [GetNativeService] past BLE operation lock
+09:08:40.876 Debug: [GetNativeService] release BLE operation lock
+09:08:40.877 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:40.877 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:40.877 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:40.877 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:40.877 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:40.877 Debug: Writing characteristic without response
+09:08:40.877 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:40.877 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:40.877 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:41.878 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:41.878 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:41.878 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:41.878 Debug: [GetNativeService] past BLE operation lock
+09:08:41.878 Debug: [GetNativeService] release BLE operation lock
+09:08:41.878 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:41.878 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:41.878 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:41.878 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:41.878 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:41.878 Debug: Writing characteristic without response
+09:08:41.879 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:41.879 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:42.080 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:42.080 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:42.080 Debug: [GetNativeService] past BLE operation lock
+09:08:42.080 Debug: [GetNativeService] release BLE operation lock
+09:08:42.080 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:42.080 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:42.080 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:42.080 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:42.080 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:42.081 Debug: Writing characteristic without response
+09:08:42.081 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:42.081 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:42.081 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:43.082 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:43.085 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:43.085 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:43.085 Debug: [GetNativeService] past BLE operation lock
+09:08:43.085 Debug: [GetNativeService] release BLE operation lock
+09:08:43.085 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:43.085 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:43.085 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:43.085 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:43.085 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:43.085 Debug: Writing characteristic without response
+09:08:43.086 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:43.086 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:43.287 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:43.287 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:43.287 Debug: [GetNativeService] past BLE operation lock
+09:08:43.287 Debug: [GetNativeService] release BLE operation lock
+09:08:43.287 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:43.287 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:43.288 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:43.288 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:43.288 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:43.288 Debug: Writing characteristic without response
+09:08:43.288 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:43.288 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:43.288 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:44.289 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:44.289 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:44.289 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:44.289 Debug: [GetNativeService] past BLE operation lock
+09:08:44.289 Debug: [GetNativeService] release BLE operation lock
+09:08:44.289 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:44.289 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:44.289 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:44.289 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:44.289 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:44.290 Debug: Writing characteristic without response
+09:08:44.290 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:44.290 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:44.490 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:44.490 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:44.490 Debug: [GetNativeService] past BLE operation lock
+09:08:44.491 Debug: [GetNativeService] release BLE operation lock
+09:08:44.491 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:44.491 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:44.491 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:44.491 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:44.491 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:44.491 Debug: Writing characteristic without response
+09:08:44.491 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:44.491 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:44.491 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:45.492 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:45.492 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:45.492 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:45.492 Debug: [GetNativeService] past BLE operation lock
+09:08:45.492 Debug: [GetNativeService] release BLE operation lock
+09:08:45.492 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:45.492 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:45.492 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:45.493 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:45.493 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:45.493 Debug: Writing characteristic without response
+09:08:45.493 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:45.493 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:45.694 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:45.694 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:45.694 Debug: [GetNativeService] past BLE operation lock
+09:08:45.694 Debug: [GetNativeService] release BLE operation lock
+09:08:45.694 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:45.694 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:45.695 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:45.695 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:45.695 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:45.695 Debug: Writing characteristic without response
+09:08:45.695 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:45.695 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:45.695 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:45.752 Debug: ["UpdatedCharacterteristicValue"] - "3719" / "1234" - ERROR: null
+09:08:45.756 Information: BLE-LOGGER: "RECV GUI1 frame: 0D-47-55-49-31-1E-32-37-30-30-31-35-31-33-30-30-30-30-30-30-0D, sessionId=27001513000000"
+09:08:45.756 Information: BLE-LOGGER: "RECV GUI1 frame: 0D-47-55-49-31-1E-32-37-30-30-31-35-31-33-30-30-30-30-30-30-0D"
+09:08:45.756 Debug: MV Agusta Frame Received: "GUI1", Fields: "27001513000000"
+09:08:46.697 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:46.697 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:46.697 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:46.697 Debug: [GetNativeService] past BLE operation lock
+09:08:46.697 Debug: [GetNativeService] release BLE operation lock
+09:08:46.697 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:46.697 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:46.697 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:46.697 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:46.697 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:46.697 Debug: Writing characteristic without response
+09:08:46.698 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:46.698 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:46.899 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:46.899 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:46.899 Debug: [GetNativeService] past BLE operation lock
+09:08:46.899 Debug: [GetNativeService] release BLE operation lock
+09:08:46.899 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:46.899 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:46.899 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:46.899 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:46.899 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:46.899 Debug: Writing characteristic without response
+09:08:46.900 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:46.900 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:46.900 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:47.901 Debug: MV Agusta: Navigation Update - Maneuver 1/1: "turn-left", Dist: 999m, Speed: 0km/h
+09:08:47.902 Information: BLE-LOGGER: "SEND NAVI frame: 0D-4E-41-56-49-1E-74-75-72-6E-2D-6C-65-66-74-1E-57-32-52-20-54-65-73-74-0A-56-65-67-61-42-72-69-64-67-65-0A-1E-56-65-67-61-42-72-69-64-67-65-0D"
+09:08:47.902 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:47.902 Debug: [GetNativeService] past BLE operation lock
+09:08:47.902 Debug: [GetNativeService] release BLE operation lock
+09:08:47.902 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:47.902 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:47.902 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:47.902 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:47.902 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:47.902 Debug: Writing characteristic without response
+09:08:47.902 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:47.903 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:48.103 Information: BLE-LOGGER: "SEND SM frame: 0D-53-4D-1E-30-1E-31-32-35-30-30-1E-39-39-39-0D"
+09:08:48.103 Debug: [GetNativeService] awaiting at BLE operation lock
+09:08:48.103 Debug: [GetNativeService] past BLE operation lock
+09:08:48.103 Debug: [GetNativeService] release BLE operation lock
+09:08:48.103 Debug: [GetNativeCharacteristic] awaiting at BLE operation lock
+09:08:48.103 Debug: [GetNativeCharacteristic] past BLE operation lock
+09:08:48.103 Debug: [GetNativeCharacteristic] release BLE operation lock
+09:08:48.103 Debug: [WriteWithoutResponse] awaiting at BLE operation lock
+09:08:48.103 Debug: [WriteWithoutResponse] past BLE operation lock
+09:08:48.103 Debug: Writing characteristic without response
+09:08:48.103 Debug: [WriteWithoutResponse] release BLE operation lock
+09:08:48.103 Information: BLE-LOGGER: "NAV UPDATE: idx=0, icon=turn-left, dist=999m, speed=0km/h"
+09:08:48.103 Information: BLE-LOGGER: "W2R STRESS TEST DONE: 60 ok / 0 failed of 60, max tick 207 ms"
+09:08:48.114 Debug: IsReadyToSendWriteWithoutResponse Fired
+09:08:55.769 Debug: ["UpdatedCharacterteristicValue"] - "3719" / "1234" - ERROR: null
+09:08:55.770 Information: BLE-LOGGER: "RECV GUI1 frame: 0D-47-55-49-31-1E-32-37-30-30-31-34-31-33-30-30-30-30-30-30-0D, sessionId=27001413000000"
+09:08:55.770 Information: BLE-LOGGER: "RECV GUI1 frame: 0D-47-55-49-31-1E-32-37-30-30-31-34-31-33-30-30-30-30-30-30-0D"
+09:08:55.770 Debug: MV Agusta Frame Received: "GUI1", Fields: "27001413000000"
