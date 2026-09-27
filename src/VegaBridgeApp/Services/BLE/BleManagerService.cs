@@ -399,100 +399,6 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
-    /// <summary>
-    /// W2R stress test: sends the real navigation frame flow (NAVI + SM, as in a tour)
-    /// ~1×/second for 60 ticks and reports which ticks failed. Every failed tick and the
-    /// final summary are logged under the "BLE-WRITE-TEST" / "W2R STRESS TEST" markers,
-    /// so a field log shows exactly when the W2R path stopped draining.
-    /// A tick counts as failed only when the NAVI write itself throws (SM/SM1 failures
-    /// are swallowed inside the plugin). Note: with Shiny 5.4.0, writes into a stuck W2R
-    /// path queue instead of throwing, so the test reads healthy even when the bike is
-    /// stale – with Shiny 5.7.2+ (per-write timeout) it detects the stall.
-    /// </summary>
-    public async Task<W2rStressTestResult> RunW2rStressTestAsync()
-    {
-        if (_activePeripheral is null || _activePlugin is null)
-            return new W2rStressTestResult(null, 0, 0, "No connected device");
-
-        const int ticks = 60;
-        BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
-        // The payload counts (instruction "W2R Test N/60" + SM distance countdown),
-        // so the bike display shows a visible counter: at the end of the test the
-        // display reading tells you how far delivery actually got. A stuck W2R
-        // consumer shows up as "display stuck at tick 37" even when the local
-        // writes were accepted (Shiny 5.4.0 queueing).
-        var input = new NavigationUpdateInput
-        {
-            ManeuverIcon = "turn-left",
-            InstructionText = "W2R Test\nVegaBridge",
-            StreetName = "VegaBridge",
-            IntersectionName = null,
-            DistanceToTurnM = 999,
-            SpeedKmh = 0,
-            RemainingDistanceKm = 12.5,
-            RemainingTimeMin = 6,
-            CurrentManeuverIndex = 0,
-            TotalManeuvers = 1,
-            IsFinal = false
-        };
-
-        int okTicks = 0, failedTicks = 0, firstFailTick = 0, maxTickMs = 0;
-        var failTickList = new List<int>();
-        Log.Information("BLE-LOGGER: {Line}", "W2R STRESS TEST START (60 ticks, ~1 Hz NAVI+SM)");
-
-        for (int tick = 1; tick <= ticks; tick++)
-        {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            bool ok;
-            try
-            {
-                // Vary the payload per tick so delivery progress is visible on the
-                // display (instruction counter + SM distance countdown 998 → 939 m).
-                var tickInput = input with
-                {
-                    InstructionText = $"W2R Test {tick}/60\nVegaBridge",
-                    DistanceToTurnM = 999 - tick
-                };
-                await _activePlugin.SendNavigationUpdateAsync(wrapper, tickInput);
-                ok = true;
-            }
-            catch (Exception ex)
-            {
-                ok = false;
-                Log.Information("BLE-LOGGER: {Line}",
-                    $"BLE-WRITE-TEST tick {tick}: FAILED after {sw.ElapsedMilliseconds} ms ({ex.GetType().Name})");
-            }
-            sw.Stop();
-
-            if (ok)
-            {
-                okTicks++;
-                maxTickMs = Math.Max(maxTickMs, (int)sw.ElapsedMilliseconds);
-            }
-            else
-            {
-                failedTicks++;
-                if (firstFailTick == 0)
-                    firstFailTick = tick;
-                failTickList.Add(tick);
-            }
-
-            if (tick < ticks)
-                await Task.Delay(1000);
-        }
-
-        string summary = $"W2R STRESS TEST DONE: {okTicks} ok / {failedTicks} failed of {ticks}"
-            + (firstFailTick > 0 ? $", first fail tick {firstFailTick} (ticks: {string.Join(',', failTickList)})" : "")
-            + $", max tick {maxTickMs} ms";
-        Log.Information("BLE-LOGGER: {Line}", summary);
-
-        return new W2rStressTestResult(
-            firstFailTick > 0 ? firstFailTick : null, failedTicks, maxTickMs, summary);
-    }
-
-    /// <summary>Outcome of a W2R stress test (see <see cref="BleManagerService.RunW2rStressTestAsync"/>).</summary>
-    public sealed record W2rStressTestResult(int? FirstFailTick, int FailedTicks, int MaxTickMs, string Summary);
-
     /// <summary>Outcome of the 30-minute W2R route simulation (see <see cref="BleManagerService.RunW2rRouteSimAsync"/>).</summary>
     public sealed record W2rRouteSimResult(
         int Ticks, int SlowTicks, int FailedTicks, int MaxDrainMs, int? FirstAnomalySecond, string Summary);
@@ -718,27 +624,6 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     }
 
     private static string FormatSimTm(int seconds) => $"{seconds / 60:00}:{seconds % 60:00}";
-
-    public async Task SendCommandAsync(string command, params string[] fields)
-    {
-        if (_activePeripheral == null || _activePlugin == null)
-        {
-            UpdateError("No connected device or compatible plugin available.");
-            return;
-        }
-
-        try
-        {
-            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
-            Log.Information("BLE-LOGGER: {Line}", $"SEND CMD: {command} fields=[{string.Join(", ", fields)}]");
-            await _activePlugin.SendAsync(wrapper, command, fields);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Failed to send command {Command}", command);
-            UpdateError($"Command failed: {ex.Message}");
-        }
-    }
 
     /// <summary>
     /// Execute a semantic navigation action through the active plugin.
