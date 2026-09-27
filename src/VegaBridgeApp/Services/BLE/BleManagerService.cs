@@ -411,7 +411,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// <summary>
     /// 30-minute route simulation over the real W2R write path: city traffic
     /// (frequent instruction changes) → long B10 highway stretch → simulated
-    /// reroute (RENAVI + new instruction set) → city again → destination.
+    /// reroute (RENAVI off-route alert, early injection at ~t+02:00 so the
+    /// post-RENAVI stall window is reached fast) → city again → destination.
     /// Sends NAVI+SM at the baseline 1 Hz cadence, starts the PING keepalive
     /// via the navigation-start flow (like a real ride), and stops it on
     /// FINISH. Every tick measures how long the write path took to accept
@@ -459,15 +460,20 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             const int slowThresholdMs = 500;
 
+            // Early off-route injection at t+02:00 (was: city-2 segment start at
+            // t+20:00) so the post-RENAVI stall window is reached in ~2:46
+            // instead of ~20:46 – the test no longer requires waiting 20 min.
+            const int rerouteAtSecond = 120;
+
             for (int mi = 0; mi < profile.Count; mi++)
             {
                 SimManeuver m = profile[mi];
 
-                // Simulated reroute: off-route alert + new instruction set,
-                // injected right before the city-2 segment (end of B10).
+                // Simulated reroute: off-route alert + remaining distance bump,
+                // injected early (t+02:00) to reach the stall window fast.
                 // withReroute=false = control run (Kontrolllauf) – same profile,
                 // no off-route alert, to test whether the stall is REROUTE-triggered.
-                if (m.Segment == "city-2" && !rerouteSent)
+                if (second >= rerouteAtSecond && !rerouteSent)
                 {
                     rerouteSent = true;
                     if (withReroute)
@@ -476,7 +482,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                         if (_activePlugin is not null)
                         {
                             Log.Information("BLE-LOGGER: {Line}",
-                                $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI sent (simulated off-route), new route via city-2, remaining +1.6 km");
+                                $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI sent (early injection, simulated off-route), remaining +1.6 km");
                             await _activePlugin.SendOffRouteAlertAsync(wrapper, new OffRouteAlertInput
                             {
                                 DistanceMeters = 0,
@@ -495,7 +501,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     else
                     {
                         Log.Information("BLE-LOGGER: {Line}",
-                            $"W2R-SIM CONTROL t+{FormatSimTm(second)}: Reroute deaktiviert (Kontrolllauf) – city-2 ohne Off-Route-Alert");
+                            $"W2R-SIM CONTROL t+{FormatSimTm(second)}: Reroute deaktiviert (Kontrolllauf) – kein Off-Route-Alert");
                         await Task.Delay(500, ct);
                     }
                 }
