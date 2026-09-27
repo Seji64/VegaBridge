@@ -185,6 +185,57 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         }
     }
 
+    // ── W2R rescan-level reset test (middle level of the reset hierarchy) ──
+    // Empirical check whether a rescan-level reset clears a clogged W2R state:
+    // PRE 3 NAVI instructions → full teardown + rescan + new IPeripheral object
+    // + reconnect → POST 3 instructions. Everything logged under "W2R-RR".
+
+    private bool _rrRunning;
+    private string _rrResult = string.Empty;
+    private CancellationTokenSource? _rrCts;
+
+    private async Task RunRescanResetTestAsync()
+    {
+        if (_rrRunning)
+        {
+            // Second press = stop
+            _rrCts?.Cancel();
+            return;
+        }
+        if (!IsConnected)
+            return;
+
+        _rrCts = new CancellationTokenSource();
+        _rrRunning = true;
+        _rrResult = string.Empty;
+        StateHasChanged();
+
+        DebugLogSink.Instance.Clear(); // start a fresh log capture for the test
+
+        try
+        {
+            _rrResult = await BleManager.RunRescanResetTestAsync(_rrCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _rrResult = "W2R-RR stopped (cancelled)";
+        }
+        catch (Exception ex)
+        {
+            _rrResult = $"W2R-RR failed: {ex.Message}";
+        }
+        finally
+        {
+            _rrRunning = false;
+            _rrCts?.Dispose();
+            _rrCts = null;
+            // The test lasts ~30 s: the component may have been disposed
+            // (navigation away) by the time it finishes – guard the refresh.
+            if (!_disposed)
+                _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
     // ── User actions ──────────────────────────────────────────────────────
 
     private async Task ConnectToSelected()

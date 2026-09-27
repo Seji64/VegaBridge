@@ -667,6 +667,142 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
+    /// <summary>
+    /// Rescan-level reset test (middle level of the reset hierarchy – untested
+    /// until now). PRE: 3 NAVI test instructions on the current connection with
+    /// per-write drain measurement. RESET: full teardown (DisconnectAsync) + fresh
+    /// rescan + new IPeripheral object + reconnect. POST: 3 instructions on the
+    /// new connection. If a clogged/stuck state lives in the old GATT session,
+    /// PRE shows the stall (~3 s / timeout) and POST returns to baseline (~300 ms).
+    /// Everything is logged under "W2R-RR"; the returned line is the UI caption.
+    /// </summary>
+    public async Task<string> RunRescanResetTestAsync(CancellationToken ct = default)
+    {
+        IPeripheral? oldPeripheral = _activePeripheral;
+        IBleDevicePlugin? oldPlugin = _activePlugin;
+        if (oldPeripheral is null || oldPlugin is null)
+            return "W2R-RR: nicht gestartet – keine aktive Verbindung";
+        if (oldPlugin is not MvAgustaBlePlugin)
+            return "W2R-RR: nicht gestartet – aktives Plugin ist kein MV-Agusta-Plugin";
+
+        Guid uuid = Guid.Parse(oldPeripheral.Uuid);
+        string uuidKey = uuid.ToString().ToUpper();
+        string oldRef = RefHash(oldPeripheral);
+
+        NavigationUpdateInput testInput = new()
+        {
+            ManeuverIcon = "turn-right",
+            InstructionText = "W2R-RR: rechts abbiegen",
+            StreetName = "W2R-RR",
+            DistanceToTurnM = 200,
+            SpeedKmh = 30,
+            RemainingDistanceKm = 10.0,
+            RemainingTimeMin = 20.0,
+            CurrentManeuverIndex = 0,
+            TotalManeuvers = 3,
+            IsFinal = false
+        };
+
+        async Task<(bool ok, int drainMs)> WriteOneAsync(IBleDevicePlugin plugin, BleConnectedDeviceWrapper wrapper, string phase, int idx)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            bool ok;
+            try
+            {
+                await plugin.SendNavigationUpdateAsync(wrapper, testInput);
+                ok = true;
+            }
+            catch (Exception ex)
+            {
+                ok = false;
+                Log.Warning("W2R-RR {Phase} #{Idx}: write failed – {Ex}", phase, idx, ex.Message);
+            }
+            int drainMs = (int)sw.ElapsedMilliseconds;
+            Log.Information("BLE-LOGGER: {Line}", $"W2R-RR {phase} #{idx}: {(ok ? "OK" : "FAIL")} drain {drainMs} ms");
+            return (ok, drainMs);
+        }
+
+        // ── PRE: 3 instructions on the current (possibly clogged) connection
+        int preOk = 0, preMax = 0;
+        Log.Information("BLE-LOGGER: {Line}", $"W2R-RR PRE: 3 test instructions on the current connection (peripheral {oldRef})");
+        var preWrapper = new BleConnectedDeviceWrapper(oldPeripheral, oldPlugin);
+        for (int i = 1; i <= 3; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (ok, drain) = await WriteOneAsync(oldPlugin, preWrapper, "PRE", i);
+            preOk += ok ? 1 : 0;
+            preMax = Math.Max(preMax, drain);
+            if (i < 3)
+                await Task.Delay(500, ct);
+        }
+
+        // ── RESET: full teardown + fresh rescan + new peripheral object + reconnect
+        Log.Information("BLE-LOGGER: {Line}", $"W2R-RR RESET: tearing down old connection + fresh rescan of {uuid}");
+        var resetSw = System.Diagnostics.Stopwatch.StartNew();
+        await DisconnectAsync();
+        StopScanning();
+        var _ = StartScanningAsync(); // runs 30 s in the background – we stop it early
+
+        // Poll the rescan cache until the bike re-appears (up to 15 s).
+        bool found = false;
+        for (int i = 0; i < 30 && !found; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            found = _discoveredPeripherals.ContainsKey(uuidKey);
+            if (!found)
+                await Task.Delay(500, ct);
+        }
+        if (!found)
+        {
+            StopScanning();
+            string fail = $"W2R-RR RESET FAILED: {uuid} did not re-appear in the rescan (15 s) – connection is now down";
+            Log.Warning("BLE-LOGGER: {Line}", fail);
+            return fail;
+        }
+
+        bool connected = await ConnectAsync(uuid);
+        StopScanning();
+        long resetMs = resetSw.ElapsedMilliseconds;
+        if (!connected)
+        {
+            string fail = $"W2R-RR RESET FAILED: reconnect of {uuid} after rescan failed (took {resetMs} ms)";
+            Log.Warning("BLE-LOGGER: {Line}", fail);
+            return fail;
+        }
+        if (_activePeripheral is null || _activePlugin is not MvAgustaBlePlugin)
+        {
+            string fail = "W2R-RR RESET FAILED: no MV Agusta plugin after reconnect";
+            Log.Warning("BLE-LOGGER: {Line}", fail);
+            return fail;
+        }
+
+        bool sameObject = ReferenceEquals(oldPeripheral, _activePeripheral);
+        Log.Information("BLE-LOGGER: {Line}",
+            $"W2R-RR RESET: done in {resetMs} ms – peripheral object: {(sameObject ? "SAME (reused via Shiny cache)" : "NEW (fresh scan object)")}, {oldRef} -> {RefHash(_activePeripheral)}");
+
+        // ── POST: 3 instructions on the new connection
+        int postOk = 0, postMax = 0;
+        Log.Information("BLE-LOGGER: {Line}", $"W2R-RR POST: 3 test instructions on the new connection");
+        var postWrapper = new BleConnectedDeviceWrapper(_activePeripheral, _activePlugin);
+        for (int i = 1; i <= 3; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (ok, drain) = await WriteOneAsync(_activePlugin, postWrapper, "POST", i);
+            postOk += ok ? 1 : 0;
+            postMax = Math.Max(postMax, drain);
+            if (i < 3)
+                await Task.Delay(500, ct);
+        }
+
+        string summary = $"W2R-RR DONE: PRE {preOk}/3 (max {preMax} ms) → RESET {resetMs} ms ({(sameObject ? "same" : "new")} object) → POST {postOk}/3 (max {postMax} ms)";
+        Log.Information("BLE-LOGGER: {Line}", summary);
+        return summary;
+    }
+
+    /// <summary>Human-readable reference id for a peripheral object (type + hashed instance).</summary>
+    private static string RefHash(IPeripheral peripheral) =>
+        $"{peripheral.GetType().Name}@{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(peripheral):X8}";
+
     /// <summary>30-minute simulation route profile (see <see cref="RunW2rRouteSimAsync"/>).</summary>
     private static IReadOnlyList<SimManeuver> BuildW2rRouteProfile()
     {

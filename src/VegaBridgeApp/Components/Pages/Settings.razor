@@ -61,6 +61,20 @@
                         {
                             <MudText Typo="Typo.caption" Style="font-family: monospace;">@_simResult</MudText>
                         }
+                        <MudButton
+                            Variant="Variant.Text"
+                            Color="Color.Secondary"
+                            Size="Size.Small"
+                            Disabled="@(!IsConnected || _rrRunning)"
+                            StartIcon="@Icons.Material.Filled.Replay"
+                            FullWidth="true"
+                            OnClick="@RunRescanResetTestAsync">
+                            @(_rrRunning ? "W2R Rescan-Reset Test läuft …" : "W2R Rescan-Reset Test (3 → RESET → 3)")
+                        </MudButton>
+                        @if (!string.IsNullOrEmpty(_rrResult))
+                        {
+                            <MudText Typo="Typo.caption" Style="font-family: monospace;">@_rrResult</MudText>
+                        }
 
                         <!-- <MudButton
                             Variant="Variant.Outlined"
