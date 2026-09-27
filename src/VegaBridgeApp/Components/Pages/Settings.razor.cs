@@ -136,6 +136,62 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         });
     }
 
+    // ── W2R route simulation (30 min) ─────────────────────────────────────
+    // Long-duration W2R test: scripted route (city traffic → B10 → reroute →
+    // city → destination) at baseline 1 Hz cadence. Runs independently of
+    // the UI, so it also works with the phone display off; progress and
+    // summary are logged under "W2R-SIM" for later analysis.
+
+    private bool _simRunning;
+    private string _simResult = string.Empty;
+    private CancellationTokenSource? _simCts;
+    private bool _disposed;
+
+    private async Task RunW2rRouteSimAsync()
+    {
+        if (_simRunning)
+        {
+            // Second press = stop
+            _simCts?.Cancel();
+            return;
+        }
+        if (!IsConnected)
+            return;
+
+        _simCts = new CancellationTokenSource();
+        _simRunning = true;
+        _simResult = string.Empty;
+        StateHasChanged();
+
+        DebugLogSink.Instance.Clear(); // start a fresh log capture for the test
+
+        try
+        {
+            double? lat = Gps.LastReading?.Position.Latitude;
+            double? lon = Gps.LastReading?.Position.Longitude;
+            BleManagerService.W2rRouteSimResult result = await BleManager.RunW2rRouteSimAsync(lat, lon, _simCts.Token);
+            _simResult = result.Summary;
+        }
+        catch (OperationCanceledException)
+        {
+            _simResult = "W2R-SIM stopped (cancelled)";
+        }
+        catch (Exception ex)
+        {
+            _simResult = $"W2R-SIM failed: {ex.Message}";
+        }
+        finally
+        {
+            _simRunning = false;
+            _simCts?.Dispose();
+            _simCts = null;
+            // The run lasts 30 min: the component may have been disposed
+            // (navigation away) by the time it finishes – guard the refresh.
+            if (!_disposed)
+                _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
     // ── User actions ──────────────────────────────────────────────────────
 
     private async Task ConnectToSelected()
@@ -440,6 +496,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
         _stateSubscription?.Dispose();
         _devicesSubscription?.Dispose();
         _errorSubscription?.Dispose();

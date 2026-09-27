@@ -493,6 +493,232 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// <summary>Outcome of a W2R stress test (see <see cref="BleManagerService.RunW2rStressTestAsync"/>).</summary>
     public sealed record W2rStressTestResult(int? FirstFailTick, int FailedTicks, int MaxTickMs, string Summary);
 
+    /// <summary>Outcome of the 30-minute W2R route simulation (see <see cref="BleManagerService.RunW2rRouteSimAsync"/>).</summary>
+    public sealed record W2rRouteSimResult(
+        int Ticks, int SlowTicks, int FailedTicks, int MaxDrainMs, int? FirstAnomalySecond, string Summary);
+
+    /// <summary>One scripted maneuver of the route simulation timeline.</summary>
+    private sealed record SimManeuver(
+        string Segment, string Icon, string Instruction, string Street,
+        int DurationSec, double SpeedKmh, int DistanceToTurnM);
+
+    /// <summary>
+    /// 30-minute route simulation over the real W2R write path: city traffic
+    /// (frequent instruction changes) → long B10 highway stretch → simulated
+    /// reroute (RENAVI + new instruction set) → city again → destination.
+    /// Sends NAVI+SM at the baseline 1 Hz cadence, starts the PING keepalive
+    /// via the navigation-start flow (like a real ride), and stops it on
+    /// FINISH. Every tick measures how long the write path took to accept
+    /// the frame ("drain time"): with Shiny 5.7.2+ a clogged W2R queue shows
+    /// up as ~4 s timeouts, so any tick above the 500 ms threshold or a
+    /// failed write is logged as a W2R-SIM anomaly and 3+ consecutive
+    /// anomalies are flagged as a detected stall. Heartbeats, segment
+    /// changes and the final summary keep the exported log readable.
+    /// Designed for a display-off run: no UI dependency, progress and
+    /// summary are logged under "W2R-SIM" for later analysis.
+    /// </summary>
+    public async Task<W2rRouteSimResult> RunW2rRouteSimAsync(double? startLat, double? startLon, CancellationToken ct)
+    {
+        if (_activePeripheral is null || _activePlugin is null)
+            return new W2rRouteSimResult(0, 0, 0, 0, null, "W2R-SIM: no connected device");
+
+        BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+        IReadOnlyList<SimManeuver> profile = BuildW2rRouteProfile();
+        double totalKm = profile.Sum(m => m.SpeedKmh * m.DurationSec / 3600.0);
+        int totalSec = profile.Sum(m => m.DurationSec);
+
+        Log.Information("BLE-LOGGER: {Line}",
+            $"W2R-SIM START: {totalSec / 60}-min route, {totalKm:F1} km (city-1 → B10 → REROUTE → city-2 → ziel), 1 Hz NAVI+SM + PING keepalive, slow threshold 500 ms");
+
+        int ticks = 0, slowTicks = 0, failedTicks = 0, maxDrainMs = 0;
+        int firstAnomalySecond = 0, consecutive = 0;
+        double remainingM = totalKm * 1000;
+        int second = 0; // t+ elapsed seconds over the whole run
+        bool rerouteSent = false;
+
+        try
+        {
+            // Navigation start (DEST + REM) starts the PING keepalive – same
+            // as a real ride, so keepalive behaviour is part of the test.
+            await _activePlugin.SendNavigationStartAsync(wrapper, new NavigationStartInput
+            {
+                TotalDistanceKm = totalKm,
+                TotalTimeMin = totalSec / 60.0,
+                StartLatitude = startLat,
+                StartLongitude = startLon
+            });
+
+            const int slowThresholdMs = 500;
+
+            for (int mi = 0; mi < profile.Count; mi++)
+            {
+                SimManeuver m = profile[mi];
+
+                // Simulated reroute: off-route alert + new instruction set,
+                // injected right before the city-2 segment (end of B10).
+                if (m.Segment == "city-2" && !rerouteSent)
+                {
+                    rerouteSent = true;
+                    remainingM += 1600; // the reroute adds 1.6 km
+                    Log.Information("BLE-LOGGER: {Line}",
+                        $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI sent (simulated off-route), new route via city-2, remaining +1.6 km");
+                    await _activePlugin.SendOffRouteAlertAsync(wrapper, new OffRouteAlertInput
+                    {
+                        DistanceMeters = 0,
+                        Latitude = startLat ?? 0,
+                        Longitude = startLon ?? 0,
+                        DetectedAt = DateTimeOffset.UtcNow
+                    });
+                    await Task.Delay(500, ct);
+                }
+
+                Log.Information("BLE-LOGGER: {Line}",
+                    $"W2R-SIM SEGMENT t+{FormatSimTm(second)}: {m.Segment} ({m.DurationSec}s @ {m.SpeedKmh:F0} km/h, maneuver {mi + 1}/{profile.Count})");
+
+                for (int s = 0; s < m.DurationSec; s++, second++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    ticks++;
+
+                    double distToTurnM = m.DistanceToTurnM * (1.0 - s / (double)m.DurationSec);
+                    remainingM -= m.SpeedKmh * 1000.0 / 3600.0;
+
+                    var input = new NavigationUpdateInput
+                    {
+                        ManeuverIcon = m.Icon,
+                        InstructionText = m.Instruction,
+                        StreetName = m.Street,
+                        DistanceToTurnM = Math.Max(0, distToTurnM),
+                        SpeedKmh = m.SpeedKmh,
+                        RemainingDistanceKm = Math.Max(0, remainingM) / 1000.0,
+                        RemainingTimeMin = (totalSec - second) / 60.0,
+                        CurrentManeuverIndex = mi,
+                        TotalManeuvers = profile.Count,
+                        IsFinal = mi == profile.Count - 1
+                    };
+
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    bool ok;
+                    try
+                    {
+                        await _activePlugin.SendNavigationUpdateAsync(wrapper, input);
+                        ok = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        ok = false;
+                        failedTicks++;
+                        Log.Information("BLE-LOGGER: {Line}",
+                            $"W2R-SIM FAIL t+{FormatSimTm(second)} seg={m.Segment} tick={ticks} after {sw.ElapsedMilliseconds} ms ({ex.GetType().Name})");
+                    }
+                    int drainMs = (int)sw.ElapsedMilliseconds;
+                    sw.Stop();
+                    maxDrainMs = Math.Max(maxDrainMs, drainMs);
+
+                    bool anomalous = !ok || drainMs > slowThresholdMs;
+                    if (anomalous)
+                    {
+                        slowTicks++;
+                        if (firstAnomalySecond == 0)
+                            firstAnomalySecond = second;
+                        consecutive++;
+                        if (consecutive >= 3)
+                        {
+                            Log.Information("BLE-LOGGER: {Line}",
+                                $"W2R-SIM STALL: {consecutive} consecutive anomalous ticks, since t+{FormatSimTm(firstAnomalySecond)} (threshold {slowThresholdMs} ms, max drain {maxDrainMs} ms)");
+                        }
+                        else if (ok)
+                        {
+                            Log.Information("BLE-LOGGER: {Line}",
+                                $"W2R-SIM SLOW t+{FormatSimTm(second)} seg={m.Segment} tick={ticks} drainMs={drainMs}");
+                        }
+                    }
+                    else
+                    {
+                        consecutive = 0;
+                    }
+
+                    if (ticks % 30 == 0)
+                    {
+                        Log.Information("BLE-LOGGER: {Line}",
+                            $"W2R-SIM HB t+{FormatSimTm(second)} seg={m.Segment} tick={ticks} cumMaxDrainMs={maxDrainMs} slow={slowTicks} failed={failedTicks}");
+                    }
+
+                    // Keep the 1 Hz cadence: the write plus the plugin's
+                    // internal leaky-bucket delays already consumed part of
+                    // this second (a clogged write self-paces at ~4 s).
+                    long leftoverMs = 1000 - sw.ElapsedMilliseconds;
+                    if (leftoverMs > 0)
+                        await Task.Delay((int)leftoverMs, ct);
+                }
+            }
+
+            await _activePlugin.SendNavigationFinishAsync(wrapper);
+
+            string summary = $"W2R-SIM DONE: {ticks} ticks over {second}s, {slowTicks} slow / {failedTicks} failed"
+                + (firstAnomalySecond > 0
+                    ? $", first anomaly t+{FormatSimTm(firstAnomalySecond)}"
+                    : "")
+                + $", max drain {maxDrainMs} ms, reroute sent";
+            Log.Information("BLE-LOGGER: {Line}", summary);
+            return new W2rRouteSimResult(
+                ticks, slowTicks, failedTicks, maxDrainMs,
+                firstAnomalySecond > 0 ? firstAnomalySecond : null, summary);
+        }
+        catch (OperationCanceledException)
+        {
+            Log.Information("BLE-LOGGER: {Line}", $"W2R-SIM STOPPED (cancelled) at t+{FormatSimTm(second)} – sending FINISH");
+            try
+            {
+                await _activePlugin.SendNavigationFinishAsync(wrapper);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "W2R-SIM: FINISH after cancel failed");
+            }
+            string summary = $"W2R-SIM STOPPED after {ticks} ticks / {second}s, {slowTicks} slow / {failedTicks} failed, max drain {maxDrainMs} ms";
+            Log.Information("BLE-LOGGER: {Line}", summary);
+            return new W2rRouteSimResult(ticks, slowTicks, failedTicks, maxDrainMs, null, summary);
+        }
+    }
+
+    /// <summary>30-minute simulation route profile (see <see cref="RunW2rRouteSimAsync"/>).</summary>
+    private static IReadOnlyList<SimManeuver> BuildW2rRouteProfile()
+    {
+        const double citySpeed = 35, highwaySpeed = 80, finalSpeed = 25;
+        return
+        [
+            // city-1: 480 s – dense traffic, frequent instruction changes
+            new SimManeuver("city-1", "turn-left", "Links abbiegen\nHauptstraße", "Hauptstraße", 48, citySpeed, 300),
+            new SimManeuver("city-1", "straight", "Richtung Zentrum\nB 27", "B 27", 40, citySpeed, 300),
+            new SimManeuver("city-1", "turn-right", "Rechts abbiegen\nKastanienweg", "Kastanienweg", 48, citySpeed, 300),
+            new SimManeuver("city-1", "roundabout-right-1", "Kreisverkehr\nAusfahrt 2", "L 1015", 54, citySpeed, 300),
+            new SimManeuver("city-1", "turn-left", "Links abbiegen\nSchwabstraße", "Schwabstraße", 48, citySpeed, 300),
+            new SimManeuver("city-1", "straight", "Gerade\nL 1015", "L 1015", 40, citySpeed, 300),
+            new SimManeuver("city-1", "turn-right", "Rechts abbiegen\nIndustriestraße", "Industriestraße", 48, citySpeed, 300),
+            new SimManeuver("city-1", "roundabout-right-2", "Kreisverkehr\nAusfahrt 1", "K 1234", 54, citySpeed, 300),
+            new SimManeuver("city-1", "turn-left", "Links abbiegen\nZielstraße", "Zielstraße", 40, citySpeed, 300),
+            new SimManeuver("city-1", "straight", "Auf die B 10\nRichtung Süden", "B 10", 60, citySpeed, 300),
+            // B10: 720 s – long highway stretch, one instruction at a time
+            new SimManeuver("B10", "straight", "Gerade\nB 10", "B 10", 240, highwaySpeed, 8000),
+            new SimManeuver("B10", "straight", "Gerade\nB 10", "B 10", 240, highwaySpeed, 8000),
+            new SimManeuver("B10", "straight", "Ausfahrt\nAbfahrt Zentrum", "B 10", 240, highwaySpeed, 8000),
+            // city-2: 480 s – new route after the simulated reroute
+            new SimManeuver("city-2", "turn-right", "Rechts abbiegen\nRosenstraße", "Rosenstraße", 60, citySpeed, 300),
+            new SimManeuver("city-2", "straight", "Gerade\nRosenstraße", "Rosenstraße", 60, citySpeed, 300),
+            new SimManeuver("city-2", "turn-left", "Links abbiegen\nLindenstraße", "Lindenstraße", 60, citySpeed, 300),
+            new SimManeuver("city-2", "roundabout-right-1", "Kreisverkehr\nAusfahrt 2", "L 1015", 60, citySpeed, 300),
+            new SimManeuver("city-2", "turn-right", "Rechts abbiegen\nBahnhofstraße", "Bahnhofstraße", 60, citySpeed, 300),
+            new SimManeuver("city-2", "straight", "Gerade\nMarktplatz", "Marktplatz", 60, citySpeed, 300),
+            new SimManeuver("city-2", "turn-left", "Links abbiegen\nZielstraße", "Zielstraße", 60, citySpeed, 300),
+            new SimManeuver("city-2", "straight", "Ziel in Kürze\nAnkunft", "Zielstraße", 60, citySpeed, 300),
+            // final approach: 120 s
+            new SimManeuver("final", "straight", "Ziel\nVegaBridge", "Ankunft", 120, finalSpeed, 300)
+        ];
+    }
+
+    private static string FormatSimTm(int seconds) => $"{seconds / 60:00}:{seconds % 60:00}";
+
     public async Task SendCommandAsync(string command, params string[] fields)
     {
         if (_activePeripheral == null || _activePlugin == null)

@@ -59,6 +59,20 @@
                         {
                             <MudText Typo="Typo.caption" Style="font-family: monospace;">@_w2rTestResult</MudText>
                         }
+                        <MudButton
+                            Variant="Variant.Text"
+                            Color="Color.Secondary"
+                            Size="Size.Small"
+                            Disabled="@(!IsConnected || _simRunning)"
+                            StartIcon="@Icons.Material.Filled.Route"
+                            FullWidth="true"
+                            OnClick="@RunW2rRouteSimAsync">
+                            @(_simRunning ? "W2R Route-Sim läuft … (Stop)" : "W2R Route-Sim (30 min)")
+                        </MudButton>
+                        @if (!string.IsNullOrEmpty(_simResult))
+                        {
+                            <MudText Typo="Typo.caption" Style="font-family: monospace;">@_simResult</MudText>
+                        }
 
                         <!-- <MudButton
                             Variant="Variant.Outlined"
