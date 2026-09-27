@@ -1,7 +1,7 @@
 # Follow-up-Plan: BLE W2R-Resilienz (Nachfolger von PR #28)
 
-> Status: **Planung** – Zweig `fix/ble-w2r-resilience`, Implementierung erst nach Freigabe.
-> Basis: Revert von PR #28 (`8b23338`), TestFlight Build 8 = 1.0.4 (8) = exakte Vor-PR-Baseline.
+> Status: **Planung** – Zweig `fix/ble-w2r-resilience` (PR #29), Implementierung erst nach Freigabe.
+> Zweig-Stand: 1-Hz-Baseline + W2R-Stress-Test-Button + **Shiny 5.7.2** + Package-Updates (User-Commits `2216811`, `141adf9`, `17a2bf2`). main = saubere Revert-Baseline (Shiny 5.4.0).
 
 ## Hintergrund – Tour 2026-09-26 (zwei Logs)
 
@@ -28,9 +28,10 @@
 | 1 | **Jitter-Hysterese auf Bucket-Trigger** | `BleNavigationCoordinator` | Bucket-Flip löst erst nach 2 aufeinanderfolgenden Ticks aus + ±10 % Hysterese-Band an der Bucket-Grenze (50-m-Zone). 30-s-Backup-Resend bleibt. |
 | 2 | **PING entkoppeln** | `MvAgustaBlePlugin` | PING-Timer läuft unabhängig von Nav-Updates: 5-s-Skip-Fenster nach Nav-Update entfernen (PING = 8-Byte-Frame, kostenneutral). PING muss auch bei 1 Hz Nav-Updates zuverlässig alle 30 s ankommen. |
 | 3 | **Watchdog verifizieren** | `BleManagerService` | „BLE link degraded“ steht im 09-26-Log **0-mal** trotz 354 Fehlern – `ReportNavWriteStale()` nachverfolgen (Logger-Kategorie? DebugLogSink-Export-Filter?), fixen und in Testtour prüfen. |
-| 4 | **Full-Teardown-Eskalation bei anhaltendem W2R-Stall** | `BleManagerService` (`InvalidateConnectionAndReconnect` + `RetryConnectionAsync`) | Stufenmodell: 3 consecutive W2R-Timeouts (~12 s) → heutiger Reconnect (15 s Cooldown, 3× 2^n s); ab 6 consecutive Fails bzw. 60 s ohne erfolgreichen Write → **Disconnect + Peripheral-Objekt-Release + Re-Scan + frische Verbindung**. Log-Linie pro Eskalation. |
-| 5 | **Force-Sync nach Reconnect** | `BleManagerService` / Plugin | Nach jedem (Re-)Connect/Teardown: aktuellen NAVI+SM sofort mit `force=true` senden, damit das Display synchron ist (kompensiert die unter 5.7.2 verlore Frames im Stall-Fenster). |
-| 6 | **Shiny 5.7.2 + On-Change-Policy neu einbringen** | (Revert-Reintroduction) | Erst NACH 1–5; #1657-Fix für 09-23-artige Deadlocks bleibt dabei erhalten. Falls Full-Teardown in der Testtour nicht ausreicht: Shiny-5.4.0-Revert als Plan B. |
+| 4 | ~~**Full-Teardown-Eskalation**~~ | – | **Ablehnt (User):** automatisches Disconnect+Release+Re-Scan bei anhaltendem Stall = „Windows neu installieren, wenn es hakt“. Falsche Kategorie; kein Auto-Eskalation. |
+| 5 | ~~**Force-Sync nach Reconnect/Teardown**~~ | – | **Ablehnt (User):** mit Punkt 4 raus. Bei 1 Hz ist der Resync nach Erholung ohnehin automatisch (nächstes Update ≤ 1 s). |
+| 6 | **Shiny: kein Pinning auf 5.4.0, Zweig bleibt auf aktuellem 5.x (5.7.2)** | `VegaBridgeApp.csproj` | User-Entscheidung: „wir können keine App entwickeln, wo wir eine ur-alt Version pinnen müssen“. On-Change-Policy (Punkte 1+2) bleibt aufgeschoben; Shiny-Package-Bump steht bereits (User-Commits). |
+| 6a | **(optional) Manueller „BLE-Session-Reset“-Button** | `BleManagerService`, `Settings` | Nur wenn Watchdog „degraded“ meldet: manueller Button (Disconnect + Objekt-Release + Re-Scan + Connect). Keine Auto-Eskalation – der Reset bleibt beim User. **Freigabe ausstehend.** |
 | 7 | **Doku-Update** | `docs/.../ble-protokoll-spezifikation.md` | §6.1 (official traffic profile) neu + neuer Abschnitt „Tour 09-26: W2R-TX-Stall, sessionscope, Root-Cause-Korrektur“ (Changelog v4.4). |
 | 8 | **Kosmetik: Serilog-Bool-Format** | `BleNavigationCoordinator` | „backup in Trues/Falses“ (F0-Format an Bool in de-DE-Culture) → saubere Template-Ausgabe. |
 | 9 | **Version** | `VegaBridgeApp.csproj` | 1.0.4 Build 9 für nächste TestFlight-Runde. |
@@ -39,8 +40,10 @@
 ## Entschieden (2026-09-26, User-Feedback)
 
 - **Kein RSSI-Sampling:** Verbindungstärke ist im Bike-Display sichtbar und dort konstant gut → RF-Interferenz wird nicht weiter als Arbeitshypothese verfolgt.
-- **Kein Cross-Test mit der offiziellen App / keine FW-Fehlermeldung an MV Agusta:** Die offizielle App funktioniert, die Bike-FW gilt als sauber. „Warum stallt der W2R-Consumer ab?“ wird nicht weiter über die Firmware-Hypothese verfolgt, sondern über den Stress-Test (Punkt 10) operational abgefangen: reproduzierbarer Stall → Trigger identifiziert; nie reproduzierbar stationär → Resilienz-Features (4+5) sind die Antwort.
-- **Wichtig (5.4.0-Asymmetrie):** Unter Shiny 5.4.0 (aktuelle Baseline) queueen Writes in einen gestauten W2R-Pfad statt Timeout zu werfen → der Stress-Test liest dann „0 failed“, selbst wenn das Display stale ist. Den Test als Detektor kann man erst mit Shiny 5.7.2+ (Punkt 6) nutzen; als **Reproduktions-Trigger** (kriegt der 1-Hz-Flow den Konsum gar erst ins Stallen?) funktioniert er in beiden Versionen.
+- **Kein Cross-Test mit der offiziellen App / keine FW-Fehlermeldung an MV Agusta:** Die offizielle App funktioniert, die Bike-FW gilt als sauber. „Warum stallt der W2R-Consumer ab?“ wird nicht weiter über die Firmware-Hypothese verfolgt.
+- **Kein automatischer Full-Teardown (User):** automatischer Session-Reset bei anhaltendem Stall wird abgelehnt. Stattdessen: **Watchdog + UI-Status** (Punkt 3) → User sieht den degradieren Zustand und entscheidet (manueller App-/Session-Reset im Stillstand). Optionaler manueller Reset-Button = Punkt 6a.
+- **Kein Shiny-Pinning auf 5.4.0 (User):** Zweig fährt aktuelles Shiny (5.7.2). Konsequenz: W2R-Stall unter 5.7.x = Frame-Verlust (Timeout statt Queue) → Freeze während des Stalls ist das akzeptierte Verhalten; abgemildert durch Watchdog + auto-Resync (1 Hz) nach Erholung.
+- **Stress-Test wurde bewusst mit Shiny 5.7.0 getestet (User):** 60/60 ok, max. Drain 11 ms, max. Tick 207 ms → Rate-Trigger **ausgeschlossen**, W2R-Pfad stationär gesund. Test gilt als Pre-Tour-Health-Check (5.7.x-Semantik: 4-s-Timeouts = Detektoren).
 
 ## Testprotokoll (nach Implementierung)
 
@@ -48,17 +51,15 @@
    - 60/60 ok **und** am Test-Ende zeigt das Display „W2R Test 60/60“ / ~939 m → alle Frames geliefert, Link gesund, Tour starten.
    - 60/60 ok, aber Display steht auf z. B. „37/60“ → lokaler Write-OK, **Delivery-Stall** (5.4.0-Queueing): ab Tick 37 kamen die Frames nicht mehr an.
    - early fails (z. B. ab Tick 30) → Trigger-Pattern gefunden (Rate/Pattern-basiert) → „first fail tick“-Kennzahl in den Log.
-   - 60/60 ok, aber die Tour stallt trotzdem → Trigger braucht Fahrbetrieb (Ort/RF-Umfeld) → Resilienz-Features (4+5) tragen die Last.
+   - 60/60 ok, aber die Tour stallt trotzdem → Trigger braucht Fahrbetrieb (Ort/RF-Umfeld) → Watchdog + manueller Reset tragen die Last.
 1. Kurze Testtour 20–30 min: mindestens 1 Nahbereich (< 2 km bis Manöver), 1 Stand ≥ 60 s, 1 Autobahn-Section.
 2. Prüfen:
-   - Nahbereich (fahrend): Skip-Rate > 50 %, keine 1-Hz-Sendflut (Jitter-Hysterese wirkt).
-   - PING: exakt alle 30 s, auch während 1-Hz-Nav-Bereichen.
-   - „BLE link degraded“ erscheint bei Write-Stall (Watchdog fix).
-   - Full-Teardown: tritt bei anhaltendem Stall auf und klärt TX **ohne** App-Neustart.
-3. Log-Export + die 6 Kennzahlen (Write-Failures, PING-Ok/Ratio, Reconnect-Zyklen, Send/Skip-Rate, Gate-Busy, Teardown-Ereignisse).
+   - „BLE link degraded“ erscheint bei Write-Stall (Watchdog, Punkt 3) – UI-Status **und** im Log-Export sichtbar.
+   - (falls 6a) manueller Reset-Button klärt den W2R-Stall ohne App-Neustart.
+3. Log-Export + Kennzahlen: Write-Failures, PING-Ok/Ratio, Reconnect-Zyklen, degraded-Ereignisse, ggf. manueller Reset.
 
 ## Offene Fragen / Risiken
 
-- **Full-Teardown während der Fahrt:** kurzzeitig (~5–10 s) verlore Dashboard-Link (GUI1-RX). Akzeptabel? Force-Sync (Punkt 5) kompensiert danach.
-- **Frame-Verlust unter 5.7.2 bleibt im Stall-Fenster inhärent** (Timeout statt Queue) – Display zeigt veraltete Anweisungen bis zur Erholung; Force-Sync + 30-s-Backup minimieren das.
-- **Shiny-Entscheidung** wird erst nach Testtour getroffen (5.7.2 + Teardown vs. 5.4.0-Revert).
+- **Frame-Verlust unter 5.7.x bleibt im Stall-Fenster inhärent** (Timeout statt Queue) – Display zeigt veraltete Anweisungen bis zur Erholung; Resync passiert automatisch (1 Hz ≤ 1 s nach Erholung) oder per manueller Session-/App-Reset.
+- **Manueller Reset-Button (6a):** kurzzeitig (~5–10 s) wegfallender Dashboard-Link (GUI1-RX) während des Re-Scans. Akzeptabel?
+- **Stall-Dauer:** am 09-26 31 min ohne Erholung – ohne Teardown ist der einzige Heilweg der manuelle (Session-/App-)Reset. Watchdog muss den Zustand also früh und klar anzeigen.
