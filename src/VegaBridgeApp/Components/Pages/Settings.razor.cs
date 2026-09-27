@@ -137,6 +137,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private bool _simRunning;
     private string _simResult = string.Empty;
     private CancellationTokenSource? _simCts;
+    private bool _simNoReroute;
     private bool _disposed;
 
     private async Task RunW2rRouteSimAsync()
@@ -161,7 +162,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         {
             double? lat = Gps.LastReading?.Position.Latitude;
             double? lon = Gps.LastReading?.Position.Longitude;
-            BleManagerService.W2rRouteSimResult result = await BleManager.RunW2rRouteSimAsync(lat, lon, _simCts.Token);
+            BleManagerService.W2rRouteSimResult result = await BleManager.RunW2rRouteSimAsync(lat, lon, _simCts.Token, withReroute: !_simNoReroute);
             _simResult = result.Summary;
         }
         catch (OperationCanceledException)

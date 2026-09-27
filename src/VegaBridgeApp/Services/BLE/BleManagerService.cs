@@ -423,7 +423,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// Designed for a display-off run: no UI dependency, progress and
     /// summary are logged under "W2R-SIM" for later analysis.
     /// </summary>
-    public async Task<W2rRouteSimResult> RunW2rRouteSimAsync(double? startLat, double? startLon, CancellationToken ct)
+    public async Task<W2rRouteSimResult> RunW2rRouteSimAsync(double? startLat, double? startLon, CancellationToken ct, bool withReroute = true)
     {
         if (_activePeripheral is null || _activePlugin is null)
             return new W2rRouteSimResult(0, 0, 0, 0, null, "W2R-SIM: no connected device");
@@ -435,8 +435,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         double totalKm = profile.Sum(m => m.SpeedKmh * m.DurationSec / 3600.0);
         int totalSec = profile.Sum(m => m.DurationSec);
 
+        string simMode = withReroute ? "REROUTE" : "CONTROL (ohne Reroute)";
         Log.Information("BLE-LOGGER: {Line}",
-            $"W2R-SIM START: {totalSec / 60}-min route, {totalKm:F1} km (city-1 → B10 → REROUTE → city-2 → ziel), 1 Hz NAVI+SM + PING keepalive, slow threshold 500 ms");
+            $"W2R-SIM START: {totalSec / 60}-min route, {totalKm:F1} km (city-1 → B10 → REROUTE → city-2 → ziel), 1 Hz NAVI+SM + PING keepalive, slow threshold 500 ms, mode={simMode}");
 
         int ticks = 0, slowTicks = 0, failedTicks = 0, maxDrainMs = 0;
         int firstAnomalySecond = 0, consecutive = 0;
@@ -464,28 +465,39 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
                 // Simulated reroute: off-route alert + new instruction set,
                 // injected right before the city-2 segment (end of B10).
+                // withReroute=false = control run (Kontrolllauf) – same profile,
+                // no off-route alert, to test whether the stall is REROUTE-triggered.
                 if (m.Segment == "city-2" && !rerouteSent)
                 {
                     rerouteSent = true;
-                    remainingM += 1600; // the reroute adds 1.6 km
-                    if (_activePlugin is not null)
+                    if (withReroute)
                     {
-                        Log.Information("BLE-LOGGER: {Line}",
-                            $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI sent (simulated off-route), new route via city-2, remaining +1.6 km");
-                        await _activePlugin.SendOffRouteAlertAsync(wrapper, new OffRouteAlertInput
+                        remainingM += 1600; // the reroute adds 1.6 km
+                        if (_activePlugin is not null)
                         {
-                            DistanceMeters = 0,
-                            Latitude = startLat ?? 0,
-                            Longitude = startLon ?? 0,
-                            DetectedAt = DateTimeOffset.UtcNow
-                        });
+                            Log.Information("BLE-LOGGER: {Line}",
+                                $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI sent (simulated off-route), new route via city-2, remaining +1.6 km");
+                            await _activePlugin.SendOffRouteAlertAsync(wrapper, new OffRouteAlertInput
+                            {
+                                DistanceMeters = 0,
+                                Latitude = startLat ?? 0,
+                                Longitude = startLon ?? 0,
+                                DetectedAt = DateTimeOffset.UtcNow
+                            });
+                        }
+                        else
+                        {
+                            Log.Information("BLE-LOGGER: {Line}",
+                                $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI skipped – no active connection");
+                        }
+                        await Task.Delay(500, ct);
                     }
                     else
                     {
                         Log.Information("BLE-LOGGER: {Line}",
-                            $"W2R-SIM REROUTE t+{FormatSimTm(second)}: RENAVI skipped – no active connection");
+                            $"W2R-SIM CONTROL t+{FormatSimTm(second)}: Reroute deaktiviert (Kontrolllauf) – city-2 ohne Off-Route-Alert");
+                        await Task.Delay(500, ct);
                     }
-                    await Task.Delay(500, ct);
                 }
 
                 Log.Information("BLE-LOGGER: {Line}",

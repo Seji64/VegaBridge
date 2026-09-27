@@ -45,6 +45,8 @@
                             OnClick="@(async () => await BleManager.SendTestFrameAsync())">
                             Test Connection
                         </MudButton>
+                        <MudCheckBox T="bool" @bind-Value="_simNoReroute" Label="Kontrolllauf: ohne Reroute" Color="Color.Primary" Size="Size.Small"
+                                    Disabled="_simRunning" Style="margin: 4px 0;" />
                         <MudButton
                             Variant="Variant.Text"
                             Color="Color.Secondary"
