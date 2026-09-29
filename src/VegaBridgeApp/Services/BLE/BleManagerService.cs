@@ -95,12 +95,16 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             // continuously via the delegate's OnAdapterStateChanged.
             RefreshConnectedPeripherals();
 
-            // Filter the scan to our known service UUIDs (Shiny docs: required
-            // for iOS background scanning, best practice everywhere).
-            string[] serviceUuids = _plugins.Select(p => p.ServiceUuid.ToString()).ToArray();
-            Log.Information("BLE scanning started (service filter: {Uuids})", string.Join(", ", serviceUuids));
+            // Deliberately unfiltered: the MV Agusta display advertises by
+            // NAME, not by its 128-bit service UUID – and iOS only matches a
+            // service-UUID filter against what the peripheral puts into its
+            // advertising payload, so a filtered scan here finds nothing
+            // (verified on-device: empty device list). The Shiny docs
+            // require a ServiceUuids filter for iOS *background* scanning
+            // only; we scan in the foreground, so unfiltered is correct.
+            Log.Information("BLE scanning started (unfiltered)");
             _scanSubscription = bleManager
-                .ScanForUniquePeripherals(new ScanConfig(serviceUuids))
+                .ScanForUniquePeripherals()
                 .Subscribe(UpdateDeviceFromScanResult);
             
             await Task.Delay(TimeSpan.FromSeconds(30), scanToken);
