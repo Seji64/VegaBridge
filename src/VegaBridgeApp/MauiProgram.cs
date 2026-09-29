@@ -7,7 +7,8 @@ using CommunityToolkit.Maui;
 using Polly;
 using Serilog;
 using Serilog.Events;
-using Shiny.BluetoothLE;
+using Plugin.BLE;
+using Plugin.BLE.Abstractions.Contracts;
 using VegaBridgeApp.Services.BLE;
 using VegaBridgeApp.Services.BLE.Plugins;
 using VegaBridgeApp.Services.Closures;
@@ -57,22 +58,9 @@ public static class MauiProgram
         CultureInfo.DefaultThreadCurrentCulture = new CultureInfo(culture);
         CultureInfo.DefaultThreadCurrentUICulture = new CultureInfo(culture);
 
-        // ── BLE (Shiny.BluetoothLE) ────────────────────────────────────────
+        // ── BLE (Plugin.BLE) ────────────────────────────────────────────────
         builder.Services.AddSingleton(TimeProvider.System);
-#if IOS || MACCATALYST
-        // CoreBluetooth State Restoration: iOS can wake the app for BLE
-        // events after it was suspended (screen off, phone in the pocket)
-        // instead of silently dropping the connection to the bike. The
-        // RestoreIdentifier is what enables that on iOS/macOS.
-        builder.Services.AddBluetoothLE<VegaBridgeBleDelegate>(new AppleBleConfiguration(
-            ShowPowerAlert: true,
-            RestoreIdentifier: "vegabridge-ble"));
-#else
-        // VegaBridgeBleDelegate exists only on Apple targets (BleDelegate
-        // is Apple-only) – other platforms use the plain registration.
-        builder.Services.AddBluetoothLE();
-#endif
-        
+        builder.Services.AddSingleton<IAdapter>(_ => CrossBluetoothLE.Current.Adapter);
         builder.Services.AddSingleton<BleManagerService>();
         builder.Services.AddTransient<IBleDevicePlugin, MvAgustaBlePlugin>();
 
