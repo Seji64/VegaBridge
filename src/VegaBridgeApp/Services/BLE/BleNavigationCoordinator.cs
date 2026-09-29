@@ -84,8 +84,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         Log.Information("BLE-LOGGER: {Line}", $"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={start.ManeuverCount}");
 
-        await _bleManager.ExecuteNavigationActionAsync(
-            "SendNavigationStartAsync", input);
+        await _bleManager.ExecuteNavigationStartAsync(input);
     }
 
     /// <inheritdoc />
@@ -133,9 +132,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             DetectedAt = DateTimeOffset.UtcNow
         };
 
-        await _bleManager.ExecuteNavigationActionAsync(
-            nameof(IBleDevicePlugin.SendOffRouteAlertAsync),
-            input);
+        await _bleManager.ExecuteNavigationOffRouteAlertAsync(input);
     }
 
     /// <inheritdoc />
@@ -215,8 +212,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         }
         try
         {
-            await _bleManager.ExecuteNavigationActionAsync(
-                "SendNavigationUpdateAsync", input);
+            await _bleManager.ExecuteNavigationUpdateAsync(input);
         }
         finally
         {
