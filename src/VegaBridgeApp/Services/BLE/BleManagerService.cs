@@ -20,16 +20,18 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     private IDisposable? _connectionSubscription;
     private IDisposable? _notificationSubscription;
     private CancellationTokenSource? _scanTimeoutCts;
-    private CancellationTokenSource? _retryCts;
 
     // Maintain our own dictionary of discovered peripherals for reliable access
     private readonly ConcurrentDictionary<string, IPeripheral> _discoveredPeripherals = new();
     
     private readonly IEnumerable<IBleDevicePlugin> _plugins = plugins;
 
-    // Cooldown: prevent reconnect storms when BLE writes fail repeatedly.
-    private DateTimeOffset _lastInvalidateAt = DateTimeOffset.MinValue;
-    private static readonly TimeSpan InvalidateCooldown = TimeSpan.FromSeconds(15);
+    // Intent flag (docs: "A deliberate disconnect stays disconnected; call
+    // Connect() again to re-arm"): DisconnectAsync() sets it, ConnectAsync()
+    // clears it. While set, no path may auto-reconnect – otherwise a
+    // user-initiated disconnect gets overridden on the next app resume.
+    private volatile bool _userInitiatedDisconnect;
+
     // Expose active plugin for advanced access (e.g., session ID)
     public IBleDevicePlugin? ActivePlugin => _activePlugin;
 
@@ -207,8 +209,13 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 return false;
             }
 
+            // No explicit ConnectionConfig: Shiny 5.7.2 defaults a null config
+            // to AutoConnect = true, so Shiny owns link recovery (dropped
+            // links, adapter power cycles ≥ 5.6). Per the docs we must NOT
+            // run our own WhenDisconnected→Connect loop on top of it.
             await peripheral.ConnectAsync(timeout: TimeSpan.FromSeconds(30));
 
+            _userInitiatedDisconnect = false;
             _activePeripheral = peripheral;
             
             // Plugin Selection. Name-based matching works for peripherals
@@ -233,19 +240,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             _state.OnNext(BleConnectionState.Connected);
             Log.Information("Successfully connected to {Uuid} using plugin {Plugin}", deviceUuid, _activePlugin?.DisplayName ?? "None");
             
-            SetupConnectionMonitoring(peripheral);
+            SetupWhenConnected(peripheral);
             SetupNotifications(peripheral);
 
-            // Subscribe to write failures: a dead link (iOS dropped it while
-            // the app was in the background) surfaces as a write timeout.
-            // Reconnect instead of pinging/sending into the void.
-            if (_activePlugin is MvAgustaBlePlugin mvPlugin)
-            {
-                mvPlugin.WriteFailed -= OnPluginWriteFailed;
-                mvPlugin.WriteFailed += OnPluginWriteFailed;
-            }
-
-            // After a reconnect the keepalive must resume if a navigation
+            // After a (re)connect the keepalive must resume if a navigation
             // session is active (the plugin tracks _pingShouldRun).
             if (_activePlugin is MvAgustaBlePlugin mv)
             {
@@ -272,13 +270,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         try
         {
             Log.Information("Disconnecting from {Uuid}", _activePeripheral.Uuid);
-            
-            if (_retryCts != null)
-            {
-                await _retryCts.CancelAsync();
-                _retryCts?.Dispose();
-                _retryCts = null;
-            }
+
+            // Deliberate disconnect: Shiny's DisconnectAsync() extension
+            // calls CancelConnection() internally (5.7.2), which disposes
+            // the peripheral's auto-reconnect. The intent flag makes that
+            // stick – no resume/send path may silently reconnect.
+            _userInitiatedDisconnect = true;
             _connectionSubscription?.Dispose();
             _connectionSubscription = null;
             _notificationSubscription?.Dispose();
@@ -300,80 +297,44 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     }
 
     /// <summary>
-    /// Ensures the active BLE connection is still alive and usable. iOS can
-    /// silently drop the link while the app is in the background (screen off,
-    /// phone in the pocket) – the UI still shows "Connected", but writes time
-    /// out. Call this when the app returns to the foreground and before
-    /// sending navigation frames; it reconnects when the link is gone.
+    /// Ensures the active BLE connection is still alive and usable. Call this
+    /// when the app returns to the foreground and before sending navigation
+    /// frames. Docs (Shiny.BluetoothLE ≥ 5.6): with AutoConnect enabled,
+    /// Shiny owns ALL link recovery – we must not issue competing connects
+    /// ("the two fight each other"). The auto-reconnect is armed by
+    /// ConnectAsync (default) and only disarmed by a user-initiated
+    /// DisconnectAsync (which calls Shiny's CancelConnection internally),
+    /// so every non-user link loss is Shiny's responsibility; our
+    /// WhenConnected hook (SetupWhenConnected) re-runs the per-connection
+    /// setup as soon as the link comes back. This method therefore never
+    /// triggers a reconnect itself.
     /// </summary>
-    public async Task<bool> EnsureConnectedAsync()
+    public Task<bool> EnsureConnectedAsync()
     {
-        if (_activePeripheral == null)
-            return false;
+        IPeripheral? peripheral = _activePeripheral;
+        if (peripheral == null)
+            return Task.FromResult(false);
 
-        try
+        // Shiny reports the live link status; Connected means the GATT link
+        // is really alive.
+        if (peripheral.Status == ConnectionState.Connected)
+            return Task.FromResult(true);
+
+        // Deliberate disconnect: stay disconnected until the user connects
+        // again via the UI (docs: a deliberate disconnect stays
+        // disconnected, Connect() re-arms the auto-reconnect).
+        if (_userInitiatedDisconnect)
         {
-            // Shiny reports the current link status; Connected means the
-            // GATT link is really alive, anything else (Disconnected,
-            // Connecting, etc.) means we must rebuild it.
-            if (_activePeripheral.Status == ConnectionState.Connected)
-            {
-                return true;
-            }
-
-            Log.Warning("BLE link lost (status={Status}) – reconnecting", _activePeripheral.Status);
-            return await RetryConnectionAsync(Guid.Parse(_activePeripheral.Uuid));
+            Log.Information("BLE: user-initiated disconnect – not auto-reconnecting");
+            return Task.FromResult(false);
         }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "EnsureConnectedAsync failed");
-            return false;
-        }
-    }
 
-    /// <summary>
-    /// Marks the current connection as broken and schedules a reconnect.
-    /// Used when a write times out (Arg_TimeoutException) – the classic sign
-    /// that iOS dropped the link without firing a disconnect event.
-    /// </summary>
-    public void InvalidateConnectionAndReconnect()
-    {
-        IPeripheral? lost = _activePeripheral;
-        if (lost == null) return;
-
-        // Cooldown: prevent reconnect storms. Without this, each failed BLE
-        // write triggers a reconnect → next write also fails → reconnect again
-        // every 3-7s, preventing the link from ever stabilizing.
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        if (now - _lastInvalidateAt < InvalidateCooldown)
-        {
-            Log.Debug("InvalidateConnectionAndReconnect: cooldown active – skipping");
-            return;
-        }
-        _lastInvalidateAt = now;
-        Log.Warning("Forcing connection state to Idle after write failure");
-        _connectionSubscription?.Dispose();
-        _connectionSubscription = null;
-        _notificationSubscription?.Dispose();
-        _notificationSubscription = null;
-        _activePeripheral = null;
-        _activePlugin = null;
-        _state.OnNext(BleConnectionState.Idle);
-        UpdateDeviceList();
-        UpdateError("Connection lost. Attempting to reconnect...");
-
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(TimeSpan.FromSeconds(1));
-            try
-            {
-                await RetryConnectionAsync(Guid.Parse(lost.Uuid));
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Reconnect after write failure failed");
-            }
-        });
+        // Non-intent link loss: Shiny's auto-reconnect owns the recovery.
+        // Report "not usable" so the caller skips this write; the next tick
+        // retries, and WhenConnected re-runs our setup when the link is
+        // back. Never a home-grown retry loop (docs).
+        Log.Information("BLE link down (status={Status}) – waiting for Shiny auto-reconnect", peripheral.Status);
+        return Task.FromResult(false);
     }
 
     // ── Plugin API Proxy ──────────────────────────────────────────────────
@@ -988,28 +949,113 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
-    // ── Connection Monitoring & Retry ─────────────────────────────────────
+    // ── Connection Monitoring (Shiny owns reconnection) ───────────────────
 
-    private void SetupConnectionMonitoring(IPeripheral peripheral)
+    /// <summary>
+    /// Docs (Shiny.BluetoothLE, ≥ 5.6): with AutoConnect enabled, Shiny
+    /// reconnects dropped links AND adapter power cycles by itself. Our job
+    /// is NOT to drive reconnects – it is to re-run everything we did at
+    /// connect time from WhenConnected() ("Auto-reconnect restores the link,
+    /// not your GATT state. … Hook WhenConnected() and do that work there
+    /// rather than after the first ConnectAsync()").
+    /// Status/failure observables are UI/log signals only.
+    /// </summary>
+    private void SetupWhenConnected(IPeripheral peripheral)
     {
         _connectionSubscription?.Dispose();
 
-        // Monitor both disconnects and connection failures
-        var disconnectSub = peripheral.WhenDisconnected()
-            .Subscribe(_ => HandleUnexpectedDisconnection(peripheral));
+        // Docs: re-run per-connection setup whenever the (auto-)reconnected
+        // link comes back. This is the ONLY reconnect hook we own.
+        IObservable<IPeripheral> connected = peripheral.WhenConnected();
+        var connectedSub = connected.Subscribe(_ => OnLinkRestored(peripheral));
+
+        // UI state tracking only – never a reconnect trigger (docs: a home-grown
+        // WhenDisconnected→Connect loop fights Shiny's auto-reconnect).
+        var statusSub = peripheral.WhenStatusChanged()
+            .Subscribe(status =>
+            {
+                if (!ReferenceEquals(_activePeripheral, peripheral)) return;
+                if (status == ConnectionState.Disconnected)
+                {
+                    _state.OnNext(BleConnectionState.Idle);
+                    if (!_userInitiatedDisconnect)
+                    {
+                        UpdateError("Connection lost – reconnecting (automatic).", isCritical: false);
+                    }
+                    UpdateDeviceList();
+                }
+            });
+
+        // In-flight operations fault with BleException on a dead link; Shiny's
+        // auto-reconnect retries once the peripheral reports Connected again.
+        // We only log failures – no reconnect logic here.
         var failSub = peripheral.WhenConnectionFailed()
             .Subscribe(ex =>
             {
                 Log.Warning("Connection failed for {Uuid}: {Error}", peripheral.Uuid, ex.Message);
-                HandleUnexpectedDisconnection(peripheral);
             });
 
-        // Combine into single disposable for cleanup
         _connectionSubscription = System.Reactive.Disposables.Disposable.Create(() =>
         {
-            disconnectSub.Dispose();
+            connectedSub.Dispose();
+            statusSub.Dispose();
             failSub.Dispose();
         });
+    }
+
+    /// <summary>
+    /// Fires when Shiny (re)established the GATT link – initial auto-reconnect
+    /// after a dropped link, adapter power-cycle recovery, or state
+    /// restoration. Re-runs the per-connection setup exactly like
+    /// ConnectAsync() does, because auto-reconnect restores the link but NOT
+    /// our GATT/plugin state (docs).
+    /// </summary>
+    private void OnLinkRestored(IPeripheral peripheral)
+    {
+        // The user may have disconnected this peripheral in the meantime –
+        // only re-arm setup for the device we actually track.
+        if (!ReferenceEquals(_activePeripheral, peripheral)) return;
+
+        Log.Information("BLE link (re)established for {Uuid} – re-running per-connection setup", peripheral.Uuid);
+        _state.OnNext(BleConnectionState.Connected);
+        _errorMessage.OnNext(string.Empty);
+
+        // Plugin may still be null after a background drop (or the name was
+        // only readable now) – re-select like in ConnectAsync().
+        if (_activePlugin == null)
+        {
+            _activePlugin = SelectActivePlugin(peripheral);
+        }
+
+        SetupNotifications(peripheral);
+
+        if (_activePlugin is MvAgustaBlePlugin mv)
+        {
+            BleConnectedDeviceWrapper wrapper = new(peripheral, mv);
+            _ = mv.EnsurePingRunningAsync(wrapper);
+        }
+
+        UpdateDeviceList();
+    }
+
+    /// <summary>
+    /// Plugin selection usable from both paths: name match synchronously,
+    /// service-UUID fallback fire-and-forget (the WhenConnected hook must
+    /// not block on GATT reads; ConnectAsync awaits the same fallback).
+    /// </summary>
+    private IBleDevicePlugin? SelectActivePlugin(IPeripheral peripheral)
+    {
+        BleDeviceInfo deviceInfo = new() { Uuid = Guid.Parse(peripheral.Uuid), Name = peripheral.Name ?? "Unknown" };
+        IBleDevicePlugin? match = _plugins.FirstOrDefault(p => p.IsCompatible(deviceInfo));
+        if (match != null) return match;
+
+        _ = Task.Run(async () =>
+        {
+            IBleDevicePlugin? byService = await SelectPluginByServiceUuidAsync(peripheral);
+            if (byService != null && _activePlugin == null)
+                _activePlugin = byService;
+        });
+        return null;
     }
 
     private void SetupNotifications(IPeripheral peripheral)
@@ -1020,90 +1066,16 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         Log.Information("Setting up notifications for {Uuid} using plugin {Plugin}", peripheral.Uuid, _activePlugin.DisplayName);
 
-        // Use NotifyCharacteristic to subscribe to GATT notifications
-        // Signature: NotifyCharacteristic(serviceUuid, characteristicUuid, autoSubscribe)
+        // Docs: NotifyCharacteristic re-subscribes itself on auto-reconnect
+        // as long as this observable subscription is still alive – so we
+        // only re-run it after a user-initiated disconnect (Dispose above).
         _notificationSubscription = peripheral.NotifyCharacteristic(
-                _activePlugin.ServiceUuid.ToString(), 
+                _activePlugin.ServiceUuid.ToString(),
                 _activePlugin.ReadCharacteristicUuid)
             .Subscribe(result =>
             {
                 if (result.Data != null) _activePlugin.OnDataReceived(result.Data);
             });
-    }
-
-    private void HandleUnexpectedDisconnection(IPeripheral peripheral)
-    {
-        try
-        {
-            if (_activePeripheral == null) return;
-
-            Log.Warning("Unexpected disconnection detected for {Uuid}", peripheral.Uuid);
-            _state.OnNext(BleConnectionState.Idle);
-            UpdateDeviceList();
-            UpdateError("Connection lost. Attempting to reconnect...");
-
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await RetryConnectionAsync(Guid.Parse(peripheral.Uuid));
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex, "Reconnect after unexpected disconnection failed");
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Critical error during unexpected disconnection handling for {Uuid}", peripheral.Uuid);
-            UpdateError($"Error during reconnection: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// A plugin write failed – the classic sign that iOS dropped the BLE
-    /// link while the app was in the background (write timeout without a
-    /// disconnect event). Reconnect immediately.
-    /// </summary>
-    private void OnPluginWriteFailed(Exception ex)
-    {
-        Log.Warning("Plugin write failed ({Message}) – invalidating connection", ex.Message);
-        InvalidateConnectionAndReconnect();
-    }
-
-    private async Task<bool> RetryConnectionAsync(Guid deviceUuid)
-    {
-        const int maxRetries = 3;
-        int attempt = 0;
-        _retryCts?.Cancel();
-        _retryCts?.Dispose();
-        _retryCts = new CancellationTokenSource();
-        CancellationToken token = _retryCts.Token;
-
-        while (attempt < maxRetries && !token.IsCancellationRequested)
-        {
-            attempt++;
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), token);
-                if (await ConnectAsync(deviceUuid))
-                {
-                    return true;
-                }
-            }
-            catch (OperationCanceledException) { return false; }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "Retry attempt {Attempt} failed for {Uuid}", attempt, deviceUuid);
-            }
-        }
-
-        if (!token.IsCancellationRequested)
-        {
-            UpdateError("Connection lost. Reconnection attempts failed.");
-        }
-        return false;
     }
 
     private void UpdateDeviceFromScanResult(IPeripheral result)
@@ -1159,8 +1131,6 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         StopScanning();
         _connectionSubscription?.Dispose();
         _notificationSubscription?.Dispose();
-        _retryCts?.Cancel();
-        _retryCts?.Dispose();
         _state.Dispose();
         _devices.Dispose();
         _errorMessage.Dispose();
