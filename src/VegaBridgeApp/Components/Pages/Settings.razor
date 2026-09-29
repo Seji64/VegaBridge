@@ -45,11 +45,14 @@
                             OnClick="@(async () => await BleManager.SendTestFrameAsync())">
                             Test Connection
                         </MudButton>
+                        <!-- While running the button must stay pressable:
+                             the second press cancels the test. Disabled only
+                             when idle AND not connected. -->
                         <MudButton
                             Variant="Variant.Text"
                             Color="Color.Secondary"
                             Size="Size.Small"
-                            Disabled="@(!IsConnected || _simRunning)"
+                            Disabled="(!IsConnected && !_simRunning)"
                             StartIcon="@Icons.Material.Filled.Route"
                             FullWidth="true"
                             OnClick="@RunW2rRouteSimAsync">

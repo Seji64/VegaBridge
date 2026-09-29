@@ -476,6 +476,16 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 // wrapper so updates keep flowing on the live link.
                 if (_activePeripheral is null || _activePlugin is null)
                 {
+                    // User-initiated disconnect ends the test: Shiny keeps it
+                    // disconnected on purpose, waiting 25 min here would just
+                    // log 25 LINK DOWN lines.
+                    if (_userInitiatedDisconnect)
+                    {
+                        string abortSummary = $"W2R-SIM ABORTED after {ticks}/{updates} updates (user disconnect), {slowTicks} slow / {failedTicks} failed, max drain {maxDrainMs} ms";
+                        SimLine($"W2R-SIM ABORT t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} – user-initiated disconnect");
+                        SimLine(abortSummary);
+                        return new W2rRouteSimResult(ticks, slowTicks, failedTicks, maxDrainMs, null, abortSummary);
+                    }
                     failedTicks++;
                     if (firstAnomalySecond == 0)
                         firstAnomalySecond = second;
@@ -491,12 +501,19 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     SimLine($"W2R-SIM LINK REBUILT t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} – continuing on the new connection");
                 }
 
+                // Vary icon + distance every update so the bike display
+                // visibly changes on every tick – that proves the update
+                // actually reached the display (constant payloads look
+                // broken even when the link is fine).
+                string icon = i % 3 == 0 ? "turn-left" : i % 3 == 1 ? "straight" : "turn-right";
+                int distM = 500 - ((i - 1) % 5) * 100; // 500,400,300,200,100
+
                 var input = new NavigationUpdateInput
                 {
-                    ManeuverIcon = "straight",
+                    ManeuverIcon = icon,
                     InstructionText = $"W2R-SIM Update {i}",
                     StreetName = "W2R-SIM",
-                    DistanceToTurnM = 500,
+                    DistanceToTurnM = distM,
                     SpeedKmh = 30,
                     RemainingDistanceKm = 20 * (1 - (double)i / updates),
                     RemainingTimeMin = updates - i,
