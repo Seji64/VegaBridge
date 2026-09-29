@@ -59,17 +59,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             return;
         }
         
-        await StartBleScanAsync();
-    }
-
-    private async Task StartBleScanAsync()
-    {
         await BleManager.StartScanningAsync();
-    }
-
-    private void StopBleScanAsync()
-    {
-        BleManager.StopScanning();
     }
 
     private void OnConnectionStateChanged(BleConnectionState obj)
@@ -128,16 +118,16 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         });
     }
 
-    // ── W2R route simulation (30 min) ─────────────────────────────────────
-    // Long-duration W2R test: scripted route (city traffic → B10 → reroute →
-    // city → destination) at baseline 1 Hz cadence. Runs independently of
-    // the UI, so it also works with the phone display off; progress and
+    // ── W2R survival test (25 min) ────────────────────────────────────────
+    // Simple long-duration test: navigation start (PING keepalive) → one
+    // NAVI update per minute → FINISH. Answers whether the BLE connection
+    // survives ~25 minutes with the phone display off (≈20 min is the
+    // known critical point). Runs independently of the UI; progress and
     // summary are logged under "W2R-SIM" for later analysis.
 
     private bool _simRunning;
     private string _simResult = string.Empty;
     private CancellationTokenSource? _simCts;
-    private bool _simNoReroute;
     private bool _disposed;
 
     private async Task RunW2rRouteSimAsync()
@@ -162,7 +152,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         {
             double? lat = Gps.LastReading?.Position.Latitude;
             double? lon = Gps.LastReading?.Position.Longitude;
-            BleManagerService.W2rRouteSimResult result = await BleManager.RunW2rRouteSimAsync(lat, lon, _simCts.Token, withReroute: !_simNoReroute);
+            BleManagerService.W2rRouteSimResult result = await BleManager.RunW2rRouteSimAsync(lat, lon, _simCts.Token);
             _simResult = result.Summary;
         }
         catch (OperationCanceledException)
@@ -179,57 +169,6 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             _simCts?.Dispose();
             _simCts = null;
             // The run lasts 30 min: the component may have been disposed
-            // (navigation away) by the time it finishes – guard the refresh.
-            if (!_disposed)
-                _ = InvokeAsync(StateHasChanged);
-        }
-    }
-
-    // ── W2R rescan-level reset test (middle level of the reset hierarchy) ──
-    // Empirical check whether a rescan-level reset clears a clogged W2R state:
-    // PRE 3 NAVI instructions → full teardown + rescan + new IPeripheral object
-    // + reconnect → POST 3 instructions. Everything logged under "W2R-RR".
-
-    private bool _rrRunning;
-    private string _rrResult = string.Empty;
-    private CancellationTokenSource? _rrCts;
-
-    private async Task RunRescanResetTestAsync()
-    {
-        if (_rrRunning)
-        {
-            // Second press = stop
-            _rrCts?.Cancel();
-            return;
-        }
-        if (!IsConnected)
-            return;
-
-        _rrCts = new CancellationTokenSource();
-        _rrRunning = true;
-        _rrResult = string.Empty;
-        StateHasChanged();
-
-        DebugLogSink.Instance.Clear(); // start a fresh log capture for the test
-
-        try
-        {
-            _rrResult = await BleManager.RunRescanResetTestAsync(_rrCts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            _rrResult = "W2R-RR stopped (cancelled)";
-        }
-        catch (Exception ex)
-        {
-            _rrResult = $"W2R-RR failed: {ex.Message}";
-        }
-        finally
-        {
-            _rrRunning = false;
-            _rrCts?.Dispose();
-            _rrCts = null;
-            // The test lasts ~30 s: the component may have been disposed
             // (navigation away) by the time it finishes – guard the refresh.
             if (!_disposed)
                 _ = InvokeAsync(StateHasChanged);
@@ -272,13 +211,9 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private async Task HandleScanButtonClick()
     {
         if (IsScanning)
-        {
-            StopBleScanAsync();
-        }
+            BleManager.StopScanning();
         else
-        {
-            await StartBleScanAsync();
-        }
+            await BleManager.StartScanningAsync();
     }
 
 
