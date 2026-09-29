@@ -51,7 +51,7 @@
 | **Framework**     | .NET 10 · MAUI · Blazor Hybrid                                              |
 | **UI**            | [MudBlazor](https://mudblazor.com/) · MudExtensions · CommunityToolkit.Maui |
 | **Maps**          | [OpenLayers.Blazor](https://github.com/achavez99/OpenLayers.Blazor)         |
-| **BLE**           | [Shiny.BluetoothLE](https://github.com/shinyorg/shiny)                      |
+| **BLE**           | [Plugin.BLE](https://github.com/dotnet-bluetooth-le/dotnet-bluetooth-le)                      |
 | **GPS**           | [Shiny.Locations](https://github.com/shinyorg/shiny)                        |
 | **Routing**       | Valhalla (via `valhalla1.openstreetmap.de`) · Photon Geocoding               |
 | **Logging**       | Serilog                                                                      |
