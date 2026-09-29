@@ -4,7 +4,7 @@ using MudBlazor;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
-using VegaBridgeApp.Models.BLE.MvAgusta;
+using VegaBridgeApp.Services.BLE;
 using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Components.Pages;
@@ -28,14 +28,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private bool IsScanning => ConnectionState == BleConnectionState.Scanning;
     
     private GeoResult? _homeLocation;
-    
-    // ── Long-duration connection test state ──
-    private CancellationTokenSource? _longTestCts;
-    private bool _longTestRunning;
-    private int _longTestStep;
-    private const int LongTestTotalSteps = 10;
-    private const int LongTestStepDelaySec = 30; // 10 steps × 30s ≈ 5 min
-    
+
     private IDisposable? _stateSubscription;
     private IDisposable? _devicesSubscription;
     private IDisposable? _errorSubscription;
@@ -135,6 +128,114 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         });
     }
 
+    // ── W2R route simulation (30 min) ─────────────────────────────────────
+    // Long-duration W2R test: scripted route (city traffic → B10 → reroute →
+    // city → destination) at baseline 1 Hz cadence. Runs independently of
+    // the UI, so it also works with the phone display off; progress and
+    // summary are logged under "W2R-SIM" for later analysis.
+
+    private bool _simRunning;
+    private string _simResult = string.Empty;
+    private CancellationTokenSource? _simCts;
+    private bool _simNoReroute;
+    private bool _disposed;
+
+    private async Task RunW2rRouteSimAsync()
+    {
+        if (_simRunning)
+        {
+            // Second press = stop
+            _simCts?.Cancel();
+            return;
+        }
+        if (!IsConnected)
+            return;
+
+        _simCts = new CancellationTokenSource();
+        _simRunning = true;
+        _simResult = string.Empty;
+        StateHasChanged();
+
+        DebugLogSink.Instance.Clear(); // start a fresh log capture for the test
+
+        try
+        {
+            double? lat = Gps.LastReading?.Position.Latitude;
+            double? lon = Gps.LastReading?.Position.Longitude;
+            BleManagerService.W2rRouteSimResult result = await BleManager.RunW2rRouteSimAsync(lat, lon, _simCts.Token, withReroute: !_simNoReroute);
+            _simResult = result.Summary;
+        }
+        catch (OperationCanceledException)
+        {
+            _simResult = "W2R-SIM stopped (cancelled)";
+        }
+        catch (Exception ex)
+        {
+            _simResult = $"W2R-SIM failed: {ex.Message}";
+        }
+        finally
+        {
+            _simRunning = false;
+            _simCts?.Dispose();
+            _simCts = null;
+            // The run lasts 30 min: the component may have been disposed
+            // (navigation away) by the time it finishes – guard the refresh.
+            if (!_disposed)
+                _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ── W2R rescan-level reset test (middle level of the reset hierarchy) ──
+    // Empirical check whether a rescan-level reset clears a clogged W2R state:
+    // PRE 3 NAVI instructions → full teardown + rescan + new IPeripheral object
+    // + reconnect → POST 3 instructions. Everything logged under "W2R-RR".
+
+    private bool _rrRunning;
+    private string _rrResult = string.Empty;
+    private CancellationTokenSource? _rrCts;
+
+    private async Task RunRescanResetTestAsync()
+    {
+        if (_rrRunning)
+        {
+            // Second press = stop
+            _rrCts?.Cancel();
+            return;
+        }
+        if (!IsConnected)
+            return;
+
+        _rrCts = new CancellationTokenSource();
+        _rrRunning = true;
+        _rrResult = string.Empty;
+        StateHasChanged();
+
+        DebugLogSink.Instance.Clear(); // start a fresh log capture for the test
+
+        try
+        {
+            _rrResult = await BleManager.RunRescanResetTestAsync(_rrCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _rrResult = "W2R-RR stopped (cancelled)";
+        }
+        catch (Exception ex)
+        {
+            _rrResult = $"W2R-RR failed: {ex.Message}";
+        }
+        finally
+        {
+            _rrRunning = false;
+            _rrCts?.Dispose();
+            _rrCts = null;
+            // The test lasts ~30 s: the component may have been disposed
+            // (navigation away) by the time it finishes – guard the refresh.
+            if (!_disposed)
+                _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
     // ── User actions ──────────────────────────────────────────────────────
 
     private async Task ConnectToSelected()
@@ -167,7 +268,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         StatusMessage = L["BLEDisconnected"];
         StateHasChanged();
     }
-    
+
     private async Task HandleScanButtonClick()
     {
         if (IsScanning)
@@ -281,134 +382,11 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         Snackbar.Add(L["DebugLogCleared"], Severity.Info);
     }
 
-    // ── Long-duration connection test ────────────────────────────────────
-    // Sends a ~5 min navigation simulation (10 steps × 30 s) so the rider
-    // can verify the BLE link survives a screen-off ride. Uses the plugin
-    // start/finish flow, so the PING keepalive runs during the whole test –
-    // exactly like real navigation.
-
-    private bool LongTestRunning => _longTestRunning;
-
-    private string LongTestStatusText
-    {
-        get
-        {
-            if (!_longTestRunning) return string.Empty;
-            return string.Format(L["LongTestProgress"], _longTestStep, LongTestTotalSteps);
-        }
-    }
-
-    private async Task StartLongTestAsync()
-    {
-        if (!IsConnected)
-        {
-            Snackbar.Add(L["LongTestNotConnected"], Severity.Warning);
-            return;
-        }
-
-        _longTestCts = new CancellationTokenSource();
-        _longTestRunning = true;
-        _longTestStep = 0;
-        StateHasChanged();
-
-        DebugLogSink.Instance.Clear();
-        Log.Information("BLE-LOGGER: {Line}", "=== LONG CONNECTION TEST START (5 min) ===");
-
-        try
-        {
-            // Phase 1: navigation start via plugin flow → starts the PING
-            // keepalive (15 s interval) exactly like a real ride. Real GPS
-            // coordinates so the DEST frame on the display is not 0/0.
-            double? startLat = Gps.LastReading?.Position.Latitude;
-            double? startLon = Gps.LastReading?.Position.Longitude;
-            NavigationStartInput startInput = new()
-            {
-                TotalDistanceKm = 12.5,
-                TotalTimeMin = 8,
-                StartLatitude = startLat,
-                StartLongitude = startLon
-            };
-            await BleManager.ExecuteNavigationActionAsync("SendNavigationStartAsync", startInput);
-            await Task.Delay(500);
-
-            // Phases 2..10: one maneuver every 30 s, distance shrinking.
-            // Keeps the display alive and lets us check if the connection
-            // survives (keepalive + reconnect logic) with the screen off.
-            (string Icon, string Instruction, string Street)[] steps =
-            [
-                ("turn-left",  "Links abbiegen\nHauptstraße", "Hauptstraße"),
-                ("straight",   "Geradeaus fahren", "B 27"),
-                ("turn-right", "Rechts abbiegen\nNebenstraße", "Nebenstraße"),
-                ("roundabout-right-1", "Kreisverkehr\nAusfahrt 1", "L 1015"),
-                ("turn-left",  "Links abbiegen\nSchwabstraße", "Schwabstraße"),
-                ("straight",   "Geradeaus fahren", "L 1015"),
-                ("turn-right", "Rechts abbiegen\nIndustriestraße", "Industriestraße"),
-                ("roundabout-right-2", "Kreisverkehr\nAusfahrt 2", "K 1234"),
-                ("turn-left",  "Links abbiegen\nZielstraße", "Zielstraße"),
-                ("straight",   "Ziel erreicht in Kürze", "Ankunft")
-            ];
-
-            for (int i = 0; i < steps.Length; i++)
-            {
-                _longTestStep = i + 1;
-                Log.Information("BLE-LOGGER: {Line}", $"LONG TEST step {_longTestStep}/{steps.Length}: {steps[i].Icon}");
-
-                await BleManager.SendCommandAsync(Commands.NAVI, steps[i].Icon, steps[i].Instruction, steps[i].Street);
-                await Task.Delay(200);
-
-                double remainingKm = 12.5 * (1.0 - (double)i / steps.Length);
-                double distToTurn = Math.Max(0, 400 - i * 40);
-                await BleManager.SendCommandAsync(Commands.SM, "0", ((int)(remainingKm * 1000)).ToString(), ((int)distToTurn).ToString());
-                await Task.Delay(200);
-
-                // Countdown for turn maneuvers (like the old rapid test).
-                if (steps[i].Icon.StartsWith("turn") || steps[i].Icon.StartsWith("roundabout"))
-                {
-                    await BleManager.SendCommandAsync(Commands.SM1, steps[i].Icon.Contains("left") ? "902" : "901", "7", "");
-                }
-
-                await InvokeAsync(StateHasChanged);
-
-                // Wait for the next step, unless it was the last one.
-                if (i < steps.Length - 1)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(LongTestStepDelaySec), _longTestCts.Token);
-                }
-            }
-
-            // Phase 11: finish via plugin flow → stops the keepalive.
-            await BleManager.ExecuteNavigationFinishAsync();
-            Log.Information("BLE-LOGGER: {Line}", "=== LONG CONNECTION TEST END (finished) ===");
-            Snackbar.Add(L["LongTestDone"], Severity.Success);
-        }
-        catch (OperationCanceledException)
-        {
-            Log.Information("BLE-LOGGER: {Line}", "=== LONG CONNECTION TEST STOPPED (cancelled) ===");
-            Snackbar.Add(L["LongTestStopped"], Severity.Info);
-        }
-        catch (Exception ex)
-        {
-            Log.Information("BLE-LOGGER: {Line}", $"=== LONG CONNECTION TEST FAILED: {ex.Message} ===");
-            Snackbar.Add(string.Format(L["LongTestError"], ex.Message), Severity.Error);
-        }
-        finally
-        {
-            _longTestRunning = false;
-            _longTestCts?.Dispose();
-            _longTestCts = null;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private void StopLongTest()
-    {
-        _longTestCts?.Cancel();
-    }
-
     // ── Cleanup ───────────────────────────────────────────────────────────
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
         _stateSubscription?.Dispose();
         _devicesSubscription?.Dispose();
         _errorSubscription?.Dispose();
