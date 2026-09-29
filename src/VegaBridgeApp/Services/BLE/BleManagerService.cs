@@ -273,10 +273,13 @@ public class BleManagerService : IDisposable
 
         await SetupNotificationsAsync(device);
 
-        if (_activePlugin is MvAgustaBlePlugin mv)
+        if (_activePlugin is MvAgustaBlePlugin mvPlugin)
         {
-            BleConnectedDeviceWrapper wrapper = new(device, mv);
-            await mv.EnsurePingRunningAsync(wrapper);
+            mvPlugin.WriteFailed -= OnPluginWriteFailed;
+            mvPlugin.WriteFailed += OnPluginWriteFailed;
+
+            BleConnectedDeviceWrapper wrapper = new(device, mvPlugin);
+            await mvPlugin.EnsurePingRunningAsync(wrapper);
         }
 
         UpdateDeviceList();
@@ -301,6 +304,10 @@ public class BleManagerService : IDisposable
 
             _intentionalDisconnectId = device.Id;
             await StopNotificationsAsync();
+
+            if (_activePlugin is MvAgustaBlePlugin mvPlugin)
+                mvPlugin.WriteFailed -= OnPluginWriteFailed;
+
             await _adapter.DisconnectDeviceAsync(device);
         }
         catch (Exception ex)
