@@ -5,6 +5,7 @@ using Serilog;
 using Shiny.BluetoothLE;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Services.BLE.Plugins;
+using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Services.BLE;
 
@@ -413,12 +414,35 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         const int intervalSec = 60;
         const int slowThresholdMs = 500;  // a clogged W2R queue shows up as ~4 s drains
 
+        // The in-memory DebugLogSink is off by default – a test that produces
+        // no capturable log is useless, so the test owns its capture.
+        DebugLogSink.Instance.SetEnabled(true);
+        DebugLogSink.Instance.Clear();
+
+        // The sink buffer lives in RAM; a 25-min display-off run can outlive
+        // the app process (which is exactly the phenomenon under test). The
+        // W2R-SIM timeline is therefore additionally appended to a file that
+        // survives a process kill.
+        string simLogFile = System.IO.Path.Combine(
+            Microsoft.Maui.Storage.FileSystem.AppDataDirectory,
+            $"w2r-sim-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+
         BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
         IPeripheral? livePeripheral = _activePeripheral;
         IBleDevicePlugin? livePlugin = _activePlugin;
 
-        Log.Information("BLE-LOGGER: {Line}",
-            $"W2R-SIM START: {updates}-min survival test, {updates} updates @ 1/min, PING keepalive via navigation start, slow threshold {slowThresholdMs} ms");
+        // Wall clock alongside test time: while iOS suspends the app the
+        // Task.Delay loop freezes, so t+ stalls while wall keeps running –
+        // the gap between the two reveals the suspension duration.
+        DateTime simStartUtc = DateTime.UtcNow;
+        void SimLine(string line)
+        {
+            Log.Information("BLE-LOGGER: {Line}", line);
+            _ = System.IO.File.AppendAllTextAsync(simLogFile, line + Environment.NewLine);
+        }
+        int WallSec() => (int)(DateTime.UtcNow - simStartUtc).TotalSeconds;
+
+        SimLine($"W2R-SIM START: {updates}-min survival test, {updates} updates @ 1/min, PING keepalive via navigation start, slow threshold {slowThresholdMs} ms, timeline file {simLogFile}");
 
         int ticks = 0, slowTicks = 0, failedTicks = 0, maxDrainMs = 0;
         int firstAnomalySecond = 0;
@@ -451,8 +475,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     failedTicks++;
                     if (firstAnomalySecond == 0)
                         firstAnomalySecond = second;
-                    Log.Information("BLE-LOGGER: {Line}",
-                        $"W2R-SIM LINK DOWN t+{FormatSimTm(second)} update={i}/{updates} – write skipped (Shiny reconnect in progress)");
+                    SimLine($"W2R-SIM LINK DOWN t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} – write skipped (Shiny reconnect in progress)");
                     await Task.Delay(intervalSec, ct);
                     continue;
                 }
@@ -461,8 +484,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     wrapper = new BleConnectedDeviceWrapper(_activePeripheral, _activePlugin);
                     livePeripheral = _activePeripheral;
                     livePlugin = _activePlugin;
-                    Log.Information("BLE-LOGGER: {Line}",
-                        $"W2R-SIM LINK REBUILT t+{FormatSimTm(second)} update={i}/{updates} – continuing on the new connection");
+                    SimLine($"W2R-SIM LINK REBUILT t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} – continuing on the new connection");
                 }
 
                 var input = new NavigationUpdateInput
@@ -490,8 +512,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 {
                     ok = false;
                     failedTicks++;
-                    Log.Information("BLE-LOGGER: {Line}",
-                        $"W2R-SIM FAIL t+{FormatSimTm(second)} update={i}/{updates} after {sw.ElapsedMilliseconds} ms ({ex.GetType().Name})");
+                    SimLine($"W2R-SIM FAIL t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} after {sw.ElapsedMilliseconds} ms ({ex.GetType().Name})");
                 }
                 int drainMs = (int)sw.ElapsedMilliseconds;
                 sw.Stop();
@@ -502,13 +523,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     slowTicks++;
                     if (firstAnomalySecond == 0)
                         firstAnomalySecond = second;
-                    Log.Information("BLE-LOGGER: {Line}",
-                        $"W2R-SIM SLOW t+{FormatSimTm(second)} update={i}/{updates} drain={drainMs} ms");
+                    SimLine($"W2R-SIM SLOW t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} drain={drainMs} ms");
                 }
                 else if (ok)
                 {
-                    Log.Information("BLE-LOGGER: {Line}",
-                        $"W2R-SIM OK t+{FormatSimTm(second)} update={i}/{updates} drain={drainMs} ms");
+                    SimLine($"W2R-SIM OK t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} drain={drainMs} ms");
                 }
 
                 // Keep the 1/min cadence: the write already consumed part of
@@ -521,21 +540,21 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             if (_activePlugin is not null)
                 await _activePlugin.SendNavigationFinishAsync(wrapper);
             else
-                Log.Information("BLE-LOGGER: {Line}", "W2R-SIM: FINISH skipped – no active connection");
+                SimLine("W2R-SIM: FINISH skipped – no active connection");
 
-            string summary = $"W2R-SIM DONE: {ticks}/{updates} updates over {updates * intervalSec}s, {slowTicks} slow / {failedTicks} failed"
+            string summary = $"W2R-SIM DONE: {ticks}/{updates} updates over {updates * intervalSec}s ({FormatSimTm(WallSec())} wall clock), {slowTicks} slow / {failedTicks} failed"
                 + (firstAnomalySecond > 0
                     ? $", first anomaly t+{FormatSimTm(firstAnomalySecond)}"
                     : "")
                 + $", max drain {maxDrainMs} ms";
-            Log.Information("BLE-LOGGER: {Line}", summary);
+            SimLine(summary);
             return new W2rRouteSimResult(
                 ticks, slowTicks, failedTicks, maxDrainMs,
                 firstAnomalySecond > 0 ? firstAnomalySecond : null, summary);
         }
         catch (OperationCanceledException)
         {
-            Log.Information("BLE-LOGGER: {Line}", $"W2R-SIM STOPPED (cancelled) at t+{FormatSimTm(ticks * intervalSec)} – sending FINISH");
+            SimLine($"W2R-SIM STOPPED (cancelled) at t+{FormatSimTm(ticks * intervalSec)} wall+{FormatSimTm(WallSec())} – sending FINISH");
             if (_activePlugin is not null)
             {
                 try
@@ -549,10 +568,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             }
             else
             {
-                Log.Information("BLE-LOGGER: {Line}", "W2R-SIM: FINISH skipped – no active connection");
+                SimLine("W2R-SIM: FINISH skipped – no active connection");
             }
             string summary = $"W2R-SIM STOPPED after {ticks}/{updates} updates, {slowTicks} slow / {failedTicks} failed, max drain {maxDrainMs} ms";
-            Log.Information("BLE-LOGGER: {Line}", summary);
+            SimLine(summary);
             return new W2rRouteSimResult(ticks, slowTicks, failedTicks, maxDrainMs, null, summary);
         }
     }
@@ -799,6 +818,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 if (!ReferenceEquals(_activePeripheral, peripheral)) return;
                 if (status == ConnectionState.Disconnected)
                 {
+                    // Log-only (timeline marker) – Shiny's AutoConnect owns the
+                    // actual reconnection, we never act on this event.
+                    Log.Information("BLE-LOGGER: {Line}",
+                        $"BLE peripheral {peripheral.Uuid} status -> Disconnected{(_userInitiatedDisconnect ? " (user-initiated)" : " – Shiny auto-reconnect in progress")}");
                     _state.OnNext(BleConnectionState.Idle);
                     if (!_userInitiatedDisconnect)
                     {

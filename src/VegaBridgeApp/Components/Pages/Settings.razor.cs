@@ -146,8 +146,9 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         _simResult = string.Empty;
         StateHasChanged();
 
-        DebugLogSink.Instance.Clear(); // start a fresh log capture for the test
-
+        // The test method enables + clears the log capture itself, and
+        // additionally writes its timeline to a file that survives a
+        // process kill (display-off runs can outlive the app).
         try
         {
             double? lat = Gps.LastReading?.Position.Latitude;

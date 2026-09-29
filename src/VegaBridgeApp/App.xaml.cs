@@ -24,6 +24,12 @@ public partial class App : Application
         // and re-send the current navigation state so the bike display does
         // not stay on stale instructions. A user-initiated disconnect is
         // never overridden (intent flag in BleManagerService).
+        // Timeline marker for display-off runs: from here the app is
+        // backgrounded (and soon suspended) – anything logged before this
+        // line happened while the app was active.
+        window.Deactivated += (_, _) =>
+            Log.Information("App deactivated (backgrounded) – BLE keepalive continues in background, app may be suspended");
+
         window.Resumed += async (_, _) =>
         {
             try
