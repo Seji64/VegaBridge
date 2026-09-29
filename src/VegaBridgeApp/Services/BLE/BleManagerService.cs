@@ -337,6 +337,46 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         return Task.FromResult(false);
     }
 
+    /// <summary>
+    /// Forwarded by <see cref="VegaBridgeBleDelegate"/> (Apple targets only):
+    /// adapter-level state changes (Bluetooth toggled in system settings, app
+    /// restarted by state restoration) arrive here reliably, because
+    /// observable subscriptions do not survive app sleep/restart cycles.
+    /// Docs (Shiny.BluetoothLE, 5.6+): Shiny owns the adapter cycle – it tears
+    /// down connected peripherals on power-down and reconnects every
+    /// AutoConnect-armed peripheral on power-up. This handler must therefore
+    /// NEVER issue Connect()/Scan(); it only keeps our state and UI in sync.
+    /// </summary>
+    public void OnBleAdapterStateChanged(AccessState state)
+    {
+        Log.Information("BLE adapter state changed: {State}", state);
+
+        if (state != AccessState.Available)
+        {
+            // Bluetooth is off: Shiny runs the full disconnect teardown on
+            // every connected peripheral (WhenStatusChanged emits Disconnected
+            // in the foreground). If we still hold a live reference, mark the
+            // link lost so the UI does not look like it is still connected.
+            IPeripheral? peripheral = _activePeripheral;
+            if (peripheral is not null && peripheral.Status != ConnectionState.Disconnected)
+            {
+                _state.OnNext(BleConnectionState.Idle);
+                if (!_userInitiatedDisconnect)
+                    UpdateError("Bluetooth is off – the connection will be restored automatically once it is back on.", isCritical: false);
+                UpdateDeviceList();
+            }
+            return;
+        }
+
+        // Adapter back on: Shiny reconnects the AutoConnect-armed peripherals
+        // on its own. Surface OS-connected devices even when our subscriptions
+        // are dead (e.g. the app was restarted in the background via state
+        // restoration and BleManagerService is a fresh instance). The error
+        // banner is cleared by OnLinkRestored() once the link is really up.
+        RefreshConnectedPeripherals();
+        UpdateDeviceList();
+    }
+
     // ── Plugin API Proxy ──────────────────────────────────────────────────
 
     public async Task SendTestFrameAsync()
