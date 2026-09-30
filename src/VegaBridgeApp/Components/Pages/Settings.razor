@@ -45,48 +45,23 @@
                             OnClick="@(async () => await BleManager.SendTestFrameAsync())">
                             Test Connection
                         </MudButton>
-                        <MudCheckBox T="bool" @bind-Value="_simNoReroute" Label="Kontrolllauf: ohne Reroute" Color="Color.Primary" Size="Size.Small"
-                                    Disabled="_simRunning" Style="margin: 4px 0;" />
+                        <!-- While running the button must stay pressable:
+                             the second press cancels the test. Disabled only
+                             when idle AND not connected. -->
                         <MudButton
                             Variant="Variant.Text"
                             Color="Color.Secondary"
                             Size="Size.Small"
-                            Disabled="@(!IsConnected || _simRunning)"
+                            Disabled="(!IsConnected && !_simRunning)"
                             StartIcon="@Icons.Material.Filled.Route"
                             FullWidth="true"
                             OnClick="@RunW2rRouteSimAsync">
-                            @(_simRunning ? "W2R Route-Sim läuft … (Stop)" : "W2R Route-Sim (30 min)")
+                            @(_simRunning ? "W2R Test läuft … (Stop)" : "W2R 25-min Überleibstest")
                         </MudButton>
                         @if (!string.IsNullOrEmpty(_simResult))
                         {
                             <MudText Typo="Typo.caption" Style="font-family: monospace;">@_simResult</MudText>
                         }
-                        <MudButton
-                            Variant="Variant.Text"
-                            Color="Color.Secondary"
-                            Size="Size.Small"
-                            Disabled="@(!IsConnected || _rrRunning)"
-                            StartIcon="@Icons.Material.Filled.Replay"
-                            FullWidth="true"
-                            OnClick="@RunRescanResetTestAsync">
-                            @(_rrRunning ? "W2R Rescan-Reset Test läuft …" : "W2R Rescan-Reset Test (3 → RESET → 3)")
-                        </MudButton>
-                        @if (!string.IsNullOrEmpty(_rrResult))
-                        {
-                            <MudText Typo="Typo.caption" Style="font-family: monospace;">@_rrResult</MudText>
-                        }
-
-                        <!-- <MudButton
-                            Variant="Variant.Outlined"
-                            Color="Color.Primary"
-                            Size="Size.Small"
-                            Disabled="!IsConnected"
-                            StartIcon="@Icons.Material.Filled.Navigation"
-                            FullWidth="true"
-                            OnClick="@SendNavigationTestSequenceAsync">
-                            Nav Test Sequence (Standard)
-                        </MudButton> -->
-                        
                     </MudStack>
 
                     <MudDivider />

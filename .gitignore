@@ -11,6 +11,7 @@ obj/
 *.dSYM
 
 ## Rider / VS / VS Code
+*.designer.cs
 .idea/
 .vs/
 .vscode/

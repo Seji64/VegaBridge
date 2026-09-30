@@ -1,4 +1,4 @@
-﻿using Serilog;
+using Serilog;
 using VegaBridgeApp.Services.BLE;
 
 namespace VegaBridgeApp;
@@ -17,12 +17,19 @@ public partial class App : Application
     {
         Window window = new(new MainPage()) { Title = "VegaBridge" };
 
-        // iOS silently drops the BLE link while the app is in the background
-        // (screen off, phone in the pocket) – often without a disconnect
-        // event, so the UI keeps showing "Connected" while writes time out.
-        // When the app returns to the foreground, verify the connection and
-        // rebuild it if needed, then re-send the current navigation state so
-        // the bike display does not stay on stale instructions.
+        // Shiny.BluetoothLE (≥ 5.6) owns link recovery: a dropped link or a
+        // Bluetooth power cycle is reconnected by Shiny itself, and its
+        // WhenConnected() hook (BleManagerService.SetupWhenConnected) re-runs
+        // our per-connection setup. On app resume we only verify the status
+        // and re-send the current navigation state so the bike display does
+        // not stay on stale instructions. A user-initiated disconnect is
+        // never overridden (intent flag in BleManagerService).
+        // Timeline marker for display-off runs: from here the app is
+        // backgrounded (and soon suspended) – anything logged before this
+        // line happened while the app was active.
+        window.Deactivated += (_, _) =>
+            Log.Information("App deactivated (backgrounded) – BLE keepalive continues in background, app may be suspended");
+
         window.Resumed += async (_, _) =>
         {
             try

@@ -57,5 +57,24 @@
     <string>This app uses Bluetooth to communicate with your motorcycle for navigation and ride data.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>This app uses Bluetooth to communicate with your motorcycle for turn-by-turn navigation.</string>
+
+    <!-- UIScene Lifecycle (Pflicht im iOS 27 SDK / Xcode 27, sonst Launch-Crash: NoSceneLifecycleAdoption) -->
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+        <key>UISceneConfigurations</key>
+        <dict>
+            <key>UIWindowSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneConfigurationName</key>
+                    <string>__MAUI_DEFAULT_SCENE_CONFIGURATION__</string>
+                    <key>UISceneDelegateClassName</key>
+                    <string>SceneDelegate</string>
+                </dict>
+            </array>
+        </dict>
+    </dict>
 </dict>
 </plist>

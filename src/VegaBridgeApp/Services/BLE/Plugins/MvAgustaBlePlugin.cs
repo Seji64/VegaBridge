@@ -31,20 +31,13 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     private bool _isDisposed;
     private DateTimeOffset _lastNavUpdateAt = DateTimeOffset.MinValue;
     // Bumped on every StartPingAsync. A superseded (replaced) keepalive loop
-    // must not fire WriteFailed – its in-flight failure must not trigger a
-    // reconnect of the freshly rebuilt link (F2).
+    // must not log current-loop failures – its in-flight failure belongs to
+    // the link that was just dropped, not the freshly rebuilt one.
     private int _pingGeneration;
     // Whether the keepalive SHOULD be running (set on nav start, cleared on
     // nav stop / disconnect). After a BLE reconnect the manager calls
     // EnsurePingRunning to restart the loop without a new navigation start.
     private volatile bool _pingShouldRun;
-
-    /// <summary>
-    /// Raised when a keepalive/command write fails (e.g. the BLE link was
-    /// silently dropped by iOS while the app was in the background). The
-    /// BleManagerService subscribes and triggers a reconnect.
-    /// </summary>
-    public event Action<Exception>? WriteFailed;
 
     /// <summary>
     /// Restarts the PING keepalive after a reconnect, but only if a
@@ -86,8 +79,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            // Shiny's write queue faults dead-link writes with BleException and
+            // its auto-reconnect (Shiny.BluetoothLE ≥ 5.6) owns link recovery –
+            // the plugin only logs; the next tick/GPS update retries.
             Log.Error(ex, "MV Agusta: SEND {Command} failed", command);
-            WriteFailed?.Invoke(ex);
             throw;
         }
     }
@@ -108,12 +103,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // Same failure path as SendAsync: a write timeout is the classic
-            // sign that iOS dropped the link. Firing WriteFailed lets the
-            // manager invalidate and reconnect instead of leaving the
-            // connection in a zombie state.
+            // Same failure path as SendAsync – see its catch.
             Log.Error(ex, "MV Agusta: SEND MSG (test) failed");
-            WriteFailed?.Invoke(ex);
             throw;
         }
     }
@@ -134,14 +125,16 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         double startLat = input.StartLatitude ?? 0;
         string lon = startLon != 0 ? startLon.ToString("F6", CultureInfo.InvariantCulture) : "0.000000";
         string lat = startLat != 0 ? startLat.ToString("F6", CultureInfo.InvariantCulture) : "0.000000";
+        // No manual pacing between W2R writes: Shiny's write queue already
+        // waits on CoreBluetooth's flow control (CanSendWriteWithoutResponse)
+        // per the Shiny.BluetoothLE docs – fixed Task.Delay pacing was our
+        // own quirk and only added latency.
         await SendAsync(device, Commands.DEST, "", lon, lat);
-        await Task.Delay(200);
-        
+
         // REM format (from pklg capture): REM|\x1e|<meters>\x1e|
         // 3 RS separators → 4 fields: command, empty, meters, empty
         await SendAsync(device, Commands.REM, "", (input.TotalDistanceKm * 1000).ToString("F0"), "");
-        await Task.Delay(200);
-        
+
         // Start PING keepalive when navigation begins
         _pingShouldRun = true;
         await StartPingAsync(device);
@@ -183,7 +176,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
         _lastNavUpdateAt = DateTimeOffset.UtcNow;
         await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
-        await Task.Delay(200); // Leaky Bucket: space writes evenly instead of burst
+        // No leaky-bucket pacing after the NAVI write: the Shiny write queue
+        // already waits on CanSendWriteWithoutResponse (docs) – the fixed
+        // 200 ms delay was our quirk and only added per-tick latency.
 
         // SM and SM1 are non-critical (status display). If the BLE queue
         // is full after NAVI, skip them instead of throwing. NAVI is the
@@ -273,8 +268,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // Official app sends PING once in capture, but keepalive every ~15s
 
         // Generation guard: when a reconnect starts a new keepalive loop,
-        // this loop is superseded. Its in-flight write failure must NOT
-        // fire WriteFailed – that would tear down the freshly rebuilt link.
+        // this loop is superseded. Its in-flight write failure must NOT be
+        // logged as a current-link failure – it belongs to the old link.
         int generation = ++_pingGeneration;
 
         // Start the ping loop and store the task for proper disposal
@@ -298,10 +293,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
                     {
                         if (generation == _pingGeneration && !_isDisposed)
                         {
-                            // Current loop: the link is dead (iOS silently dropped it
-                            // in the background) – let the manager reconnect.
+                            // Current loop: the link is dead (iOS dropped it in the
+                            // background). Shiny's auto-reconnect owns recovery
+                            // (≥ 5.6); we only log – no reconnect trigger here.
                             Log.Error(ex, "MV Agusta: Failed to send PING keepalive – link likely dead");
-                            WriteFailed?.Invoke(ex);
                         }
                         else
                         {
@@ -358,7 +353,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     /// Sends a PING keepalive frame (official MV Ride keepalive mechanism).
     /// PING format: \rPING\u001E\u001E\u001E\r (4 fields, all empty after command).
     /// Failures propagate to the calling loop, which decides (generation guard)
-    /// whether to trigger a reconnect or ignore a superseded loop.
+    /// whether to log a current-loop failure or ignore a superseded loop.
+    /// Link recovery itself is owned by Shiny's auto-reconnect.
     /// </summary>
     private async Task SendPingAsync(IBleConnectedDevice device)
     {
