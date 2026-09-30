@@ -140,7 +140,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         await StartPingAsync(device);
     }
 
-    public async Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input)
+    public async Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input, bool sendNavi = true)
     {
         Log.Debug("MV Agusta: Navigation Update - Maneuver {Index}/{Total}: {Icon}, Dist: {Dist:F0}m, Speed: {Speed:F0}km/h", 
             input.CurrentManeuverIndex + 1, input.TotalManeuvers, input.ManeuverIcon, input.DistanceToTurnM, input.SpeedKmh);
@@ -169,16 +169,24 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         if (intersectionName.Length > maxLen)
             intersectionName = intersectionName[..maxLen];
         
-        byte[] naviFrame = BuildFrame(Commands.NAVI,
-            input.ManeuverIcon,
-            navigationGuide,
-            intersectionName);
-        Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
-        _lastNavUpdateAt = DateTimeOffset.UtcNow;
-        await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
-        // No leaky-bucket pacing after the NAVI write: the Shiny write queue
-        // already waits on CanSendWriteWithoutResponse (docs) – the fixed
-        // 200 ms delay was our quirk and only added per-tick latency.
+        // NAVI = the instruction frame the display shows; per the official
+        // MV Ride profile it is written on maneuver change only. Status ticks
+        // (sendNavi: false) skip it and refresh SM/SM1 – that is what keeps
+        // the PING keepalive from being auto-suppressed by the 5 s skip
+        // window (only NAVI writes bump _lastNavUpdateAt).
+        if (sendNavi)
+        {
+            byte[] naviFrame = BuildFrame(Commands.NAVI,
+                input.ManeuverIcon,
+                navigationGuide,
+                intersectionName);
+            Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
+            _lastNavUpdateAt = DateTimeOffset.UtcNow;
+            await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
+            // No leaky-bucket pacing after the NAVI write: the Shiny write queue
+            // already waits on CanSendWriteWithoutResponse (docs) – the fixed
+            // 200 ms delay was our quirk and only added per-tick latency.
+        }
 
         // SM and SM1 are non-critical (status display). If the BLE queue
         // is full after NAVI, skip them instead of throwing. NAVI is the
@@ -189,10 +197,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // SM failed after NAVI was delivered (queue full or link flapping).
-            // Log it – otherwise the bike's status display goes silently stale
-            // and the root cause is invisible in the field.
-            Log.Debug(ex, "SM frame failed – skipping (NAVI already delivered)");
+            // SM failed (queue full or link flapping). Log it – otherwise the
+            // bike's status display goes silently stale and the root cause is
+            // invisible in the field.
+            Log.Debug(ex, "SM frame failed – skipping");
         }
 
         if (input.DistanceToTurnM is <= 300 and > 0)
@@ -205,10 +213,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                // Same as SM: non-critical frame, NAVI already delivered. Log for
-                // field diagnostics – a persistent failure here means the bike's
-                // status display is going stale.
-                Log.Debug(ex, "SM1 frame failed – skipping (NAVI already delivered)");
+                // Same as SM: non-critical frame. Log for field diagnostics –
+                // a persistent failure here means the bike's status display
+                // is going stale.
+                Log.Debug(ex, "SM1 frame failed – skipping");
             }
         }
         // Log the navigation update for debugging

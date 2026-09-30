@@ -651,7 +651,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// <summary>
     /// Sends a navigation-update frame through the active plugin.
     /// </summary>
-    public async Task ExecuteNavigationUpdateAsync(NavigationUpdateInput input)
+    public async Task ExecuteNavigationUpdateAsync(NavigationUpdateInput input, bool sendNavi = true)
     {
         if (_activePeripheral == null || _activePlugin == null)
         {
@@ -673,7 +673,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             }
 
             BleConnectedDeviceWrapper wrapper = new(_activePeripheral!, _activePlugin);
-            await _activePlugin.SendNavigationUpdateAsync(wrapper, input);
+            await _activePlugin.SendNavigationUpdateAsync(wrapper, input, sendNavi);
         }
         catch (Exception ex)
         {

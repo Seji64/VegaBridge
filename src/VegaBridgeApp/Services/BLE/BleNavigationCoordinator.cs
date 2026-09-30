@@ -17,9 +17,19 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     private readonly NavigationService _navigation;
     private readonly BleManagerService _bleManager;
 
-    // Throttling for periodic status updates (SM frames)
+    // Throttling for periodic status updates (SM frames). ~1 Hz matches the
+    // official MV Ride driving cadence; the old 500 ms tick drove W2R at 2–3
+    // frames/s and clogged the bike's write-without-response flow control.
     private DateTimeOffset _lastStatusSent = DateTimeOffset.MinValue;
-    private readonly TimeSpan _statusThrottleInterval = TimeSpan.FromMilliseconds(500);
+    private readonly TimeSpan _statusThrottleInterval = TimeSpan.FromMilliseconds(1000);
+
+    // Send policy (official MV profile): the NAVI instruction frame is only
+    // written when the maneuver signature (index/instruction/street) changes;
+    // in between, status ticks refresh SM/SM1 only. PING keepalive (15 s, in
+    // the plugin) is what keeps the W2R path warm – it used to be
+    // auto-suppressed because per-tick NAVI writes kept its 5 s skip window
+    // inside _lastNavUpdateAt.
+    private string? _lastNaviSig;
 
     // Serializes BLE frame writes so concurrent update chains cannot interleave.
     // Send-Gate: if 1, a BLE write is in progress. New frames are discarded
@@ -72,6 +82,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         _isNavigating = true;
         _currentStatus = null;
+        _lastNaviSig = null; // new session: first update must carry NAVI
 
         NavigationStartInput input = new()
         {
@@ -91,7 +102,11 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     public async Task OnManeuverAsync(NavigationManeuverInfo maneuver)
     {
         _currentManeuver = maneuver;
-        await SendUpdateAsync();
+        // Maneuver change = NAVI signature change → full update (NAVI + SM).
+        // Stamp _lastStatusSent so the status tick on the same GPS reading
+        // is throttled out instead of doubling the SM write.
+        _lastStatusSent = DateTimeOffset.UtcNow;
+        await SendUpdateAsync(sendNavi: true);
     }
 
     /// <inheritdoc />
@@ -104,7 +119,12 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             return;
 
         _lastStatusSent = now;
-        await SendUpdateAsync();
+
+        // Status ticks refresh SM only, unless the maneuver signature has
+        // changed since the last NAVI write (covers the first tick of a
+        // session and any change that did not arrive via OnManeuverAsync).
+        string sig = NaviSignature();
+        await SendUpdateAsync(sendNavi: sig != _lastNaviSig);
     }
 
     /// <summary>
@@ -118,7 +138,8 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             return;
 
         Log.Information("Resending navigation state after reconnect");
-        await SendUpdateAsync();
+        // Full resync: the rebuilt link has no memory of the last instruction.
+        await SendUpdateAsync(sendNavi: true);
     }
 
     /// <inheritdoc />
@@ -141,6 +162,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
+        _lastNaviSig = null;
 
         await _bleManager.ExecuteNavigationFinishAsync();
     }
@@ -151,6 +173,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
+        _lastNaviSig = null;
 
         await _bleManager.ExecuteNavigationStopAsync();
     }
@@ -164,7 +187,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
     // -- Helpers
 
-    private async Task SendUpdateAsync()
+    private async Task SendUpdateAsync(bool sendNavi)
     {
         if (!_isNavigating || _currentManeuver == null || _currentStatus == null)
             return;
@@ -212,15 +235,29 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         }
         try
         {
-            await _bleManager.ExecuteNavigationUpdateAsync(input);
+            await _bleManager.ExecuteNavigationUpdateAsync(input, sendNavi);
         }
         finally
         {
             Interlocked.Exchange(ref _isWriting, 0);
         }
+
+        // Remember the signature a NAVI write was requested with. A gate-busy
+        // discard returns before this line, so the next tick re-requests the
+        // NAVI write instead of silently keeping the display stale.
+        if (sendNavi)
+            _lastNaviSig = NaviSignature();
     }
 
     // -- Helpers
+
+    /// <summary>
+    /// Signature of the NAVI frame (the instruction the display shows). A new
+    /// NAVI write is due when the maneuver index or its display content
+    /// (instruction/street) changes.
+    /// </summary>
+    private string NaviSignature()
+        => _currentManeuver is not { } m ? "" : $"{m.Index}|{m.Instruction}|{m.StreetNames.FirstOrDefault() ?? ""}";
 
     private NavigationManeuverInfo? GetManeuverInfo()
     {

@@ -71,7 +71,13 @@ public interface IBleDevicePlugin
     /// Sends a navigation update (maneuver, speed, distance) to the device.
     /// Called on maneuver change and periodically (throttled) for status updates.
     /// </summary>
-    Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input);
+    /// <param name="sendNavi">
+    /// Whether to write the NAVI frame (the instruction the display shows).
+    /// Maneuver changes pass true; periodic status ticks pass false so only
+    /// the SM/SM1 distance frames refresh (official MV Ride cadence: NAVI
+    /// on-change, SM ~1 Hz, PING keepalive).
+    /// </param>
+    Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input, bool sendNavi = true);
 
     /// <summary>
     /// Sends navigation finish sequence to the device.
