@@ -233,19 +233,21 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             Log.Debug("Send gate busy – discarding stale navigation update");
             return;
         }
+        bool delivered = false;
         try
         {
-            await _bleManager.ExecuteNavigationUpdateAsync(input, sendNavi);
+            delivered = await _bleManager.ExecuteNavigationUpdateAsync(input, sendNavi);
         }
         finally
         {
             Interlocked.Exchange(ref _isWriting, 0);
         }
 
-        // Remember the signature a NAVI write was requested with. A gate-busy
-        // discard returns before this line, so the next tick re-requests the
-        // NAVI write instead of silently keeping the display stale.
-        if (sendNavi)
+        // Remember the signature a NAVI write was delivered with. A gate-busy
+        // discard or a failed write (delivered == false) skips this line, so
+        // the next tick re-requests the NAVI frame instead of silently
+        // keeping the display on the stale instruction.
+        if (sendNavi && delivered)
             _lastNaviSig = NaviSignature();
     }
 

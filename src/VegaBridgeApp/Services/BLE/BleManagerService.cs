@@ -650,13 +650,17 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     /// <summary>
     /// Sends a navigation-update frame through the active plugin.
+    /// Returns whether the frame was actually delivered to the device –
+    /// false when skipped (no device), the link is unhealthy, or the
+    /// write failed. Callers use this to decide whether a NAVI write must
+    /// be re-requested.
     /// </summary>
-    public async Task ExecuteNavigationUpdateAsync(NavigationUpdateInput input, bool sendNavi = true)
+    public async Task<bool> ExecuteNavigationUpdateAsync(NavigationUpdateInput input, bool sendNavi = true)
     {
         if (_activePeripheral == null || _activePlugin == null)
         {
             Log.Debug("ExecuteNavigationUpdateAsync skipped: no active device/plugin");
-            return;
+            return false;
         }
 
         Log.Information("BLE-LOGGER: {Line}", "NAV ACTION: SendNavigationUpdateAsync");
@@ -669,11 +673,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             {
                 Log.Warning("ExecuteNavigationUpdateAsync: link not healthy, skipping write");
                 UpdateError("Connection lost. Reconnection attempts failed.", isCritical: false);
-                return;
+                return false;
             }
 
             BleConnectedDeviceWrapper wrapper = new(_activePeripheral!, _activePlugin);
             await _activePlugin.SendNavigationUpdateAsync(wrapper, input, sendNavi);
+            return true;
         }
         catch (Exception ex)
         {
@@ -682,6 +687,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             // events handle real connection loss). Just log and let the
             // next GPS tick send a fresh frame.
             Log.Debug(ex, "Write failed for SendNavigationUpdateAsync – next tick will retry");
+            return false;
         }
     }
 
