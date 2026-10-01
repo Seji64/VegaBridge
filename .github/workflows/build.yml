@@ -3,6 +3,13 @@ name: build
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+# One build at a time per branch: a new push cancels the in-flight one,
+# so queued builds never pile up behind each other.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
