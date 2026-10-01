@@ -26,11 +26,75 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     // Send policy (official MV profile): the NAVI instruction frame is only
     // written when the maneuver signature (index/instruction/street) changes;
     // in between, status ticks refresh SM every tick, SM1 on countdown-bucket
-    // change only (on-change gate in the plugin). PING keepalive (15 s, in
-    // the plugin) is what keeps the W2R path warm – it used to be
-    // auto-suppressed because per-tick NAVI writes kept its 5 s skip window
-    // inside _lastNavUpdateAt.
+    // change only (on-change gate in the plugin). PING keepalive (15 s) is
+    // what keeps the W2R path warm – this coordinator owns the cadence; the
+    // plugin only knows the PING frame (SendKeepAliveAsync).
     private string? _lastNaviSig;
+
+    // ─── PING keepalive (15 s tick, official MV profile) ─────────────────
+    // The plugin used to own this loop; it now only sends the frame. Each
+    // tick resolves the current live connection through the manager, so a
+    // reconnect needs no re-arming: the next tick just picks up the new
+    // link, and ticks while the link is down are no-ops.
+    private PeriodicTimer? _keepAliveTimer;
+    private CancellationTokenSource? _keepAliveCts;
+    private Task? _keepAliveTask;
+    // 5 s skip window: a PING landing right after a NAVI+SM burst clogs the
+    // W2R queue (observed: PING + NAVI within 23 ms → write failures).
+    private DateTimeOffset _lastNaviWriteAt = DateTimeOffset.MinValue;
+
+    private async Task StartKeepAliveAsync()
+    {
+        await StopKeepAliveAsync();
+
+        _keepAliveCts = new CancellationTokenSource();
+        CancellationToken token = _keepAliveCts.Token;
+        _keepAliveTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // official MV Ride keepalive cadence
+
+        _keepAliveTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (await _keepAliveTimer.WaitForNextTickAsync(token))
+                {
+                    if (DateTimeOffset.UtcNow - _lastNaviWriteAt < TimeSpan.FromSeconds(5))
+                        continue; // NAVI+SM already warmed the W2R path
+                    await _bleManager.ExecuteKeepAliveAsync(); // no-op without a live link
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when stopping
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Keepalive tick loop error – PING keepalive stopped");
+            }
+        }, token);
+    }
+
+    private async Task StopKeepAliveAsync()
+    {
+        if (_keepAliveCts != null)
+        {
+            await _keepAliveCts.CancelAsync();
+            _keepAliveCts.Dispose();
+            _keepAliveCts = null;
+        }
+
+        _keepAliveTimer?.Dispose();
+        _keepAliveTimer = null;
+
+        if (_keepAliveTask != null)
+        {
+            try
+            {
+                await _keepAliveTask;
+            }
+            catch (OperationCanceledException) { /* Expected */ }
+            _keepAliveTask = null;
+        }
+    }
 
     // Serializes BLE frame writes so concurrent update chains cannot interleave.
     // Send-Gate: if 1, a BLE write is in progress. New frames are discarded
@@ -58,6 +122,9 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         {
             _isNavigating = true;
             _currentManeuver = GetManeuverInfo();
+            // Keepalive must cover an active session that started before this
+            // coordinator subscribed (app restart, late DI resolution).
+            _ = StartKeepAliveAsync();
         }
 
         Log.Information("BleNavigationCoordinator is now active.");
@@ -70,6 +137,10 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
+
+        // Sync Dispose cannot await – cancel the tick loop, don't wait.
+        _keepAliveCts?.Cancel();
+        _keepAliveTimer?.Dispose();
     }
 
     // ─── INavigationSink ─────────────────────────────────────────────────
@@ -97,6 +168,11 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         Log.Information("BLE-LOGGER: {Line}", $"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={start.ManeuverCount}");
 
         await _bleManager.ExecuteNavigationStartAsync(input);
+
+        // Nav session active → PING keepalive runs (15 s tick, no-op without
+        // a live BLE link; resumes on the next tick after a reconnect).
+        _lastNaviWriteAt = DateTimeOffset.UtcNow;
+        await StartKeepAliveAsync();
     }
 
     /// <inheritdoc />
@@ -166,6 +242,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _lastNaviSig = null;
 
         await _bleManager.ExecuteNavigationFinishAsync();
+        await StopKeepAliveAsync();
     }
 
     /// <inheritdoc />
@@ -177,6 +254,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _lastNaviSig = null;
 
         await _bleManager.ExecuteNavigationStopAsync();
+        await StopKeepAliveAsync();
     }
 
     /// <inheritdoc />
@@ -247,9 +325,14 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         // Remember the signature a NAVI write was delivered with. A gate-busy
         // discard or a failed write (delivered == false) skips this line, so
         // the next tick re-requests the NAVI frame instead of silently
-        // keeping the display on the stale instruction.
+        // keeping the display on the stale instruction. The write also
+        // stamps the keepalive skip window: the NAVI+SM burst already
+        // warmed the W2R path, so the next PING tick stays quiet for 5 s.
         if (sendNavi && delivered)
+        {
             _lastNaviSig = NaviSignature();
+            _lastNaviWriteAt = DateTimeOffset.UtcNow;
+        }
     }
 
     // -- Helpers

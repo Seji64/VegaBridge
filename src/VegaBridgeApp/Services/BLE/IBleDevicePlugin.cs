@@ -96,4 +96,13 @@ public interface IBleDevicePlugin
     /// Sends an off-route alert to the device.
     /// </summary>
     Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input);
+
+    /// <summary>
+    /// Sends the manufacturer's keepalive frame while a navigation session
+    /// is active (MV Agusta: PING, the official MV Ride keepalive mechanism).
+    /// The send cadence (15 s tick, 5 s skip after NAVI writes) is owned by
+    /// the navigation coordinator, not by the plugin – the plugin only knows
+    /// the frame itself. No-op if the brand has no keepalive mechanism.
+    /// </summary>
+    Task SendKeepAliveAsync(IBleConnectedDevice device);
 }

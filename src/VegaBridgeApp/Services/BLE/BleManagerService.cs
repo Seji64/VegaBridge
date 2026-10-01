@@ -243,9 +243,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             SetupWhenConnected(peripheral);
             SetupNotifications(peripheral);
 
-            // After a (re)connect the keepalive must resume if a navigation
-            // session is active (the plugin tracks _pingShouldRun).
-            await EnsureKeepaliveAsync(peripheral);
+            // No keepalive re-arm needed on (re)connect: the navigation
+            // coordinator's 15 s PING tick picks up the new link on its
+            // own (ExecuteKeepAliveAsync resolves the current connection).
 
             UpdateDeviceList();
             return true;
@@ -402,13 +402,14 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     /// <summary>
     /// 25-minute live-profile density test over the real W2R write path:
-    /// navigation start (DEST + REM – like a real ride, this starts the PING
-    /// keepalive) → 1 Hz SM ticks with a simulated urban maneuver
+    /// navigation start (DEST + REM, like a real ride) → 1 Hz SM ticks with
+    /// a simulated urban maneuver
     /// change every ~30 s (NAVI and SM1 on-change only; straight maneuvers
     /// skip SM1) → FINISH. Traffic volume is ≈77 frames/min
-    /// (SM @ 1 Hz = 60, SM1 on-change ≈ 11/min, NAVI ≈ 2/min, PING/15 s = 4),
-    /// i.e. the traffic profile a live ride produces after the on-change
-    /// traffic reduction – no bike needed. The question it answers: does the
+    /// (SM @ 1 Hz = 60, SM1 on-change ≈ 11/min, NAVI ≈ 2/min, PING/15 s = 4,
+    /// sent by the sim loop – in production the coordinator's 15 s tick
+    /// owns the keepalive cadence). I.e. the traffic profile a live ride
+    /// produces after the on-change traffic reduction – no bike needed. The question it answers: does the
     /// connection survive ~25 minutes (≈20 min is the known critical point)
     /// at live-ride traffic density? No UI dependency, so it also works with
     /// the display off; every tick, failure, link loss/rebuild and the final
@@ -452,15 +453,17 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
         int WallSec() => (int)(DateTime.UtcNow - simStartUtc).TotalSeconds;
 
-        SimLine($"W2R-SIM START: 25-min live-profile test, {totalSec} ticks @ 1 Hz, SM every tick + NAVI every {naviEvery}s + SM1 on-change + PING/15s via navigation start ≈ 77 frames/min, slow threshold {slowThresholdMs} ms, timeline file {simLogFile}");
+        SimLine($"W2R-SIM START: 25-min live-profile test, {totalSec} ticks @ 1 Hz, SM every tick + NAVI every {naviEvery}s + SM1 on-change + PING/15s in sim loop ≈ 77 frames/min, slow threshold {slowThresholdMs} ms, timeline file {simLogFile}");
 
         int ticks = 0, slowTicks = 0, failedTicks = 0, maxDrainMs = 0;
         int firstAnomalySecond = 0;
 
         try
         {
-            // Navigation start (DEST + REM) starts the PING keepalive – same
-            // as a real ride, so keepalive behaviour is part of the test.
+            // Navigation start (DEST + REM), same as a real ride. The PING
+            // keepalive is sent explicitly by the sim loop every 15 ticks –
+            // in production the coordinator's 15 s tick owns the cadence,
+            // but the sim bypasses the coordinator and drives the plugin.
             await _activePlugin.SendNavigationStartAsync(wrapper, new NavigationStartInput
             {
                 TotalDistanceKm = 20,
@@ -561,6 +564,25 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 else if (ok)
                 {
                     SimLine($"W2R-SIM OK t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} drain={drainMs} ms");
+                }
+
+                // PING keepalive every 15 ticks – the keepalive component of
+                // the live-ride profile. It rides the same W2R queue, so
+                // keepalive survival at live-ride density is part of the test.
+                if (i % 15 == 0)
+                {
+                    var pingSw = System.Diagnostics.Stopwatch.StartNew();
+                    try
+                    {
+                        await _activePlugin.SendKeepAliveAsync(wrapper);
+                        SimLine($"W2R-SIM PING t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} drain={pingSw.ElapsedMilliseconds} ms");
+                    }
+                    catch (Exception ex)
+                    {
+                        // A PING failure is not a sim anomaly by itself – the
+                        // next tick's LINK DOWN branch tracks the link state.
+                        SimLine($"W2R-SIM PING FAIL t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} ({ex.GetType().Name})");
+                    }
                 }
 
                 // Keep the 1 Hz cadence: the write already consumed part of
@@ -784,6 +806,40 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     }
 
     /// <summary>
+    /// Sends the manufacturer's keepalive frame (MV Agusta: PING) through
+    /// the active plugin. The 15 s cadence and the 5 s post-NAVI skip are
+    /// owned by the navigation coordinator – this method is one keepalive
+    /// send against the current live link, no-op when no connection exists.
+    /// </summary>
+    public async Task ExecuteKeepAliveAsync()
+    {
+        if (_activePeripheral == null || _activePlugin == null)
+        {
+            Log.Debug("ExecuteKeepAliveAsync skipped: no active device/plugin");
+            return;
+        }
+
+        Log.Information("BLE-LOGGER: {Line}", "NAV ACTION: SendKeepAliveAsync");
+
+        try
+        {
+            if (!await EnsureConnectedAsync())
+            {
+                Log.Warning("ExecuteKeepAliveAsync: link not healthy, skipping keepalive");
+                return;
+            }
+
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral!, _activePlugin);
+            await _activePlugin.SendKeepAliveAsync(wrapper);
+        }
+        catch (Exception ex)
+        {
+            // Keepalive is non-critical: log and let the next 15 s tick retry.
+            Log.Debug(ex, "Write failed for SendKeepAliveAsync – next tick will retry");
+        }
+    }
+
+    /// <summary>
     /// Handles user-cancelled navigation via the active plugin.
     /// </summary>
     public async Task ExecuteNavigationStopAsync()
@@ -916,18 +972,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
 
         SetupNotifications(peripheral);
-        _ = EnsureKeepaliveAsync(peripheral);
+        // No keepalive re-arm needed: the navigation coordinator's 15 s PING
+        // tick resolves the current connection itself (ExecuteKeepAliveAsync).
         UpdateDeviceList();
-    }
-
-    /// <summary>
-    /// Resumes the PING keepalive after (re)connect if a navigation session
-    /// is active (the MV-Agusta plugin tracks _pingShouldRun internally).
-    /// </summary>
-    private async Task EnsureKeepaliveAsync(IPeripheral? peripheral)
-    {
-        if (peripheral is not null && _activePlugin is MvAgustaBlePlugin mv)
-            await mv.EnsurePingRunningAsync(new BleConnectedDeviceWrapper(peripheral, mv));
     }
 
     /// <summary>

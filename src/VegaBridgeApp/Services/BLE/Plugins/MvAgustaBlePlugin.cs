@@ -12,7 +12,7 @@ namespace VegaBridgeApp.Services.BLE.Plugins;
 /// <summary>
 /// MV Agusta BLE plugin – implements the protocol for MV Agusta motorcycles.
 /// </summary>
-public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
+public class MvAgustaBlePlugin : IBleDevicePlugin
 {
     private const byte Cr = 0x0D;
     private const byte Rs = 0x1E;
@@ -24,35 +24,11 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     public string ControlWriteCharacteristicUuid => "00002345-0000-1000-8000-00805f9b34fb";
     public string ReadCharacteristicUuid => "00001234-0000-1000-8000-00805f9b34fb";
 
-    // Heartbeat fields - PING keepalive (official MV Ride uses PING, not GUI1 writes)
-    private PeriodicTimer? _pingTimer;
-    private CancellationTokenSource? _pingCts;
-    private Task? _pingTask;
     private string? _lastBikeSessionId;
-    private bool _isDisposed;
-    private DateTimeOffset _lastNavUpdateAt = DateTimeOffset.MinValue;
     // On-change SM1 (same policy as NAVI): the last SM1 frame that was
     // actually written, keyed by maneuver|type|countdown. Null until the
     // first SM1 of a navigation session.
     private string? _lastSm1Key;
-    // Bumped on every StartPingAsync. A superseded (replaced) keepalive loop
-    // must not log current-loop failures – its in-flight failure belongs to
-    // the link that was just dropped, not the freshly rebuilt one.
-    private int _pingGeneration;
-    // Whether the keepalive SHOULD be running (set on nav start, cleared on
-    // nav stop / disconnect). After a BLE reconnect the manager calls
-    // EnsurePingRunning to restart the loop without a new navigation start.
-    private volatile bool _pingShouldRun;
-
-    /// <summary>
-    /// Restarts the PING keepalive after a reconnect, but only if a
-    /// navigation session is active. Safe to call on every connect.
-    /// </summary>
-    public async Task EnsurePingRunningAsync(IBleConnectedDevice device)
-    {
-        if (!_pingShouldRun) return;
-        await StartPingAsync(device);
-    }
 
     /// <summary>
     /// Gets the last GUI1 session ID received from the bike (for reference only).
@@ -140,12 +116,12 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         // 3 RS separators → 4 fields: command, empty, meters, empty
         await SendAsync(device, Commands.REM, "", (input.TotalDistanceKm * 1000).ToString("F0"), "");
 
-        // Start PING keepalive when navigation begins
-        _pingShouldRun = true;
         // New session: force the first SM1 of the first maneuver even if it
         // matches the last frame of a previous session.
         _lastSm1Key = null;
-        await StartPingAsync(device);
+        // PING keepalive is deliberately NOT started here: the cadence is
+        // owned by the navigation coordinator (15 s tick), which calls
+        // SendKeepAliveAsync on the live connection.
     }
 
     public async Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input, bool sendNavi = true)
@@ -179,9 +155,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         
         // NAVI = the instruction frame the display shows; per the official
         // MV Ride profile it is written on maneuver change only. Status ticks
-        // (sendNavi: false) skip it and refresh SM/SM1 – that is what keeps
-        // the PING keepalive from being auto-suppressed by the 5 s skip
-        // window (only NAVI writes bump _lastNavUpdateAt).
+        // (sendNavi: false) skip it and refresh SM/SM1. The coordinator's
+        // PING keepalive tick skips itself for 5 s after a delivered NAVI
+        // write – the NAVI+SM pair already warmed the W2R path.
         if (sendNavi)
         {
             byte[] naviFrame = BuildFrame(Commands.NAVI,
@@ -189,7 +165,6 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
                 navigationGuide,
                 intersectionName);
             Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
-            _lastNavUpdateAt = DateTimeOffset.UtcNow;
             await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
             // No leaky-bucket pacing after the NAVI write: the Shiny write queue
             // already waits on CanSendWriteWithoutResponse (docs) – the fixed
@@ -262,10 +237,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
         Log.Information("BLE-LOGGER: {Line}", $"SEND FINISH frame: {BitConverter.ToString(frame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
-        
-        // Stop keepalive when navigation ends
-        _pingShouldRun = false;
-        await StopPingAsync();
+        // Keepalive cadence is owned by the navigation coordinator, so there
+        // is nothing to stop here – it observes the navigation-stop event.
     }
 
     public async Task SendNavigationStopAsync(IBleConnectedDevice device)
@@ -276,10 +249,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
         Log.Information("BLE-LOGGER: {Line}", $"SEND FINISH (STOP) frame: {BitConverter.ToString(frame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
-        
-        // Stop keepalive when navigation ends
-        _pingShouldRun = false;
-        await StopPingAsync();
+        // Keepalive cadence is owned by the navigation coordinator, so there
+        // is nothing to stop here – it observes the navigation-stop event.
     }
 
     public async Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input)
@@ -296,107 +267,13 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     }
 
     /// <summary>
-    /// Starts the PING keepalive timer (sends every ~15 seconds, matching official app behavior).
-    /// </summary>
-    private async Task StartPingAsync(IBleConnectedDevice device)
-    {
-        // Stop any existing timer
-        await StopPingAsync();
-        
-        _pingCts = new CancellationTokenSource();
-        CancellationToken token = _pingCts.Token; // capture once – StopPingAsync disposes/nullifies the CTS
-        _pingTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // Official app sends PING once in capture, but keepalive every ~15s
-
-        // Generation guard: when a reconnect starts a new keepalive loop,
-        // this loop is superseded. Its in-flight write failure must NOT be
-        // logged as a current-link failure – it belongs to the old link.
-        int generation = ++_pingGeneration;
-
-        // Start the ping loop and store the task for proper disposal
-        _pingTask = Task.Run(async () =>
-        {
-            try
-            {
-                while (await _pingTimer.WaitForNextTickAsync(token))
-                {
-                    if (_isDisposed) break;
-                    // Skip PING if a nav update was sent recently (within 5s).
-                    // NAVI+SM frames already act as keepalive. PING + NAVI
-                    // within 23ms fills the BLE queue and causes write failures.
-                    if (DateTimeOffset.UtcNow - _lastNavUpdateAt < TimeSpan.FromSeconds(5))
-                        continue;
-                    try
-                    {
-                        await SendPingAsync(device);
-                    }
-                    catch (Exception ex)
-                    {
-                        if (generation == _pingGeneration && !_isDisposed)
-                        {
-                            // Current loop: the link is dead (iOS dropped it in the
-                            // background). Shiny's auto-reconnect owns recovery
-                            // (≥ 5.6); we only log – no reconnect trigger here.
-                            Log.Error(ex, "MV Agusta: Failed to send PING keepalive – link likely dead");
-                        }
-                        else
-                        {
-                            // Superseded loop (reconnect already started): ignore,
-                            // the new loop owns the keepalive now.
-                            Log.Debug(ex, "MV Agusta: PING failure on superseded keepalive loop – ignoring");
-                        }
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected when stopping
-            }
-            catch (Exception ex) when (!_isDisposed)
-            {
-                Log.Error(ex, "MV Agusta: PING keepalive error");
-            }
-        }, token);
-    }
-
-    /// <summary>
-    /// Stops the PING keepalive timer and waits for the task to complete.
-    /// </summary>
-    private async Task StopPingAsync()
-    {
-        if (_pingCts != null)
-        {
-            await _pingCts.CancelAsync();
-            _pingCts.Dispose();
-            _pingCts = null;
-        }
-        
-        _pingTimer?.Dispose();
-        _pingTimer = null;
-
-        // Wait for the ping task to finish gracefully
-        if (_pingTask != null)
-        {
-            try
-            {
-                await _pingTask;
-            }
-            catch (OperationCanceledException) { /* Expected */ }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "MV Agusta: PING task ended with error during stop");
-            }
-            _pingTask = null;
-        }
-    }
-
-    /// <summary>
     /// Sends a PING keepalive frame (official MV Ride keepalive mechanism).
     /// PING format: \rPING\u001E\u001E\u001E\r (4 fields, all empty after command).
-    /// Failures propagate to the calling loop, which decides (generation guard)
-    /// whether to log a current-loop failure or ignore a superseded loop.
-    /// Link recovery itself is owned by Shiny's auto-reconnect.
+    /// This is the ONLY PING logic in the plugin: the 15 s cadence, the 5 s
+    /// post-NAVI skip and start/stop with the navigation session are owned
+    /// by the BleNavigationCoordinator, which calls this on the live link.
     /// </summary>
-    private async Task SendPingAsync(IBleConnectedDevice device)
+    public async Task SendKeepAliveAsync(IBleConnectedDevice device)
     {
         byte[] frame = BuildFrame(Commands.PING, "", "", "");
         Log.Information("BLE-LOGGER: {Line}", $"SEND PING frame: {BitConverter.ToString(frame)}");
@@ -530,17 +407,5 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
         byte[] frame = BuildFrame(Commands.SM1, sm1Type, countdown.ToString(), "");
         Log.Information("BLE-LOGGER: {Line}", $"SEND SM1 frame: {BitConverter.ToString(frame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
-    }
-
-    // ─── IAsyncDisposable Implementation ───────────────────────────────────────
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_isDisposed) return;
-        _isDisposed = true;
-        
-        await StopPingAsync();
-        
-        GC.SuppressFinalize(this);
     }
 }
