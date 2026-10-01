@@ -30,6 +30,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
     private string? _lastBikeSessionId;
     private bool _isDisposed;
     private DateTimeOffset _lastNavUpdateAt = DateTimeOffset.MinValue;
+    // On-change SM1 (same policy as NAVI): the last SM1 frame that was
+    // actually written, keyed by maneuver|type|countdown. Null until the
+    // first SM1 of a navigation session.
+    private string? _lastSm1Key;
     // Bumped on every StartPingAsync. A superseded (replaced) keepalive loop
     // must not log current-loop failures – its in-flight failure belongs to
     // the link that was just dropped, not the freshly rebuilt one.
@@ -137,6 +141,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 
         // Start PING keepalive when navigation begins
         _pingShouldRun = true;
+        // New session: force the first SM1 of the first maneuver even if it
+        // matches the last frame of a previous session.
+        _lastSm1Key = null;
         await StartPingAsync(device);
     }
 
@@ -205,18 +212,31 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 
         if (input.DistanceToTurnM is <= 300 and > 0)
         {
-            try
+            string sm1Type = input.ManeuverIcon.Contains("left", StringComparison.OrdinalIgnoreCase) ? "902" : "901";
+            int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
+            // On-change SM1 (same policy as NAVI): the countdown has only 8
+            // values (40 m buckets), so writing it on every 1 Hz tick was
+            // duplicate traffic. The key carries the maneuver index, so a new
+            // maneuver (countdown resets to 7) and re-entry into the 300 m
+            // zone always send – inside one maneuver the distance is
+            // monotonic, so buckets never repeat and GPS jitter within the
+            // same bucket is suppressed instead of re-sent.
+            string sm1Key = $"{input.CurrentManeuverIndex}|{sm1Type}|{countdown}";
+            if (sm1Key != _lastSm1Key)
             {
-                string sm1Type = input.ManeuverIcon.Contains("left", StringComparison.OrdinalIgnoreCase) ? "902" : "901";
-                int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
-                await SendSm1CountdownAsync(device, sm1Type, countdown);
-            }
-            catch (Exception ex)
-            {
-                // Same as SM: non-critical frame. Log for field diagnostics –
-                // a persistent failure here means the bike's status display
-                // is going stale.
-                Log.Debug(ex, "SM1 frame failed – skipping");
+                try
+                {
+                    await SendSm1CountdownAsync(device, sm1Type, countdown);
+                    _lastSm1Key = sm1Key; // only after a confirmed write
+                }
+                catch (Exception ex)
+                {
+                    // Same as SM: non-critical frame. The key stays unset so
+                    // the next tick retries. Log for field diagnostics –
+                    // a persistent failure here means the bike's status display
+                    // is going stale.
+                    Log.Debug(ex, "SM1 frame failed – skipping");
+                }
             }
         }
         // Log the navigation update for debugging

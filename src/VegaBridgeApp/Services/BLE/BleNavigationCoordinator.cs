@@ -25,7 +25,8 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
     // Send policy (official MV profile): the NAVI instruction frame is only
     // written when the maneuver signature (index/instruction/street) changes;
-    // in between, status ticks refresh SM/SM1 only. PING keepalive (15 s, in
+    // in between, status ticks refresh SM every tick, SM1 on countdown-bucket
+    // change only (on-change gate in the plugin). PING keepalive (15 s, in
     // the plugin) is what keeps the W2R path warm – it used to be
     // auto-suppressed because per-tick NAVI writes kept its 5 s skip window
     // inside _lastNavUpdateAt.

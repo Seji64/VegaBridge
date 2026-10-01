@@ -119,8 +119,9 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     }
 
     // ── W2R live-profile density test (25 min) ────────────────────────────
-    // Navigation start (PING keepalive) → 1 Hz SM(+SM1) ticks with a NAVI
-    // every ~30 s (simulated urban maneuver change) → FINISH ≈ 128
+    // Navigation start (PING keepalive) → 1 Hz SM ticks + NAVI every ~30 s
+    // (simulated urban maneuver change), both on-change; SM1 rides the
+    // on-change gate in the plugin (≈ 8 sends per maneuver). FINISH ≈ 82
     // frames/min – the traffic profile of a live ride after the on-change
     // traffic reduction. Answers whether the connection survives ~25 minutes
     // at live-ride traffic density (≈20 min is the known critical point).
