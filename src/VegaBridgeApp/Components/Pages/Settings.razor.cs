@@ -118,12 +118,14 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         });
     }
 
-    // ── W2R survival test (25 min) ────────────────────────────────────────
-    // Simple long-duration test: navigation start (PING keepalive) → one
-    // NAVI update per minute → FINISH. Answers whether the BLE connection
-    // survives ~25 minutes with the phone display off (≈20 min is the
-    // known critical point). Runs independently of the UI; progress and
-    // summary are logged under "W2R-SIM" for later analysis.
+    // ── W2R live-profile density test (25 min) ────────────────────────────
+    // Navigation start (PING keepalive) → 1 Hz SM(+SM1) ticks with a NAVI
+    // every ~30 s (simulated urban maneuver change) → FINISH ≈ 128
+    // frames/min – the traffic profile of a live ride after the on-change
+    // traffic reduction. Answers whether the connection survives ~25 minutes
+    // at live-ride traffic density (≈20 min is the known critical point).
+    // Runs independently of the UI; progress and summary are logged under
+    // "W2R-SIM" for later analysis.
 
     private bool _simRunning;
     private string _simResult = string.Empty;
@@ -169,7 +171,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             _simRunning = false;
             _simCts?.Dispose();
             _simCts = null;
-            // The run lasts 30 min: the component may have been disposed
+            // The run lasts 25 min: the component may have been disposed
             // (navigation away) by the time it finishes – guard the refresh.
             if (!_disposed)
                 _ = InvokeAsync(StateHasChanged);

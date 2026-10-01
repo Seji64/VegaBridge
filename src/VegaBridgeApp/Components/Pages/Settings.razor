@@ -56,7 +56,7 @@
                             StartIcon="@Icons.Material.Filled.Route"
                             FullWidth="true"
                             OnClick="@RunW2rRouteSimAsync">
-                            @(_simRunning ? "W2R Test läuft … (Stop)" : "W2R 25-min Überleibstest")
+                            @(_simRunning ? "W2R Test läuft … (Stop)" : "W2R Live-Profil-Test (25 min, ≈128 Frames/min)")
                         </MudButton>
                         @if (!string.IsNullOrEmpty(_simResult))
                         {
