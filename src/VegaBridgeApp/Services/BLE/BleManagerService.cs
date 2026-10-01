@@ -566,6 +566,15 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 long leftoverMs = intervalSec * 1000L - sw.ElapsedMilliseconds;
                 if (leftoverMs > 0)
                     await Task.Delay((int)leftoverMs, ct);
+
+                // RX liveness into the DUREABLE timeline: RECV GUI1 lines
+                // live only in the RAM debug log, which does not survive a
+                // process kill on display-off runs. A stalled/clogged link
+                // usually keeps RX alive – the rising rxFrames counter is
+                // the evidence that separates "W2R consumer stall" from
+                // "whole link is dead".
+                if (i % 60 == 0)
+                    SimLine($"W2R-SIM HB t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} rxFrames={(livePlugin as MvAgustaBlePlugin is { } mv ? mv.RxFrameCount : 0)}");
             }
 
             if (_activePlugin is not null)

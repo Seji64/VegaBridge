@@ -374,22 +374,31 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
 
     // ─── Incoming Data Handling ──────────────────────────────────────────
 
+    // Total RX frames received on the notification characteristic – the
+    // W2R-SIM test samples this into its durable timeline file as an RX
+    // liveness signal (the RAM-only debug log does not survive a process
+    // kill on display-off runs).
+    private int _rxFrameCount;
+    public int RxFrameCount => _rxFrameCount;
+
     public void OnDataReceived(byte[] data)
     {
+        Interlocked.Increment(ref _rxFrameCount);
         if (TryParseFrame(data, out string command, out string[] fields))
         {
             // GUI1 notification from the bike: capture the session ID for
-            // reference/logging only. The phone intentionally never writes
-            // GUI1 back – PING keepalive + NAVI/SM frames keep the session alive
+            // reference. The phone intentionally never writes GUI1 back –
+            // PING keepalive + NAVI/SM frames keep the session alive
             // (official MV Ride capture shows 0 GUI1 writes from the phone).
+            // One log line per frame (GUI1 used to be logged twice – the
+            // specific and the generic line – which flooded the capture).
             if (command == "GUI1" && fields.Length > 0)
-            {
                 _lastBikeSessionId = fields[0];
-                Log.Information("BLE-LOGGER: {Line}", $"RECV GUI1 frame: {BitConverter.ToString(data)}, sessionId={fields[0]}");
-            }
-            // Logic to handle the parsed frame
-            // In a real scenario, this might trigger an event or update a state machine.
-            Log.Information("BLE-LOGGER: {Line}", $"RECV {command} frame: {BitConverter.ToString(data)}");
+
+            Log.Information("BLE-LOGGER: {Line}",
+                command == "GUI1" && fields.Length > 0
+                    ? $"RECV GUI1 frame: {BitConverter.ToString(data)}, sessionId={fields[0]}"
+                    : $"RECV {command} frame: {BitConverter.ToString(data)}");
             Log.Debug("MV Agusta Frame Received: {Command}, Fields: {Fields}", command, string.Join(", ", fields));
         }
         else
