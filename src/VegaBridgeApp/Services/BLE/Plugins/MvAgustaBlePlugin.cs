@@ -3,6 +3,7 @@ using System.Text;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.BLE.MvAgusta;
+using VegaBridgeApp.Models.Navigation;
 
 // ReSharper disable InvalidXmlDocComment
 
@@ -210,9 +211,20 @@ public class MvAgustaBlePlugin : IBleDevicePlugin, IAsyncDisposable
             Log.Debug(ex, "SM frame failed – skipping");
         }
 
-        if (input.DistanceToTurnM is <= 300 and > 0)
+        // SM1 is the turn-approach indicator: every maneuver except a plain
+        // "straight" approach shows a countdown in the 300 m zone. Left turns
+        // are 902, everything else (right family, U-turn, roundabout,
+        // finish) is 901 – matching the official MV Ride capture. The icon
+        // keys come from NavigationIconMapper (single source of truth), no
+        // substring matching.
+        if (input.DistanceToTurnM is > 0 and <= 300
+            && input.ManeuverIcon != NavigationIconMapper.IconStraight)
         {
-            string sm1Type = input.ManeuverIcon.Contains("left", StringComparison.OrdinalIgnoreCase) ? "902" : "901";
+            string sm1Type = input.ManeuverIcon is NavigationIconMapper.IconTurnLeft
+                    or NavigationIconMapper.IconSlightLeft
+                    or NavigationIconMapper.IconSharpLeft
+                ? "902"
+                : "901";
             int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
             // On-change SM1 (same policy as NAVI): the countdown has only 8
             // values (40 m buckets), so writing it on every 1 Hz tick was

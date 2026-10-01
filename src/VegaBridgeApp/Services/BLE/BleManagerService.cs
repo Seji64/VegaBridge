@@ -404,9 +404,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// 25-minute live-profile density test over the real W2R write path:
     /// navigation start (DEST + REM – like a real ride, this starts the PING
     /// keepalive) → 1 Hz SM ticks with a simulated urban maneuver
-    /// change every ~30 s (NAVI and SM1 on-change only) → FINISH. Traffic
-    /// volume is ≈82 frames/min (SM @ 1 Hz = 60, SM1 on-change ≈ 16/min,
-    /// NAVI ≈ 2/min, PING/15 s = 4),
+    /// change every ~30 s (NAVI and SM1 on-change only; straight maneuvers
+    /// skip SM1) → FINISH. Traffic volume is ≈77 frames/min
+    /// (SM @ 1 Hz = 60, SM1 on-change ≈ 11/min, NAVI ≈ 2/min, PING/15 s = 4),
     /// i.e. the traffic profile a live ride produces after the on-change
     /// traffic reduction – no bike needed. The question it answers: does the
     /// connection survive ~25 minutes (≈20 min is the known critical point)
@@ -452,7 +452,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
         int WallSec() => (int)(DateTime.UtcNow - simStartUtc).TotalSeconds;
 
-        SimLine($"W2R-SIM START: 25-min live-profile test, {totalSec} ticks @ 1 Hz, SM every tick + NAVI every {naviEvery}s + SM1 on-change + PING/15s via navigation start ≈ 82 frames/min, slow threshold {slowThresholdMs} ms, timeline file {simLogFile}");
+        SimLine($"W2R-SIM START: 25-min live-profile test, {totalSec} ticks @ 1 Hz, SM every tick + NAVI every {naviEvery}s + SM1 on-change + PING/15s via navigation start ≈ 77 frames/min, slow threshold {slowThresholdMs} ms, timeline file {simLogFile}");
 
         int ticks = 0, slowTicks = 0, failedTicks = 0, maxDrainMs = 0;
         int firstAnomalySecond = 0;
@@ -513,7 +513,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 // 1 s tick (its distance field changes every tick). SM1 is
                 // gated on-change in the plugin: distance counts down
                 // 300 → 10 m within the maneuver, so its countdown bucket
-                // fires ≈ 8 times per maneuver instead of every tick.
+                // fires ≈ 8 times per maneuver instead of every tick
+                // (straight maneuvers skip SM1 entirely).
                 int maneuver = (i - 1) / naviEvery; // 0 .. totalSec/naviEvery-1
                 bool sendNavi = i % naviEvery == 1; // NAVI on maneuver change
                 string icon = maneuver % 3 == 0 ? "turn-left" : maneuver % 3 == 1 ? "straight" : "turn-right";
@@ -583,7 +584,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             else
                 SimLine("W2R-SIM: FINISH skipped – no active connection");
 
-            string summary = $"W2R-SIM DONE: {ticks}/{totalSec} ticks over {totalSec}s ({FormatSimTm(WallSec())} wall clock, ≈82 frames/min live profile), {slowTicks} slow / {failedTicks} failed"
+            string summary = $"W2R-SIM DONE: {ticks}/{totalSec} ticks over {totalSec}s ({FormatSimTm(WallSec())} wall clock, ≈77 frames/min live profile), {slowTicks} slow / {failedTicks} failed"
                 + (firstAnomalySecond > 0
                     ? $", first anomaly t+{FormatSimTm(firstAnomalySecond)}"
                     : "")
