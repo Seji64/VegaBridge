@@ -27,8 +27,17 @@ public partial class App : Application
         // Timeline marker for display-off runs: from here the app is
         // backgrounded (and soon suspended) – anything logged before this
         // line happened while the app was active.
+        // The event double-fires in bursts (~60 ms apart, scene-lifecycle
+        // quirk observed in the live logs) – debounce so the timeline gets
+        // one line per backgrounding, not a duplicate pair.
+        DateTime lastDeactivatedAt = DateTime.MinValue;
         window.Deactivated += (_, _) =>
+        {
+            if ((DateTime.UtcNow - lastDeactivatedAt).TotalMilliseconds < 1000)
+                return;
+            lastDeactivatedAt = DateTime.UtcNow;
             Log.Information("App deactivated (backgrounded) – BLE keepalive continues in background, app may be suspended");
+        };
 
         window.Resumed += async (_, _) =>
         {

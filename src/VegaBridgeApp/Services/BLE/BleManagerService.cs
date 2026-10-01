@@ -243,9 +243,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             SetupWhenConnected(peripheral);
             SetupNotifications(peripheral);
 
-            // After a (re)connect the keepalive must resume if a navigation
-            // session is active (the plugin tracks _pingShouldRun).
-            await EnsureKeepaliveAsync(peripheral);
+            // No keepalive re-arm needed on (re)connect: the navigation
+            // coordinator's 15 s PING tick picks up the new link on its
+            // own (ExecuteKeepAliveAsync resolves the current connection).
 
             UpdateDeviceList();
             return true;
@@ -396,26 +396,33 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
     }
 
-    /// <summary>Outcome of the 25-minute W2R survival test (see <see cref="BleManagerService.RunW2rRouteSimAsync"/>).</summary>
+    /// <summary>Outcome of the 25-minute W2R live-profile density test (see <see cref="BleManagerService.RunW2rRouteSimAsync"/>).</summary>
     public sealed record W2rRouteSimResult(
         int Ticks, int SlowTicks, int FailedTicks, int MaxDrainMs, int? FirstAnomalySecond, string Summary);
 
     /// <summary>
-    /// 25-minute low-frequency survival test over the real W2R write path:
-    /// navigation start (DEST + REM – like a real ride, this starts the PING
-    /// keepalive) → one NAVI update per minute → FINISH. The question it
-    /// answers: with the phone display off, does the BLE connection survive
-    /// ~25 minutes (≈20 min is the known critical point)? No UI dependency,
-    /// so it also works with the display off; every tick, failure, link
-    /// loss/rebuild and the final summary are logged under "W2R-SIM".
+    /// 25-minute live-profile density test over the real W2R write path:
+    /// navigation start (DEST + REM, like a real ride) → 1 Hz SM ticks with
+    /// a simulated urban maneuver
+    /// change every ~30 s (NAVI and SM1 on-change only; straight maneuvers
+    /// skip SM1) → FINISH. Traffic volume is ≈77 frames/min
+    /// (SM @ 1 Hz = 60, SM1 on-change ≈ 11/min, NAVI ≈ 2/min, PING/15 s = 4,
+    /// sent by the sim loop – in production the coordinator's 15 s tick
+    /// owns the keepalive cadence). I.e. the traffic profile a live ride
+    /// produces after the on-change traffic reduction – no bike needed. The question it answers: does the
+    /// connection survive ~25 minutes (≈20 min is the known critical point)
+    /// at live-ride traffic density? No UI dependency, so it also works with
+    /// the display off; every tick, failure, link loss/rebuild and the final
+    /// summary are logged under "W2R-SIM".
     /// </summary>
     public async Task<W2rRouteSimResult> RunW2rRouteSimAsync(double? startLat, double? startLon, CancellationToken ct)
     {
         if (_activePeripheral is null || _activePlugin is null)
             return new W2rRouteSimResult(0, 0, 0, 0, null, "W2R-SIM: no connected device");
 
-        const int updates = 25;           // one update per minute
-        const int intervalSec = 60;
+        const int totalSec = 25 * 60;     // 25 min, one 1 s tick per second
+        const int intervalSec = 1;        // 1 Hz = the live-ride SM cadence
+        const int naviEvery = 30;         // simulated urban maneuver change (NAVI on-change)
         const int slowThresholdMs = 500;  // a clogged W2R queue shows up as ~4 s drains
 
         // The in-memory DebugLogSink is off by default – a test that produces
@@ -446,28 +453,30 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
         int WallSec() => (int)(DateTime.UtcNow - simStartUtc).TotalSeconds;
 
-        SimLine($"W2R-SIM START: {updates}-min survival test, {updates} updates @ 1/min, PING keepalive via navigation start, slow threshold {slowThresholdMs} ms, timeline file {simLogFile}");
+        SimLine($"W2R-SIM START: 25-min live-profile test, {totalSec} ticks @ 1 Hz, SM every tick + NAVI every {naviEvery}s + SM1 on-change + PING/15s in sim loop ≈ 77 frames/min, slow threshold {slowThresholdMs} ms, timeline file {simLogFile}");
 
         int ticks = 0, slowTicks = 0, failedTicks = 0, maxDrainMs = 0;
         int firstAnomalySecond = 0;
 
         try
         {
-            // Navigation start (DEST + REM) starts the PING keepalive – same
-            // as a real ride, so keepalive behaviour is part of the test.
+            // Navigation start (DEST + REM), same as a real ride. The PING
+            // keepalive is sent explicitly by the sim loop every 15 ticks –
+            // in production the coordinator's 15 s tick owns the cadence,
+            // but the sim bypasses the coordinator and drives the plugin.
             await _activePlugin.SendNavigationStartAsync(wrapper, new NavigationStartInput
             {
                 TotalDistanceKm = 20,
-                TotalTimeMin = 25,
+                TotalTimeMin = totalSec / 60,
                 StartLatitude = startLat,
                 StartLongitude = startLon
             });
 
-            for (int i = 1; i <= updates; i++)
+            for (int i = 1; i <= totalSec; i++)
             {
                 ct.ThrowIfCancellationRequested();
                 ticks++;
-                int second = (i - 1) * intervalSec; // t+ elapsed seconds at this tick
+                int second = i - 1; // t+ elapsed seconds at this tick
 
                 // Reconnect-proofing: Shiny owns link recovery; an in-session
                 // reconnect nulls and reassigns _activePeripheral/_activePlugin
@@ -481,7 +490,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     // log 25 LINK DOWN lines.
                     if (_userInitiatedDisconnect)
                     {
-                        string abortSummary = $"W2R-SIM ABORTED after {ticks}/{updates} updates (user disconnect), {slowTicks} slow / {failedTicks} failed, max drain {maxDrainMs} ms";
+                        string abortSummary = $"W2R-SIM ABORTED after {ticks}/{totalSec} ticks (user disconnect), {slowTicks} slow / {failedTicks} failed, max drain {maxDrainMs} ms";
                         SimLine($"W2R-SIM ABORT t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} – user-initiated disconnect");
                         SimLine(abortSummary);
                         return new W2rRouteSimResult(ticks, slowTicks, failedTicks, maxDrainMs, null, abortSummary);
@@ -489,7 +498,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     failedTicks++;
                     if (firstAnomalySecond == 0)
                         firstAnomalySecond = second;
-                    SimLine($"W2R-SIM LINK DOWN t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} – write skipped (Shiny reconnect in progress)");
+                    SimLine($"W2R-SIM LINK DOWN t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} – write skipped (Shiny reconnect in progress)");
                     await Task.Delay(intervalSec, ct);
                     continue;
                 }
@@ -498,42 +507,48 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     wrapper = new BleConnectedDeviceWrapper(_activePeripheral, _activePlugin);
                     livePeripheral = _activePeripheral;
                     livePlugin = _activePlugin;
-                    SimLine($"W2R-SIM LINK REBUILT t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} – continuing on the new connection");
+                    SimLine($"W2R-SIM LINK REBUILT t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} – continuing on the new connection");
                 }
 
-                // Vary icon + distance every update so the bike display
-                // visibly changes on every tick – that proves the update
-                // actually reached the display (constant payloads look
-                // broken even when the link is fine).
-                string icon = i % 3 == 0 ? "turn-left" : i % 3 == 1 ? "straight" : "turn-right";
-                int distM = 500 - ((i - 1) % 5) * 100; // 500,400,300,200,100
+                // Live-ride profile: a simulated urban "maneuver" advances
+                // every {naviEvery} s – the NAVI frame goes out on that
+                // change only (on-change policy), while SM rides on every
+                // 1 s tick (its distance field changes every tick). SM1 is
+                // gated on-change in the plugin: distance counts down
+                // 300 → 10 m within the maneuver, so its countdown bucket
+                // fires ≈ 8 times per maneuver instead of every tick
+                // (straight maneuvers skip SM1 entirely).
+                int maneuver = (i - 1) / naviEvery; // 0 .. totalSec/naviEvery-1
+                bool sendNavi = i % naviEvery == 1; // NAVI on maneuver change
+                string icon = maneuver % 3 == 0 ? "turn-left" : maneuver % 3 == 1 ? "straight" : "turn-right";
+                int distM = 300 - ((i - 1) % naviEvery) * 10; // 300,290,…,10
 
                 var input = new NavigationUpdateInput
                 {
                     ManeuverIcon = icon,
-                    InstructionText = $"W2R-SIM Update {i}",
-                    StreetName = "W2R-SIM",
+                    InstructionText = $"W2R-LIVE M{maneuver} {icon}",
+                    StreetName = $"W2R-LIVE M{maneuver}",
                     DistanceToTurnM = distM,
                     SpeedKmh = 30,
-                    RemainingDistanceKm = 20 * (1 - (double)i / updates),
-                    RemainingTimeMin = updates - i,
-                    CurrentManeuverIndex = 0,
-                    TotalManeuvers = 1,
-                    IsFinal = i == updates
+                    RemainingDistanceKm = 20 * (1 - (double)i / totalSec),
+                    RemainingTimeMin = (totalSec - i) / 60.0,
+                    CurrentManeuverIndex = maneuver,
+                    TotalManeuvers = totalSec / naviEvery,
+                    IsFinal = i == totalSec
                 };
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 bool ok;
                 try
                 {
-                    await _activePlugin.SendNavigationUpdateAsync(wrapper, input);
+                    await _activePlugin.SendNavigationUpdateAsync(wrapper, input, sendNavi);
                     ok = true;
                 }
                 catch (Exception ex)
                 {
                     ok = false;
                     failedTicks++;
-                    SimLine($"W2R-SIM FAIL t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} after {sw.ElapsedMilliseconds} ms ({ex.GetType().Name})");
+                    SimLine($"W2R-SIM FAIL t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} after {sw.ElapsedMilliseconds} ms ({ex.GetType().Name})");
                 }
                 int drainMs = (int)sw.ElapsedMilliseconds;
                 sw.Stop();
@@ -544,18 +559,46 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                     slowTicks++;
                     if (firstAnomalySecond == 0)
                         firstAnomalySecond = second;
-                    SimLine($"W2R-SIM SLOW t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} drain={drainMs} ms");
+                    SimLine($"W2R-SIM SLOW t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} drain={drainMs} ms");
                 }
                 else if (ok)
                 {
-                    SimLine($"W2R-SIM OK t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} update={i}/{updates} drain={drainMs} ms");
+                    SimLine($"W2R-SIM OK t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} drain={drainMs} ms");
                 }
 
-                // Keep the 1/min cadence: the write already consumed part of
+                // PING keepalive every 15 ticks – the keepalive component of
+                // the live-ride profile. It rides the same W2R queue, so
+                // keepalive survival at live-ride density is part of the test.
+                if (i % 15 == 0)
+                {
+                    var pingSw = System.Diagnostics.Stopwatch.StartNew();
+                    try
+                    {
+                        await _activePlugin.SendKeepAliveAsync(wrapper);
+                        SimLine($"W2R-SIM PING t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} drain={pingSw.ElapsedMilliseconds} ms");
+                    }
+                    catch (Exception ex)
+                    {
+                        // A PING failure is not a sim anomaly by itself – the
+                        // next tick's LINK DOWN branch tracks the link state.
+                        SimLine($"W2R-SIM PING FAIL t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} ({ex.GetType().Name})");
+                    }
+                }
+
+                // Keep the 1 Hz cadence: the write already consumed part of
                 // this interval (a clogged write self-paces at ~4 s).
                 long leftoverMs = intervalSec * 1000L - sw.ElapsedMilliseconds;
                 if (leftoverMs > 0)
                     await Task.Delay((int)leftoverMs, ct);
+
+                // RX liveness into the DUREABLE timeline: RECV GUI1 lines
+                // live only in the RAM debug log, which does not survive a
+                // process kill on display-off runs. A stalled/clogged link
+                // usually keeps RX alive – the rising rxFrames counter is
+                // the evidence that separates "W2R consumer stall" from
+                // "whole link is dead".
+                if (i % 60 == 0)
+                    SimLine($"W2R-SIM HB t+{FormatSimTm(second)} wall+{FormatSimTm(WallSec())} tick={i}/{totalSec} rxFrames={(livePlugin as MvAgustaBlePlugin is { } mv ? mv.RxFrameCount : 0)}");
             }
 
             if (_activePlugin is not null)
@@ -563,7 +606,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             else
                 SimLine("W2R-SIM: FINISH skipped – no active connection");
 
-            string summary = $"W2R-SIM DONE: {ticks}/{updates} updates over {updates * intervalSec}s ({FormatSimTm(WallSec())} wall clock), {slowTicks} slow / {failedTicks} failed"
+            string summary = $"W2R-SIM DONE: {ticks}/{totalSec} ticks over {totalSec}s ({FormatSimTm(WallSec())} wall clock, ≈77 frames/min live profile), {slowTicks} slow / {failedTicks} failed"
                 + (firstAnomalySecond > 0
                     ? $", first anomaly t+{FormatSimTm(firstAnomalySecond)}"
                     : "")
@@ -591,7 +634,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             {
                 SimLine("W2R-SIM: FINISH skipped – no active connection");
             }
-            string summary = $"W2R-SIM STOPPED after {ticks}/{updates} updates, {slowTicks} slow / {failedTicks} failed, max drain {maxDrainMs} ms";
+            string summary = $"W2R-SIM STOPPED after {ticks}/{totalSec} ticks, {slowTicks} slow / {failedTicks} failed, max drain {maxDrainMs} ms";
             SimLine(summary);
             return new W2rRouteSimResult(ticks, slowTicks, failedTicks, maxDrainMs, null, summary);
         }
@@ -650,13 +693,17 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     /// <summary>
     /// Sends a navigation-update frame through the active plugin.
+    /// Returns whether the frame was actually delivered to the device –
+    /// false when skipped (no device), the link is unhealthy, or the
+    /// write failed. Callers use this to decide whether a NAVI write must
+    /// be re-requested.
     /// </summary>
-    public async Task ExecuteNavigationUpdateAsync(NavigationUpdateInput input)
+    public async Task<bool> ExecuteNavigationUpdateAsync(NavigationUpdateInput input, bool sendNavi = true)
     {
         if (_activePeripheral == null || _activePlugin == null)
         {
             Log.Debug("ExecuteNavigationUpdateAsync skipped: no active device/plugin");
-            return;
+            return false;
         }
 
         Log.Information("BLE-LOGGER: {Line}", "NAV ACTION: SendNavigationUpdateAsync");
@@ -669,11 +716,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             {
                 Log.Warning("ExecuteNavigationUpdateAsync: link not healthy, skipping write");
                 UpdateError("Connection lost. Reconnection attempts failed.", isCritical: false);
-                return;
+                return false;
             }
 
             BleConnectedDeviceWrapper wrapper = new(_activePeripheral!, _activePlugin);
-            await _activePlugin.SendNavigationUpdateAsync(wrapper, input);
+            await _activePlugin.SendNavigationUpdateAsync(wrapper, input, sendNavi);
+            return true;
         }
         catch (Exception ex)
         {
@@ -682,6 +730,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             // events handle real connection loss). Just log and let the
             // next GPS tick send a fresh frame.
             Log.Debug(ex, "Write failed for SendNavigationUpdateAsync – next tick will retry");
+            return false;
         }
     }
 
@@ -753,6 +802,40 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         {
             Log.Error(ex, "Failed to send navigation finish");
             UpdateError($"Navigation finish failed: {ex.Message}", isCritical: false);
+        }
+    }
+
+    /// <summary>
+    /// Sends the manufacturer's keepalive frame (MV Agusta: PING) through
+    /// the active plugin. The 15 s cadence and the 5 s post-NAVI skip are
+    /// owned by the navigation coordinator – this method is one keepalive
+    /// send against the current live link, no-op when no connection exists.
+    /// </summary>
+    public async Task ExecuteKeepAliveAsync()
+    {
+        if (_activePeripheral == null || _activePlugin == null)
+        {
+            Log.Debug("ExecuteKeepAliveAsync skipped: no active device/plugin");
+            return;
+        }
+
+        Log.Information("BLE-LOGGER: {Line}", "NAV ACTION: SendKeepAliveAsync");
+
+        try
+        {
+            if (!await EnsureConnectedAsync())
+            {
+                Log.Warning("ExecuteKeepAliveAsync: link not healthy, skipping keepalive");
+                return;
+            }
+
+            BleConnectedDeviceWrapper wrapper = new(_activePeripheral!, _activePlugin);
+            await _activePlugin.SendKeepAliveAsync(wrapper);
+        }
+        catch (Exception ex)
+        {
+            // Keepalive is non-critical: log and let the next 15 s tick retry.
+            Log.Debug(ex, "Write failed for SendKeepAliveAsync – next tick will retry");
         }
     }
 
@@ -889,18 +972,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
 
         SetupNotifications(peripheral);
-        _ = EnsureKeepaliveAsync(peripheral);
+        // No keepalive re-arm needed: the navigation coordinator's 15 s PING
+        // tick resolves the current connection itself (ExecuteKeepAliveAsync).
         UpdateDeviceList();
-    }
-
-    /// <summary>
-    /// Resumes the PING keepalive after (re)connect if a navigation session
-    /// is active (the MV-Agusta plugin tracks _pingShouldRun internally).
-    /// </summary>
-    private async Task EnsureKeepaliveAsync(IPeripheral? peripheral)
-    {
-        if (peripheral is not null && _activePlugin is MvAgustaBlePlugin mv)
-            await mv.EnsurePingRunningAsync(new BleConnectedDeviceWrapper(peripheral, mv));
     }
 
     /// <summary>
