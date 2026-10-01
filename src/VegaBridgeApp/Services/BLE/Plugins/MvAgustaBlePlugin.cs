@@ -14,9 +14,6 @@ namespace VegaBridgeApp.Services.BLE.Plugins;
 /// </summary>
 public class MvAgustaBlePlugin : IBleDevicePlugin
 {
-    private const byte Cr = 0x0D;
-    private const byte Rs = 0x1E;
-
     public string ManufacturerId => "MVAGUSTA";
     public string DisplayName => "MV Agusta";
     public string BrandName => "MV AGUSTA";
@@ -24,18 +21,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     public string ControlWriteCharacteristicUuid => "00002345-0000-1000-8000-00805f9b34fb";
     public string ReadCharacteristicUuid => "00001234-0000-1000-8000-00805f9b34fb";
 
-    private string? _lastBikeSessionId;
     // On-change SM1 (same policy as NAVI): the last SM1 frame that was
     // actually written, keyed by maneuver|type|countdown. Null until the
     // first SM1 of a navigation session.
     private string? _lastSm1Key;
-
-    /// <summary>
-    /// Gets the last GUI1 session ID received from the bike (for reference only).
-    /// The phone never writes GUI1 – PING keepalive + NAVI/SM traffic keep the
-    /// session alive (official MV Ride capture shows 0 GUI1 writes from the phone).
-    /// </summary>
-    public string? LastBikeSessionId => _lastBikeSessionId;
 
     public bool IsCompatible(BleDeviceInfo device)
     {
@@ -241,29 +230,23 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         // is nothing to stop here – it observes the navigation-stop event.
     }
 
-    public async Task SendNavigationStopAsync(IBleConnectedDevice device)
+    public Task SendNavigationStopAsync(IBleConnectedDevice device)
     {
-        Log.Debug("MV Agusta: Navigation Stop (user cancelled)");
-        // For MV Agusta, there is no separate STOP command - FINISH is used for both
-        // destination reached and user-cancelled navigation (confirmed via BLE trace analysis)
-        byte[] frame = BuildFrame(Commands.FINISH, "", "", "");
-        Log.Information("BLE-LOGGER: {Line}", $"SEND FINISH (STOP) frame: {BitConverter.ToString(frame)}");
-        await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
-        // Keepalive cadence is owned by the navigation coordinator, so there
-        // is nothing to stop here – it observes the navigation-stop event.
+        // For MV Agusta, there is no separate STOP command – FINISH is used
+        // for both destination reached and user-cancelled navigation
+        // (confirmed via BLE trace analysis).
+        Log.Debug("MV Agusta: Navigation Stop (user cancelled) – sending FINISH");
+        return SendNavigationFinishAsync(device);
     }
 
-    public async Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input)
+    public async Task SendOffRouteAlertAsync(IBleConnectedDevice device)
     {
-        Log.Warning("MV Agusta: Off-Route Alert - {Dist:F1}m at {Lat},{Lon}", input.DistanceMeters, input.Latitude, input.Longitude);
-        
         // RENAVI format (from pklg capture): RENAVI|\x1e|\x1e|
-        // All fields empty – the bike switches to rerouting mode based on the command alone.
+        // All fields empty – the bike switches to rerouting mode based on
+        // the command alone. Detection details are logged by the caller.
         byte[] frame = BuildFrame(Commands.RENAVI, "", "", "");
         Log.Information("BLE-LOGGER: {Line}", $"SEND RENAVI frame: {BitConverter.ToString(frame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
-        
-        Log.Information("BLE-LOGGER: {Line}", $"OFF-ROUTE ALERT: dist={input.DistanceMeters:F0}m, lat={input.Latitude:F6}, lon={input.Longitude:F6}");
     }
 
     /// <summary>
@@ -295,15 +278,10 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         Interlocked.Increment(ref _rxFrameCount);
         if (TryParseFrame(data, out string command, out string[] fields))
         {
-            // GUI1 notification from the bike: capture the session ID for
-            // reference. The phone intentionally never writes GUI1 back –
-            // PING keepalive + NAVI/SM frames keep the session alive
+            // GUI1 notification from the bike: log the session ID for
+            // diagnostics only. The phone intentionally never writes GUI1
+            // back – PING keepalive + NAVI/SM frames keep the session alive
             // (official MV Ride capture shows 0 GUI1 writes from the phone).
-            // One log line per frame (GUI1 used to be logged twice – the
-            // specific and the generic line – which flooded the capture).
-            if (command == "GUI1" && fields.Length > 0)
-                _lastBikeSessionId = fields[0];
-
             Log.Information("BLE-LOGGER: {Line}",
                 command == "GUI1" && fields.Length > 0
                     ? $"RECV GUI1 frame: {BitConverter.ToString(data)}, sessionId={fields[0]}"
@@ -330,68 +308,25 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         await device.WriteAsync(ControlWriteCharacteristicUuid, smFrame, withResponse: false);
     }
 
-    private byte[] BuildFrame(string command, params string[] fields)
+    // Frame layout: 0x0D + command + (0x1E + field)* + 0x0D
+    private static byte[] BuildFrame(string command, params string[] fields)
     {
-        using MemoryStream ms = new();
-        ms.WriteByte(Cr);
-        ms.Write(Encoding.UTF8.GetBytes(command));
-
-        foreach (string field in fields)
-        {
-            ms.WriteByte(Rs);
-            byte[] fieldBytes = Encoding.UTF8.GetBytes(field);
-            ms.Write(fieldBytes);
-        }
-
-        ms.WriteByte(Cr);
-        return ms.ToArray();
+        char cr = '\r', rs = '\u001E';
+        return Encoding.UTF8.GetBytes($"{cr}{command}{string.Concat(fields.Select(f => $"{rs}{f}"))}{cr}");
     }
 
-    private bool IsValidFrame(byte[] data)
-    {
-        if (data.Length < 3) return false;
-        return data[0] == Cr && data[^1] == Cr;
-    }
-
-    private bool TryParseFrame(byte[] data, out string command, out string[] fields)
+    private static bool TryParseFrame(byte[] data, out string command, out string[] fields)
     {
         command = string.Empty;
         fields = [];
 
-        if (!IsValidFrame(data))
+        if (data.Length < 3 || data[0] != 0x0D || data[^1] != 0x0D)
             return false;
 
-        byte[] body = data[1..^1];
-
-        if (body.Length == 0)
-            return false;
-
-        byte[][] parts = SplitByRs(body);
-
-        if (parts.Length == 0)
-            return false;
-
-        command = Encoding.UTF8.GetString(parts[0]);
-        fields = parts.Length > 1
-            ? parts[1..].Select(b => Encoding.UTF8.GetString(b)).ToArray()
-            : [];
-
+        string[] parts = Encoding.UTF8.GetString(data[1..^1]).Split('\u001E');
+        command = parts[0];
+        fields = parts.Length > 1 ? parts[1..] : [];
         return true;
-    }
-
-    private byte[][] SplitByRs(byte[] data)
-    {
-        List<byte[]> result = [];
-        int start = 0;
-        for (int i = 0; i <= data.Length; i++)
-        {
-            if (i != data.Length && data[i] != Rs) continue;
-            byte[] segment = new byte[i - start];
-            Array.Copy(data, start, segment, 0, segment.Length);
-            result.Add(segment);
-            start = i + 1;
-        }
-        return [.. result];
     }
 
     // ─── Valhalla > MV Agusta Icon Mapping ─────────────────────────────

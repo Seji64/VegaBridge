@@ -93,9 +93,11 @@ public interface IBleDevicePlugin
     Task SendNavigationStopAsync(IBleConnectedDevice device);
 
     /// <summary>
-    /// Sends an off-route alert to the device.
+    /// Sends an off-route alert to the device (MV Agusta: RENAVI, no
+    /// payload – the bike reroutes on the command alone). Detection
+    /// details are logged by the caller, not part of the frame.
     /// </summary>
-    Task SendOffRouteAlertAsync(IBleConnectedDevice device, OffRouteAlertInput input);
+    Task SendOffRouteAlertAsync(IBleConnectedDevice device);
 
     /// <summary>
     /// Sends the manufacturer's keepalive frame while a navigation session

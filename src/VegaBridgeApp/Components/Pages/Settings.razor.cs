@@ -157,7 +157,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         {
             double? lat = Gps.LastReading?.Position.Latitude;
             double? lon = Gps.LastReading?.Position.Longitude;
-            BleManagerService.W2rRouteSimResult result = await BleManager.RunW2rRouteSimAsync(lat, lon, _simCts.Token);
+            W2rRouteSimResult result = await new W2rRouteSim(BleManager).RunAsync(lat, lon, _simCts.Token);
             _simResult = result.Summary;
         }
         catch (OperationCanceledException)
