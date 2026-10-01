@@ -1,0 +1,17 @@
+name: probe
+
+# Temporary diagnostic: compares runner availability across labels.
+# Delete this file once the CI queue issue is understood.
+on:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "linux runner OK: $RUNNER_NAME"
+
+  macos27:
+    runs-on: macos-27
+    steps:
+      - run: echo "macos-27 runner OK: $RUNNER_NAME"
