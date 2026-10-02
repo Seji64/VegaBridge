@@ -36,7 +36,6 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     // tick resolves the current live connection through the manager, so a
     // reconnect needs no re-arming: the next tick just picks up the new
     // link, and ticks while the link is down are no-ops.
-    private PeriodicTimer? _keepAliveTimer;
     private CancellationTokenSource? _keepAliveCts;
     private Task? _keepAliveTask;
     // 5 s skip window: a PING landing right after a NAVI+SM burst clogs the
@@ -45,18 +44,31 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
     private async Task StartKeepAliveAsync()
     {
-        await StopKeepAliveAsync();
+        // Stop the old loop first so an old tick cannot overlap the new
+        // loop's (route restart mid-session).
+        Task? oldTask = _keepAliveTask;
+        _keepAliveCts?.Cancel();
+        _keepAliveCts?.Dispose();
+        _keepAliveCts = null;
+        _keepAliveTask = null;
+        if (oldTask != null)
+        {
+            try { await oldTask; }
+            catch (OperationCanceledException) { /* expected when stopping */ }
+        }
 
-        _keepAliveCts = new CancellationTokenSource();
-        CancellationToken token = _keepAliveCts.Token;
-        _keepAliveTimer = new PeriodicTimer(TimeSpan.FromSeconds(15)); // official MV Ride keepalive cadence
-
+        CancellationTokenSource cts = new();
+        _keepAliveCts = cts;
         _keepAliveTask = Task.Run(async () =>
         {
             try
             {
-                while (await _keepAliveTimer.WaitForNextTickAsync(token))
+                while (true)
                 {
+                    // 15 s tick (official MV Ride keepalive cadence); throws
+                    // OperationCanceledException on stop → loop exits.
+                    await Task.Delay(TimeSpan.FromSeconds(15), cts.Token);
+
                     if (DateTimeOffset.UtcNow - _lastNaviWriteAt < TimeSpan.FromSeconds(5))
                         continue; // NAVI+SM already warmed the W2R path
                     await _bleManager.ExecuteKeepAliveAsync(); // no-op without a live link
@@ -70,30 +82,22 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             {
                 Log.Error(ex, "Keepalive tick loop error – PING keepalive stopped");
             }
-        }, token);
+        }, cts.Token);
     }
 
     private async Task StopKeepAliveAsync()
     {
-        if (_keepAliveCts != null)
-        {
-            await _keepAliveCts.CancelAsync();
-            _keepAliveCts.Dispose();
-            _keepAliveCts = null;
-        }
+        _keepAliveCts?.Cancel();
+        _keepAliveCts?.Dispose();
+        _keepAliveCts = null;
 
-        _keepAliveTimer?.Dispose();
-        _keepAliveTimer = null;
+        Task? task = _keepAliveTask;
+        _keepAliveTask = null;
+        if (task == null)
+            return;
 
-        if (_keepAliveTask != null)
-        {
-            try
-            {
-                await _keepAliveTask;
-            }
-            catch (OperationCanceledException) { /* Expected */ }
-            _keepAliveTask = null;
-        }
+        try { await task; }
+        catch (OperationCanceledException) { /* expected */ }
     }
 
     // Serializes BLE frame writes so concurrent update chains cannot interleave.
@@ -117,11 +121,11 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         _navigation.AddSink(this);
 
-        // Sync if already navigating
+        // Sync if already navigating (app restart, late DI resolution).
         if (_navigation.IsNavigating)
         {
             _isNavigating = true;
-            _currentManeuver = GetManeuverInfo();
+            _currentManeuver = _navigation.LastManeuverInfo;
             // Keepalive must cover an active session that started before this
             // coordinator subscribed (app restart, late DI resolution).
             _ = StartKeepAliveAsync();
@@ -140,7 +144,8 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
 
         // Sync Dispose cannot await – cancel the tick loop, don't wait.
         _keepAliveCts?.Cancel();
-        _keepAliveTimer?.Dispose();
+        _keepAliveCts?.Dispose();
+        _keepAliveCts = null;
     }
 
     // ─── INavigationSink ─────────────────────────────────────────────────
@@ -148,11 +153,11 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     /// <inheritdoc />
     public async Task OnStartAsync(NavigationStartInfo start)
     {
-        _currentManeuver = GetManeuverInfo();
-        if (_currentManeuver == null)
-            return;
-
+        // The first maneuver arrives right after start via OnManeuverAsync
+        // (NavigationService fires it inside StartNavigation) – it carries
+        // the first NAVI+SM. Keepalive runs regardless of maneuver state.
         _isNavigating = true;
+        _currentManeuver = null;
         _currentStatus = null;
         _lastNaviSig = null; // new session: first update must carry NAVI
 
@@ -222,15 +227,8 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     /// <inheritdoc />
     public async Task OnOffRouteAsync(double lat, double lon, double distM)
     {
-        OffRouteAlertInput input = new()
-        {
-            DistanceMeters = distM,
-            Latitude = lat,
-            Longitude = lon,
-            DetectedAt = DateTimeOffset.UtcNow
-        };
-
-        await _bleManager.ExecuteNavigationOffRouteAlertAsync(input);
+        Log.Information("BLE-LOGGER: {Line}", $"OFF-ROUTE ALERT: dist={distM:F0}m, lat={lat:F6}, lon={lon:F6}");
+        await _bleManager.ExecuteNavigationOffRouteAlertAsync();
     }
 
     /// <inheritdoc />
@@ -275,7 +273,6 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         NavigationManeuverInfo maneuver = _currentManeuver;
 
         string intersectionName = maneuver.StreetNames.FirstOrDefault() ?? string.Empty;
-        string street = intersectionName;
 
         NavigationUpdateInput input = new()
         {
@@ -291,7 +288,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
                     ? 0 // kNone → straight
                     : maneuver.ValhallaType),
             InstructionText = maneuver.Instruction,
-            StreetName = street,
+            StreetName = intersectionName,
             IntersectionName = intersectionName,
             DistanceToTurnM = status.DistanceToNextTurnM,
             SpeedKmh = status.SpeedKmh,
@@ -345,25 +342,4 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     private string NaviSignature()
         => _currentManeuver is not { } m ? "" : $"{m.Index}|{m.Instruction}|{m.StreetNames.FirstOrDefault() ?? ""}";
 
-    private NavigationManeuverInfo? GetManeuverInfo()
-    {
-        Maneuver? m = _navigation.CurrentManeuver;
-        if (m == null)
-            return null;
-
-        return new NavigationManeuverInfo
-        {
-            Index = _navigation.CurrentManeuverIndex,
-            Total = _navigation.TotalManeuvers,
-            Instruction = m.Instruction ?? "",
-            StreetNames = m.StreetNames ?? [],
-            LengthKm = m.Length,
-            TimeMin = m.Time / 60.0,
-            TurnDegree = m.TurnDegree,
-            RoundaboutExitCount = m.RoundaboutExitCount,
-            TravelMode = m.TravelMode,
-            TravelType = m.TravelType,
-            RoundaboutExit = m.RoundaboutExit
-        };
-    }
 }

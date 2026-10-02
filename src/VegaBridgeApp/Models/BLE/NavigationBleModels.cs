@@ -99,29 +99,3 @@ public sealed record NavigationStartInput
     public double? StartLatitude { get; init; }
     public double? StartLongitude { get; init; }
 }
-
-/// <summary>
-/// Input data for an off-route warning.
-/// </summary>
-public sealed record OffRouteAlertInput
-{
-    /// <summary>
-    /// Deviation from the route in meters.
-    /// </summary>
-    public required double DistanceMeters { get; init; }
-
-    /// <summary>
-    /// Current latitude position.
-    /// </summary>
-    public required double Latitude { get; init; }
-
-    /// <summary>
-    /// Current longitude position.
-    /// </summary>
-    public required double Longitude { get; init; }
-
-    /// <summary>
-    /// Timestamp of the detection (UTC).
-    /// </summary>
-    public required DateTimeOffset DetectedAt { get; init; } = DateTimeOffset.UtcNow;
-}
