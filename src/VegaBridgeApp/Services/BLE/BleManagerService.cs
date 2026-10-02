@@ -661,7 +661,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     private void UpdateDeviceFromScanResult(IPeripheral result)
     {
         _discoveredPeripherals[result.Uuid.ToUpper()] = result;
-        UpdateDeviceList();
+        // iOS may have already paired the peripheral (user waited too long).
+        // Such peripherals disappear from the scan but are still connectable
+        // via GetConnectedPeripherals(). Refresh so they show up immediately.
+        RefreshConnectedPeripherals();
     }
 
     private void UpdateDeviceList()
