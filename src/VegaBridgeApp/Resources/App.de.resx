@@ -210,4 +210,10 @@
   <data name="ClosureProviderMobiData" xml:space="preserve"><value>MobiData BW (offizielle Baustellen Baden-Württemberg)</value></data>
   <data name="ClosureProviderEnabled" xml:space="preserve"><value>Sperrungs-Quelle aktiviert</value></data>
   <data name="ClosureProviderDisabled" xml:space="preserve"><value>Sperrungs-Quelle deaktiviert</value></data>
+
+  <!-- BLE Auto-Connect -->
+  <data name="BleAutoConnectTitle" xml:space="preserve"><value>Auto-Verbinden</value></data>
+  <data name="BleAutoConnectToggle" xml:space="preserve"><value>Automatisch mit letztem Motorrad verbinden</value></data>
+  <data name="BleAutoConnectHelp" xml:space="preserve"><value>Wenn aktiviert, verbindet sich VegaBridge beim App-Start automatisch mit dem zuletzt gekoppelten Motorrad, falls es in der Nähe ist.</value></data>
+
 </root>
