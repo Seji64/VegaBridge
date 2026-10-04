@@ -55,3 +55,6 @@ temp/
 ## Build artifacts
 publish/
 *.ipa
+
+## Codegraph (local index, codegraph init)
+.codegraph/
