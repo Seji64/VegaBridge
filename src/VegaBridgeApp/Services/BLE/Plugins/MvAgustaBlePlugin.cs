@@ -155,10 +155,20 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
                 intersectionName);
             Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
             await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
-            // No leaky-bucket pacing after the NAVI write: the Shiny write queue
-            // already waits on CanSendWriteWithoutResponse (docs) – the fixed
-            // 200 ms delay was our quirk and only added per-tick latency.
         }
+
+        // Leaky bucket: 200 ms between each W2R write. Without this the
+        // NAVI + SM + SM1 frames go out as a <5 ms burst; CoreBluetooth
+        // reports CanSendWriteWithoutResponse: ready: False on the 2nd or
+        // 3rd frame, Shiny then blocks up to 3 s waiting for the ready
+        // event, and the next tick's NAVI retry creates a permanent
+        // 3-s-blockade loop (observed on the 2026-10-07 live ride: the
+        // bike-side buffer clogged on every maneuver change and never
+        // drained). 200 ms spacing lets the bike consume each frame
+        // before the next one arrives. The 200 ms is part of the ~1 s
+        // tick budget – a single tick sends at most 3 frames over
+        // ~400 ms, well within the 1 s interval.
+        await Task.Delay(200);
 
         // SM and SM1 are non-critical (status display). If the BLE queue
         // is full after NAVI, skip them instead of throwing. NAVI is the
@@ -200,17 +210,18 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             string sm1Key = $"{input.CurrentManeuverIndex}|{sm1Type}|{countdown}";
             if (sm1Key != _lastSm1Key)
             {
+                // Set the key immediately before writing. If the write fails or is skipped,
+                // we still do not want to block subsequent 1-Hz ticks in a tight 3-second
+                // retry-blockade loop. A missing SM1 frame is non-critical; the next bucket
+                // change will trigger a fresh write automatically.
+                _lastSm1Key = sm1Key;
                 try
                 {
                     await SendSm1CountdownAsync(device, sm1Type, countdown);
-                    _lastSm1Key = sm1Key; // only after a confirmed write
                 }
                 catch (Exception ex)
                 {
-                    // Same as SM: non-critical frame. The key stays unset so
-                    // the next tick retries. Log for field diagnostics –
-                    // a persistent failure here means the bike's status display
-                    // is going stale.
+                    // Same as SM: non-critical frame. Log for field diagnostics.
                     Log.Debug(ex, "SM1 frame failed – skipping");
                 }
             }

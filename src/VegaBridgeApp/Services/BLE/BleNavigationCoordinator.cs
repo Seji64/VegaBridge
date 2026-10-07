@@ -319,17 +319,13 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             Interlocked.Exchange(ref _isWriting, 0);
         }
 
-        // Remember the signature a NAVI write was delivered with. A gate-busy
-        // discard or a failed write (delivered == false) skips this line, so
-        // the next tick re-requests the NAVI frame instead of silently
-        // keeping the display on the stale instruction. The write also
-        // stamps the keepalive skip window: the NAVI+SM burst already
-        // warmed the W2R path, so the next PING tick stays quiet for 5 s.
-        if (sendNavi && delivered)
-        {
-            _lastNaviSig = NaviSignature();
-            _lastNaviWriteAt = DateTimeOffset.UtcNow;
-        }
+        // Remember the signature a NAVI write was requested with.
+        // On a gate-busy discard, remember the signature anyway so we do NOT
+        // spin in a 3-second-blockade retry loop on every subsequent 1-Hz tick.
+        // A stale NAVI frame is discarded; the next real maneuver change will
+        // update the signature and trigger a fresh NAVI write automatically.
+        _lastNaviSig = NaviSignature();
+        _lastNaviWriteAt = DateTimeOffset.UtcNow;
     }
 
     // -- Helpers
