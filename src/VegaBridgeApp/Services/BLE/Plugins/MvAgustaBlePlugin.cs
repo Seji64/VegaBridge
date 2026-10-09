@@ -154,20 +154,18 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
                 navigationGuide,
                 intersectionName);
             Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
-            // PRE-CHECK: CanSendWriteWithoutResponse must be true.
-            // If false, the bike-side buffer is full. Skipping this tick
-            // is essential to avoid the 3s blocking retry-loop.
-            if (device.CanSendWriteWithoutResponse)
-            {
-                await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
-            }
-            else
-            {
-                Log.Debug("BLE-LOGGER: Skipped NAVI - device busy");
-            }
+            // No flow-control pre-check and no artificial pacing: on Apple,
+            // Shiny's write queue already waits on CoreBluetooth's flow
+            // control (peripheralIsReadyToSendWriteWithoutResponse) inside
+            // its operation queue – the Shiny.BluetoothLE docs say to just
+            // await each write in turn, never to poll
+            // CanSendWriteWithoutResponse ourselves (it is not part of the
+            // public IPeripheral API anyway). A clogged bike-side buffer
+            // surfaces as a failed/timed-out write (delivered == false);
+            // the coordinator's signature/stamp logic then keeps the 1-Hz
+            // ticks retry-free without gating off the PING keepalive.
+            await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
         }
-
-        // Removed leaky bucket: rely on Pre-Check instead.
 
         // SM and SM1 are non-critical (status display). If the BLE queue
         // is full after NAVI, skip them instead of throwing. NAVI is the
