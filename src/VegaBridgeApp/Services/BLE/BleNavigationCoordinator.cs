@@ -324,8 +324,14 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         // spin in a 3-second-blockade retry loop on every subsequent 1-Hz tick.
         // A stale NAVI frame is discarded; the next real maneuver change will
         // update the signature and trigger a fresh NAVI write automatically.
+        // Remember the signature a NAVI write was requested with.
         _lastNaviSig = NaviSignature();
-        _lastNaviWriteAt = DateTimeOffset.UtcNow;
+
+        // Stamping _lastNaviWriteAt happens conditionally now:
+        if (sendNavi && delivered)
+        {
+            _lastNaviWriteAt = DateTimeOffset.UtcNow;
+        }
     }
 
     // -- Helpers

@@ -154,21 +154,20 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
                 navigationGuide,
                 intersectionName);
             Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
-            await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
+            // PRE-CHECK: CanSendWriteWithoutResponse must be true.
+            // If false, the bike-side buffer is full. Skipping this tick
+            // is essential to avoid the 3s blocking retry-loop.
+            if (device.CanSendWriteWithoutResponse)
+            {
+                await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
+            }
+            else
+            {
+                Log.Debug("BLE-LOGGER: Skipped NAVI - device busy");
+            }
         }
 
-        // Leaky bucket: 200 ms between each W2R write. Without this the
-        // NAVI + SM + SM1 frames go out as a <5 ms burst; CoreBluetooth
-        // reports CanSendWriteWithoutResponse: ready: False on the 2nd or
-        // 3rd frame, Shiny then blocks up to 3 s waiting for the ready
-        // event, and the next tick's NAVI retry creates a permanent
-        // 3-s-blockade loop (observed on the 2026-10-07 live ride: the
-        // bike-side buffer clogged on every maneuver change and never
-        // drained). 200 ms spacing lets the bike consume each frame
-        // before the next one arrives. The 200 ms is part of the ~1 s
-        // tick budget – a single tick sends at most 3 frames over
-        // ~400 ms, well within the 1 s interval.
-        await Task.Delay(200);
+        // Removed leaky bucket: rely on Pre-Check instead.
 
         // SM and SM1 are non-critical (status display). If the BLE queue
         // is full after NAVI, skip them instead of throwing. NAVI is the
