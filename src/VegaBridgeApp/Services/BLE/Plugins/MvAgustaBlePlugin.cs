@@ -205,12 +205,12 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             // monotonic, so buckets never repeat and GPS jitter within the
             // same bucket is suppressed instead of re-sent.
             string sm1Key = $"{input.CurrentManeuverIndex}|{sm1Type}|{countdown}";
-            if (sm1Key != _lastSm1Key)
+            if (sm1Key != _lastSm1Key && !sendNavi)
             {
-                // Set the key immediately before writing. If the write fails or is skipped,
-                // we still do not want to block subsequent 1-Hz ticks in a tight 3-second
-                // retry-blockade loop. A missing SM1 frame is non-critical; the next bucket
-                // change will trigger a fresh write automatically.
+                // Set the key immediately before writing. If the write fails,
+                // we still do not want to block subsequent 1-Hz ticks in a
+                // tight 3-second retry-blockade loop. A missing SM1 frame is
+                // non-critical; the next bucket change triggers a fresh write.
                 _lastSm1Key = sm1Key;
                 try
                 {
@@ -218,10 +218,18 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
                 }
                 catch (Exception ex)
                 {
-                    // Same as SM: non-critical frame. Log for field diagnostics.
+                    // Non-critical frame. Log for field diagnostics.
                     Log.Debug(ex, "SM1 frame failed – skipping");
                 }
             }
+            // On a NAVI tick (sendNavi) the SM1 is deliberately not written and
+            // its key not updated: the tick already carries NAVI+SM, and a 3rd
+            // back-to-back frame would make a microburst that clogs the
+            // bike-side W2R buffer. Leaving the key unset means the next
+            // SM-only tick re-sends it ~1 s later (SM1 is a non-critical 40 m
+            // countdown, one tick late is fine). This keeps the NAVI tick at
+            // the official app's 2-frame NAVI+SM shape instead of a 3-frame
+            // burst.
         }
         // Log the navigation update for debugging
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE: idx={input.CurrentManeuverIndex}, icon={input.ManeuverIcon}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h");
