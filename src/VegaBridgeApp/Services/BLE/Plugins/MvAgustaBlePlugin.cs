@@ -154,10 +154,17 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
                 navigationGuide,
                 intersectionName);
             Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
+            // No flow-control pre-check and no artificial pacing: on Apple,
+            // Shiny's write queue already waits on CoreBluetooth's flow
+            // control (peripheralIsReadyToSendWriteWithoutResponse) inside
+            // its operation queue – the Shiny.BluetoothLE docs say to just
+            // await each write in turn, never to poll
+            // CanSendWriteWithoutResponse ourselves (it is not part of the
+            // public IPeripheral API anyway). A clogged bike-side buffer
+            // surfaces as a failed/timed-out write (delivered == false);
+            // the coordinator's signature/stamp logic then keeps the 1-Hz
+            // ticks retry-free without gating off the PING keepalive.
             await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
-            // No leaky-bucket pacing after the NAVI write: the Shiny write queue
-            // already waits on CanSendWriteWithoutResponse (docs) – the fixed
-            // 200 ms delay was our quirk and only added per-tick latency.
         }
 
         // SM and SM1 are non-critical (status display). If the BLE queue
@@ -198,22 +205,31 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             // monotonic, so buckets never repeat and GPS jitter within the
             // same bucket is suppressed instead of re-sent.
             string sm1Key = $"{input.CurrentManeuverIndex}|{sm1Type}|{countdown}";
-            if (sm1Key != _lastSm1Key)
+            if (sm1Key != _lastSm1Key && !sendNavi)
             {
+                // Set the key immediately before writing. If the write fails,
+                // we still do not want to block subsequent 1-Hz ticks in a
+                // tight 3-second retry-blockade loop. A missing SM1 frame is
+                // non-critical; the next bucket change triggers a fresh write.
+                _lastSm1Key = sm1Key;
                 try
                 {
                     await SendSm1CountdownAsync(device, sm1Type, countdown);
-                    _lastSm1Key = sm1Key; // only after a confirmed write
                 }
                 catch (Exception ex)
                 {
-                    // Same as SM: non-critical frame. The key stays unset so
-                    // the next tick retries. Log for field diagnostics –
-                    // a persistent failure here means the bike's status display
-                    // is going stale.
+                    // Non-critical frame. Log for field diagnostics.
                     Log.Debug(ex, "SM1 frame failed – skipping");
                 }
             }
+            // On a NAVI tick (sendNavi) the SM1 is deliberately not written and
+            // its key not updated: the tick already carries NAVI+SM, and a 3rd
+            // back-to-back frame would make a microburst that clogs the
+            // bike-side W2R buffer. Leaving the key unset means the next
+            // SM-only tick re-sends it ~1 s later (SM1 is a non-critical 40 m
+            // countdown, one tick late is fine). This keeps the NAVI tick at
+            // the official app's 2-frame NAVI+SM shape instead of a 3-frame
+            // burst.
         }
         // Log the navigation update for debugging
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE: idx={input.CurrentManeuverIndex}, icon={input.ManeuverIcon}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h");

@@ -210,4 +210,10 @@
   <data name="ClosureProviderMobiData" xml:space="preserve"><value>MobiData BW (official Baden-Württemberg roadworks)</value></data>
   <data name="ClosureProviderEnabled" xml:space="preserve"><value>Road closure source enabled</value></data>
   <data name="ClosureProviderDisabled" xml:space="preserve"><value>Road closure source disabled</value></data>
+
+  <!-- BLE Auto-Connect -->
+  <data name="BleAutoConnectTitle" xml:space="preserve"><value>Auto-Connect</value></data>
+  <data name="BleAutoConnectToggle" xml:space="preserve"><value>Connect automatically to last paired motorcycle</value></data>
+  <data name="BleAutoConnectHelp" xml:space="preserve"><value>When enabled, VegaBridge will automatically connect to the last paired motorcycle on app launch if it is nearby.</value></data>
+
 </root>

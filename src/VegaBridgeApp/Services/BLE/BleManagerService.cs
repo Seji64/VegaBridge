@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using Microsoft.Maui.Storage;
 using Serilog;
 using Shiny.BluetoothLE;
 using VegaBridgeApp.Models.BLE;
@@ -32,6 +33,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     // clears it. While set, no path may auto-reconnect – otherwise a
     // user-initiated disconnect gets overridden on the next app resume.
     private volatile bool _userInitiatedDisconnect;
+
+    private const string LastDeviceUuidKey = "ble_last_device_uuid";
+    private const string AutoConnectEnabledKey = "ble_autoconnect_enabled";
 
     // Expose active plugin for advanced access (e.g., session ID)
     public IBleDevicePlugin? ActivePlugin => _activePlugin;
@@ -239,6 +243,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             _state.OnNext(BleConnectionState.Connected);
             Log.Information("Successfully connected to {Uuid} using plugin {Plugin}", deviceUuid, _activePlugin?.DisplayName ?? "None");
+            
+            // Persist last connected device for auto-connect on next launch
+            Preferences.Set(LastDeviceUuidKey, deviceUuid.ToString());
             
             SetupWhenConnected(peripheral);
             SetupNotifications(peripheral);
@@ -661,7 +668,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     private void UpdateDeviceFromScanResult(IPeripheral result)
     {
         _discoveredPeripherals[result.Uuid.ToUpper()] = result;
-        UpdateDeviceList();
+        // iOS may have already paired the peripheral (user waited too long).
+        // Such peripherals disappear from the scan but are still connectable
+        // via GetConnectedPeripherals(). Refresh so they show up immediately.
+        RefreshConnectedPeripherals();
     }
 
     private void UpdateDeviceList()
@@ -714,6 +724,77 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         _state.Dispose();
         _devices.Dispose();
         _errorMessage.Dispose();
+    }
+
+    /// <summary>
+    /// Attempts to auto-connect to the last paired device if auto-connect is enabled.
+    /// Called after BLE access is granted on app start.
+    /// </summary>
+    public async Task TryAutoConnectAsync()
+    {
+        if (!Preferences.Get(AutoConnectEnabledKey, true))
+        {
+            Log.Debug("BLE auto-connect disabled in settings");
+            return;
+        }
+
+        string? lastUuid = Preferences.Get(LastDeviceUuidKey, (string?)null);
+        if (string.IsNullOrEmpty(lastUuid))
+        {
+            Log.Debug("BLE: no last device UUID stored, skipping auto-connect");
+            return;
+        }
+
+        if (!Guid.TryParse(lastUuid, out Guid deviceUuid))
+        {
+            Log.Warning("BLE: invalid last device UUID stored, clearing");
+            Preferences.Remove(LastDeviceUuidKey);
+            return;
+        }
+
+        // Check if device is already connected (iOS state restoration)
+        if (bleManager.GetConnectedPeripherals().Any(p => p.Uuid.Equals(deviceUuid.ToString(), StringComparison.OrdinalIgnoreCase)))
+        {
+            Log.Information("BLE: last device {Uuid} already connected via OS, skipping explicit connect", deviceUuid);
+            return;
+        }
+
+        Log.Information("BLE: attempting auto-connect to last device {Uuid}", deviceUuid);
+        
+        // Try to find in discovered peripherals (from scan or RefreshConnectedPeripherals)
+        if (!_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out IPeripheral? peripheral))
+        {
+            Log.Information("BLE: last device {Uuid} not in discovered list, starting scan to find it", deviceUuid);
+            await StartScanningAsync();
+            // Give scan a moment to populate
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            
+            if (!_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out peripheral))
+            {
+                Log.Information("BLE: last device {Uuid} not found in scan, auto-connect aborted", deviceUuid);
+                return;
+            }
+        }
+
+        // Use existing ConnectAsync logic
+        await ConnectAsync(deviceUuid);
+    }
+
+    /// <summary>
+    /// Clears the stored last device UUID (called on user-initiated disconnect if desired).
+    /// </summary>
+    public void ClearLastDevice()
+    {
+        Preferences.Remove(LastDeviceUuidKey);
+    }
+
+    /// <summary>
+    /// Gets or sets the auto-connect enabled preference.
+    /// </summary>
+    public bool AutoConnectEnabled
+    {
+        get => Preferences.Get(AutoConnectEnabledKey, true);
+        set => Preferences.Set(AutoConnectEnabledKey, value);
     }
 
     // ── HAL Implementation ────────────────────────────────────────────────

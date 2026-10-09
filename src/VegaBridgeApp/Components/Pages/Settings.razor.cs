@@ -59,7 +59,14 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             return;
         }
         
-        await BleManager.StartScanningAsync();
+        // Try auto-connect to last paired device
+        await BleManager.TryAutoConnectAsync();
+        
+        // If not connected, start scanning
+        if (!BleManager.IsAnyDeviceConnected)
+        {
+            await BleManager.StartScanningAsync();
+        }
     }
 
     private void OnConnectionStateChanged(BleConnectionState obj)
@@ -250,6 +257,16 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     // ── Debug logging (collects in-memory while enabled) ────────────────
 
     private bool DebugLoggingEnabled => DebugLogSink.Instance.IsEnabled;
+    
+    private bool BleAutoConnectEnabled
+    {
+        get => BleManager.AutoConnectEnabled;
+        set
+        {
+            BleManager.AutoConnectEnabled = value;
+            StateHasChanged();
+        }
+    }
 
     // ── Road closure providers ───────────────────────────────────────────
 
