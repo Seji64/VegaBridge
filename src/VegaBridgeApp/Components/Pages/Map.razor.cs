@@ -64,7 +64,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private int _markerUpdating;
     private DateTime _lastUiRefresh = DateTime.MinValue;
     private DateTime _lastBreadcrumbUpdate = DateTime.MinValue;
-    private DateTime _lastRerouteTime = DateTime.MinValue;
     private DateTime _lastMarkerUpdate = DateTime.MinValue;
     private double _lastMarkerLon;
     private double _lastMarkerLat;
@@ -493,17 +492,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     public async Task OnOffRouteAsync(double latitude, double longitude, double distanceMeters)
     {
-        if (_disposed || _destinationLocation == null || _isLoading) return;
-        if ((DateTime.UtcNow - _lastRerouteTime).TotalSeconds < 30) return;
-        _lastRerouteTime = DateTime.UtcNow;
-
-        // Sink callbacks arrive on the GPS thread – all UI work (snackbar,
-        // reroute dialog flow) must run on the Blazor dispatcher.
-        await InvokeAsync(async () =>
-        {
-            Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
-            await RerouteAsync(latitude, longitude);
-        });
+        if (_disposed) return;
+        // The NavigationService reroutes on its own (also without this page);
+        // the UI only informs. Sink callbacks arrive on the GPS thread.
+        await InvokeAsync(() => Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning));
     }
 
     public async Task OnRouteUpdatedAsync(RouteResponse response)
@@ -514,7 +506,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         // MarkersList and calls StateHasChanged, so it must run on the
         // Blazor dispatcher. Without this the reroute map update throws
         // and the route disappears from the map.
-        await InvokeAsync(async () => await ShowRouteOnMap(response));
+        await InvokeAsync(async () =>
+        {
+            await ShowRouteOnMap(response);
+            Snackbar.Add(L["RouteRecalculated"], Severity.Success);
+        });
 
         // Road closure check for the (re)routed path – fire and forget, the
         // service reports via snackbar/pins on the dispatcher itself.
@@ -862,7 +858,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             {
                 Locations = locs,
                 Costing = "motorcycle",
-                DirectionsOptions = new DirectionsOptions { Units = "kilometers", Language = "de" }
+                DirectionsOptions = new DirectionsOptions { Units = "kilometers" }
             };
 
             Result result = await ValhallaClient.GetRouteAsync(request);
@@ -1322,9 +1318,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 }
             }
 
-            Snackbar.Add(
-                rerouted ? L["RouteRecalculated"] : L["RerouteNoRoute"],
-                rerouted ? Severity.Success : Severity.Error);
+            // Success is announced by OnRouteUpdatedAsync (also for automatic reroutes).
+            if (!rerouted)
+                Snackbar.Add(L["RerouteNoRoute"], Severity.Error);
         }
         catch (Exception ex)
         {
@@ -1758,7 +1754,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         // Clear the map reference – the JS object may no longer exist
         _map = null;
 
-        if (Gps.IsTracking)
+        // Navigation owns the GPS while it runs – leaving the page (e.g. to
+        // settings) must not freeze it.
+        if (Gps.IsTracking && !NavService.IsNavigating)
         {
             await Gps.StopTrackingAsync();
         }
