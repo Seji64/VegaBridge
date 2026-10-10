@@ -126,7 +126,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _linkUpSubscription = _bleManager.State
             .DistinctUntilChanged()
             .Where(s => s == BleConnectionState.Connected)
-            .Subscribe(_ => OnLinkUpAsync());
+            .Subscribe(state => _ = OnLinkUpAsync()); // fire-and-forget: errors are logged inside
 
         // Sync if already navigating (app restart, late DI resolution).
         if (_navigation.IsNavigating)
