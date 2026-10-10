@@ -21,10 +21,13 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     public string ControlWriteCharacteristicUuid => "00002345-0000-1000-8000-00805f9b34fb";
     public string ReadCharacteristicUuid => "00001234-0000-1000-8000-00805f9b34fb";
 
-    // On-change SM1 (same policy as NAVI): the last SM1 frame that was
-    // actually written, keyed by maneuver|type|countdown. Null until the
-    // first SM1 of a navigation session.
-    private string? _lastSm1Key;
+    // SM1 (arrival time) cadence of the official app: every 30 s.
+    private static readonly TimeSpan Sm1Interval = TimeSpan.FromSeconds(30);
+    private DateTimeOffset _lastSm1SentAt = DateTimeOffset.MinValue;
+
+    // Valhalla puts the exit number only on the roundabout-ENTER maneuver;
+    // the following roundabout-EXIT maneuver keeps showing the same icon.
+    private string? _lastRoundaboutIcon;
 
     public bool IsCompatible(BleDeviceInfo device)
     {
@@ -101,9 +104,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         // 3 RS separators → 4 fields: command, empty, meters, empty
         await SendAsync(device, Commands.REM, "", (input.TotalDistanceKm * 1000).ToString("F0"), "");
 
-        // New session: force the first SM1 of the first maneuver even if it
-        // matches the last frame of a previous session.
-        _lastSm1Key = null;
+        // New session (or reroute): send SM1 with the next update.
+        _lastSm1SentAt = DateTimeOffset.MinValue;
+        _lastRoundaboutIcon = null;
         // PING keepalive is deliberately NOT started here: the cadence is
         // owned by the navigation coordinator (15 s tick), which calls
         // SendKeepAliveAsync on the live connection.
@@ -145,7 +148,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         // Flow control (buffer full → drop/force, watchdog) lives in the
         // write wrapper of BleManagerService.
         byte[] naviFrame = BuildFrame(Commands.NAVI,
-            input.ManeuverIcon,
+            ToBikeIcon(input.ManeuverIcon, input.RoundaboutExitCount),
             navigationGuide,
             intersectionName);
         Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
@@ -166,44 +169,23 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             Log.Debug(ex, "SM frame failed – skipping");
         }
 
-        // SM1 is the turn-approach indicator: every maneuver except a plain
-        // "straight" approach shows a countdown in the 300 m zone. Left turns
-        // are 902, everything else (right family, U-turn, roundabout,
-        // finish) is 901 – matching the official MV Ride capture. The icon
-        // keys come from NavigationIconMapper (single source of truth), no
-        // substring matching.
-        if (input.DistanceToTurnM is > 0 and <= 300
-            && input.ManeuverIcon != NavigationIconMapper.IconStraight)
+        // SM1 = arrival time + remaining time (MV Ride v1.4.3:
+        // sendNavigationStatusEveryThirtySeconds), NOT a turn countdown –
+        // the capture's "SM1|902|7" means "arrive 15:02, 7 min left".
+        // The official app sends it every 30 s, so does this.
+        if (DateTimeOffset.UtcNow - _lastSm1SentAt >= Sm1Interval)
         {
-            string sm1Type = input.ManeuverIcon is NavigationIconMapper.IconTurnLeft
-                    or NavigationIconMapper.IconSlightLeft
-                    or NavigationIconMapper.IconSharpLeft
-                ? "902"
-                : "901";
-            int countdown = Math.Max(0, Math.Min(7, (int)(input.DistanceToTurnM / 40)));
-            // On-change SM1 (same policy as NAVI): the countdown has only 8
-            // values (40 m buckets), so writing it on every 1 Hz tick was
-            // duplicate traffic. The key carries the maneuver index, so a new
-            // maneuver (countdown resets to 7) and re-entry into the 300 m
-            // zone always send – inside one maneuver the distance is
-            // monotonic, so buckets never repeat and GPS jitter within the
-            // same bucket is suppressed instead of re-sent.
-            string sm1Key = $"{input.CurrentManeuverIndex}|{sm1Type}|{countdown}";
-            if (sm1Key != _lastSm1Key)
+            try
             {
-                try
-                {
-                    await SendSm1CountdownAsync(device, sm1Type, countdown);
-                    // Marked only once delivered: a frame dropped by a full
-                    // W2R buffer is retried on the next tick (writes no longer
-                    // block, so there is no retry storm to guard against).
-                    _lastSm1Key = sm1Key;
-                }
-                catch (Exception ex)
-                {
-                    // Non-critical frame. Log for field diagnostics.
-                    Log.Debug(ex, "SM1 frame failed – retry next tick");
-                }
+                await SendArrivalTimeAsync(device, input.RemainingTimeMin);
+                // Marked only once delivered: a frame dropped by a full W2R
+                // buffer is retried on the next tick.
+                _lastSm1SentAt = DateTimeOffset.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                // Non-critical frame. Log for field diagnostics.
+                Log.Debug(ex, "SM1 frame failed – retry next tick");
             }
         }
         // Log the navigation update for debugging
@@ -312,17 +294,56 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         return true;
     }
 
-    // ─── Valhalla > MV Agusta Icon Mapping ─────────────────────────────
-    // Moved here from NavigationService to keep protocol details in the plugin.
+    // ─── Semantic icon > MV Agusta Icon Mapping ────────────────────────
 
     /// <summary>
-    /// Sends an SM1 countdown frame (turn approach indicator).
-    /// MV Ride sends SM1|902|X for left turns, SM1|901|X for right turns.
-    /// The countdown X goes from ~7 down to 0 as you approach the turn.
+    /// Maps the plugin-agnostic semantic icon to one of the 35 keys the bike
+    /// knows (TurnByTurnIndication enum of MV Ride v1.4.3). Unknown keys are
+    /// not displayed by the bike. The mapping follows the official app
+    /// (HERE ManeuverAction → key): exits/ramps → slight turn (the bike has
+    /// no exit icon), sharp turns → U-turn, roundabouts → roundabout-right-N
+    /// (counter-clockwise, right-hand traffic), destination → "Finish".
     /// </summary>
-    private async Task SendSm1CountdownAsync(IBleConnectedDevice device, string sm1Type, int countdown)
+    private string ToBikeIcon(string semanticIcon, int? roundaboutExitCount)
     {
-        byte[] frame = BuildFrame(Commands.SM1, sm1Type, countdown.ToString(), "");
+        if (semanticIcon != NavigationIconMapper.IconRoundabout)
+            _lastRoundaboutIcon = null;
+
+        switch (semanticIcon)
+        {
+            case NavigationIconMapper.IconTurnLeft: return TurnTypes.TurnLeft;
+            case NavigationIconMapper.IconTurnRight: return TurnTypes.TurnRight;
+            case NavigationIconMapper.IconSlightLeft:
+            case NavigationIconMapper.IconExitLeft: return TurnTypes.TurnSlightLeft;
+            case NavigationIconMapper.IconSlightRight:
+            case NavigationIconMapper.IconExitRight: return TurnTypes.TurnSlightRight;
+            case NavigationIconMapper.IconSharpLeft:
+            case NavigationIconMapper.IconUTurnLeft: return TurnTypes.UturnLeft;
+            case NavigationIconMapper.IconSharpRight:
+            case NavigationIconMapper.IconUTurnRight: return TurnTypes.UturnRight;
+            case NavigationIconMapper.IconFinish: return TurnTypes.Finish;
+            case NavigationIconMapper.IconRoundabout:
+                if (roundaboutExitCount is > 0)
+                    _lastRoundaboutIcon = $"roundabout-right-{Math.Min(roundaboutExitCount.Value, 12)}";
+                return _lastRoundaboutIcon ?? TurnTypes.Straight;
+            default: return TurnTypes.Straight;
+        }
+    }
+
+    /// <summary>
+    /// Sends SM1: arrival time as minutes since local midnight + remaining
+    /// minutes, e.g. SM1|902|7 = arrive 15:02, 7 min left (MV Ride v1.4.3).
+    /// </summary>
+    private async Task SendArrivalTimeAsync(IBleConnectedDevice device, double remainingTimeMin)
+    {
+        double remaining = Math.Max(0, remainingTimeMin);
+        int remainingMin = (int)remaining;
+        DateTime arrival = DateTime.Now.AddMinutes(remaining);
+        int arrivalMinuteOfDay = arrival.Hour * 60 + arrival.Minute;
+        byte[] frame = BuildFrame(Commands.SM1,
+            arrivalMinuteOfDay.ToString(CultureInfo.InvariantCulture),
+            remainingMin.ToString(CultureInfo.InvariantCulture),
+            "");
         Log.Information("BLE-LOGGER: {Line}", $"SEND SM1 frame: {BitConverter.ToString(frame)}");
         await device.WriteAsync(ControlWriteCharacteristicUuid, frame, withResponse: false);
     }

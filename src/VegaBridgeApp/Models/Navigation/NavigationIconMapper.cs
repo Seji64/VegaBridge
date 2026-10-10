@@ -15,7 +15,12 @@ public static class NavigationIconMapper
     public const string IconSlightRight = "turn-slight-right";
     public const string IconSharpLeft = "turn-sharp-left";
     public const string IconSharpRight = "turn-sharp-right";
-    public const string IconUTurn = "uturn";
+    public const string IconUTurnLeft = "uturn-left";
+    public const string IconUTurnRight = "uturn-right";
+    // Motorway/highway exits and ramps (e.g. "take the B10 exit") – shown as
+    // an exit/ramp icon in the UI instead of a plain left/right turn.
+    public const string IconExitLeft = "exit-left";
+    public const string IconExitRight = "exit-right";
     public const string IconRoundabout = "roundabout";
     public const string IconFinish = "finish";
 
@@ -33,16 +38,16 @@ public static class NavigationIconMapper
         { 9, IconSlightRight },      // kSlightRight
         { 10, IconTurnRight },      // kRight
         { 11, IconSharpRight },     // kSharpRight
-        { 12, IconUTurn },           // kUturnRight
-        { 13, IconUTurn },           // kUturnLeft
+        { 12, IconUTurnRight },      // kUturnRight
+        { 13, IconUTurnLeft },       // kUturnLeft
         { 14, IconSharpLeft },       // kSharpLeft
         { 15, IconTurnLeft },       // kLeft
         { 16, IconSlightLeft },     // kSlightLeft
         { 17, IconStraight },        // kRampStraight
-        { 18, IconTurnRight },      // kRampRight
-        { 19, IconTurnLeft },        // kRampLeft
-        { 20, IconTurnRight },      // kExitRight
-        { 21, IconTurnLeft },        // kExitLeft
+        { 18, IconExitRight },      // kRampRight
+        { 19, IconExitLeft },        // kRampLeft
+        { 20, IconExitRight },      // kExitRight
+        { 21, IconExitLeft },        // kExitLeft
         { 22, IconStraight },        // kStayStraight
         { 23, IconSlightRight },     // kStayRight
         { 24, IconSlightLeft },     // kStayLeft

@@ -194,7 +194,7 @@ All frames follow: `0x0D <command> 0x1E <field1> 0x1E <field2> ... 0x0D`
 |---------|-----------|---------|
 | `NAVI` | Phone → Bike | Navigation instruction (icon, text, street) |
 | `SM` | Phone → Bike | Status/Motion (speed, remaining distance, turn distance) |
-| `SM1` | Phone → Bike | Turn approach countdown (300m → 0m) |
+| `SM1` | Phone → Bike | Arrival time (minutes since midnight) + remaining minutes, every 30 s |
 | `DEST` | Phone → Bike | Destination coordinates |
 | `REM` | Phone → Bike | Remaining distance to destination |
 | `RENAVI` | Phone → Bike | Off-route alert → bike shows rerouting |
