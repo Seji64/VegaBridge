@@ -21,6 +21,12 @@ public sealed record NavigationUpdateInput
     public required string ManeuverIcon { get; init; }
 
     /// <summary>
+    /// Number of the roundabout exit to take (Valhalla roundabout_exit_count,
+    /// set on the roundabout-enter maneuver), null otherwise.
+    /// </summary>
+    public int? RoundaboutExitCount { get; init; }
+
+    /// <summary>
     /// Instruction text for the display (e.g. "Turn right onto B31").
     /// </summary>
     public required string InstructionText { get; init; }

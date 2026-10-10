@@ -114,6 +114,8 @@
   <data name="Straight" xml:space="preserve"><value>Straight</value></data>
   <data name="Arrival" xml:space="preserve"><value>Arrival</value></data>
   <data name="Roundabout" xml:space="preserve"><value>Roundabout</value></data>
+  <data name="ExitLeft" xml:space="preserve"><value>Exit left</value></data>
+  <data name="ExitRight" xml:space="preserve"><value>Exit right</value></data>
 
   <!-- Reroute / Skip messages -->
   <data name="WaypointSkip" xml:space="preserve"><value>Skip waypoint – recalculating route…</value></data>

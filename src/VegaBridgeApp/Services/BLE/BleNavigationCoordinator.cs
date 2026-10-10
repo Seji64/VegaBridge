@@ -19,8 +19,9 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     private readonly BleManagerService _bleManager;
 
     // Send policy (official MV Ride capture: 289 NAVI+SM pairs in 5.7 min):
-    // every ~1 Hz GPS tick sends the FULL state (NAVI + SM, SM1 on bucket
-    // change), so a frame lost to a W2R stall is healed by the next tick.
+    // every ~1 Hz GPS tick sends the FULL state (NAVI + SM; the plugin adds
+    // the SM1 arrival-time frame every 30 s), so a frame lost to a W2R stall
+    // is healed by the next tick.
     // 900 ms instead of 1000 ms: 1 Hz GPS fixes arrive with jitter, a strict
     // 1 s throttle silently skipped every other fix.
     private DateTimeOffset _lastStatusSent = DateTimeOffset.MinValue;
@@ -323,6 +324,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
                 maneuver.ValhallaType == 4 && maneuver.Index < maneuver.Total - 1
                     ? 0 // kNone → straight
                     : maneuver.ValhallaType),
+            RoundaboutExitCount = maneuver.RoundaboutExitCount,
             InstructionText = maneuver.Instruction,
             StreetName = intersectionName,
             IntersectionName = intersectionName,
