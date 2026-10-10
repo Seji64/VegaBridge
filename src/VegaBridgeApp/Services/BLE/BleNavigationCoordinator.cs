@@ -1,3 +1,4 @@
+using System.Reactive.Linq;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Navigation;
@@ -17,29 +18,29 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     private readonly NavigationService _navigation;
     private readonly BleManagerService _bleManager;
 
-    // Throttling for periodic status updates (SM frames). ~1 Hz matches the
-    // official MV Ride driving cadence; the old 500 ms tick drove W2R at 2–3
-    // frames/s and clogged the bike's write-without-response flow control.
+    // Send policy (official MV Ride capture: 289 NAVI+SM pairs in 5.7 min):
+    // every ~1 Hz GPS tick sends the FULL state (NAVI + SM, SM1 on bucket
+    // change), so a frame lost to a W2R stall is healed by the next tick.
+    // 900 ms instead of 1000 ms: 1 Hz GPS fixes arrive with jitter, a strict
+    // 1 s throttle silently skipped every other fix.
     private DateTimeOffset _lastStatusSent = DateTimeOffset.MinValue;
-    private readonly TimeSpan _statusThrottleInterval = TimeSpan.FromMilliseconds(1000);
+    private readonly TimeSpan _statusThrottleInterval = TimeSpan.FromMilliseconds(900);
 
-    // Send policy (official MV profile): the NAVI instruction frame is only
-    // written when the maneuver signature (index/instruction/street) changes;
-    // in between, status ticks refresh SM every tick, SM1 on countdown-bucket
-    // change only (on-change gate in the plugin). PING keepalive (15 s) is
-    // what keeps the W2R path warm – this coordinator owns the cadence; the
-    // plugin only knows the PING frame (SendKeepAliveAsync).
-    private string? _lastNaviSig;
+    // Destination of the running session – DEST is re-sent after reroutes
+    // and after a (re)connect mid-session.
+    private double? _destinationLat;
+    private double? _destinationLon;
+    private readonly IDisposable _linkUpSubscription;
 
-    // ─── PING keepalive (15 s tick, official MV profile) ─────────────────
+    // ─── PING keepalive (fills pauses only) ───────────────────────────────
     // The plugin used to own this loop; it now only sends the frame. Each
     // tick resolves the current live connection through the manager, so a
     // reconnect needs no re-arming: the next tick just picks up the new
     // link, and ticks while the link is down are no-ops.
     private CancellationTokenSource? _keepAliveCts;
     private Task? _keepAliveTask;
-    // 5 s skip window: a PING landing right after a NAVI+SM burst clogs the
-    // W2R queue (observed: PING + NAVI within 23 ms → write failures).
+    // PING is skipped while NAVI frames were delivered in the last 5 s – with
+    // the 1 Hz full-state policy it only goes out when the tick stream pauses.
     private DateTimeOffset _lastNaviWriteAt = DateTimeOffset.MinValue;
 
     private async Task StartKeepAliveAsync()
@@ -65,8 +66,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             {
                 while (true)
                 {
-                    // 15 s tick (official MV Ride keepalive cadence); throws
-                    // OperationCanceledException on stop → loop exits.
+                    // Throws OperationCanceledException on stop → loop exits.
                     await Task.Delay(TimeSpan.FromSeconds(15), cts.Token);
 
                     if (DateTimeOffset.UtcNow - _lastNaviWriteAt < TimeSpan.FromSeconds(5))
@@ -108,7 +108,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     // Current context
     private NavigationManeuverInfo? _currentManeuver;
     private NavigationStatus? _currentStatus;
-    private bool _isNavigating;
+    private volatile bool _isNavigating; // read by link-up / FINISH retry off the GPS thread
 
     public BleNavigationCoordinator(
         NavigationService navigation,
@@ -120,6 +120,13 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         Log.Information("BleNavigationCoordinator initializing and subscribing to events...");
 
         _navigation.AddSink(this);
+
+        // A fresh link (Shiny auto-reconnect, W2R watchdog, late connect)
+        // gets the session start re-sent before the next full-state tick.
+        _linkUpSubscription = _bleManager.State
+            .DistinctUntilChanged()
+            .Where(s => s == BleConnectionState.Connected)
+            .Subscribe(state => _ = OnLinkUpAsync()); // fire-and-forget: errors are logged inside
 
         // Sync if already navigating (app restart, late DI resolution).
         if (_navigation.IsNavigating)
@@ -137,6 +144,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     public void Dispose()
     {
         _navigation.RemoveSink(this);
+        _linkUpSubscription.Dispose();
 
         _isNavigating = false;
         _currentManeuver = null;
@@ -159,20 +167,12 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = true;
         _currentManeuver = null;
         _currentStatus = null;
-        _lastNaviSig = null; // new session: first update must carry NAVI
+        _destinationLat = start.DestinationLatitude;
+        _destinationLon = start.DestinationLongitude;
 
-        NavigationStartInput input = new()
-        {
-            TotalDistanceKm = start.TotalDistanceKm,
-            TotalTimeMin = start.TotalTimeMin,
-            UpcomingManeuvers = [],
-            StartLatitude = start.StartLatitude,
-            StartLongitude = start.StartLongitude
-        };
+        Log.Information("BLE-LOGGER: {Line}", $"NAV START: distance={start.TotalDistanceKm:F1}km, time={start.TotalTimeMin:F0}min, maneuvers={start.ManeuverCount}");
 
-        Log.Information("BLE-LOGGER: {Line}", $"NAV START: distance={input.TotalDistanceKm:F1}km, time={input.TotalTimeMin:F0}min, maneuvers={start.ManeuverCount}");
-
-        await _bleManager.ExecuteNavigationStartAsync(input);
+        await SendStartSequenceAsync(start.TotalDistanceKm);
 
         // Nav session active → PING keepalive runs (15 s tick, no-op without
         // a live BLE link; resumes on the next tick after a reconnect).
@@ -181,14 +181,14 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task OnManeuverAsync(NavigationManeuverInfo maneuver)
+    public Task OnManeuverAsync(NavigationManeuverInfo maneuver)
     {
         _currentManeuver = maneuver;
-        // Maneuver change = NAVI signature change → full update (NAVI + SM).
-        // Stamp _lastStatusSent so the status tick on the same GPS reading
-        // is throttled out instead of doubling the SM write.
-        _lastStatusSent = DateTimeOffset.UtcNow;
-        await SendUpdateAsync(sendNavi: true);
+        // NavigationService reports the status of the same GPS fix right
+        // after the maneuver – un-throttle it so the new instruction goes out
+        // immediately WITH its own distance (not the previous maneuver's).
+        _lastStatusSent = DateTimeOffset.MinValue;
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -201,12 +201,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             return;
 
         _lastStatusSent = now;
-
-        // Status ticks refresh SM only, unless the maneuver signature has
-        // changed since the last NAVI write (covers the first tick of a
-        // session and any change that did not arrive via OnManeuverAsync).
-        string sig = NaviSignature();
-        await SendUpdateAsync(sendNavi: sig != _lastNaviSig);
+        await SendUpdateAsync();
     }
 
     /// <summary>
@@ -220,8 +215,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             return;
 
         Log.Information("Resending navigation state after reconnect");
-        // Full resync: the rebuilt link has no memory of the last instruction.
-        await SendUpdateAsync(sendNavi: true);
+        await SendUpdateAsync();
     }
 
     /// <inheritdoc />
@@ -237,10 +231,9 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
-        _lastNaviSig = null;
 
-        await _bleManager.ExecuteNavigationFinishAsync();
         await StopKeepAliveAsync();
+        await SendFinishAsync(_bleManager.ExecuteNavigationFinishAsync);
     }
 
     /// <inheritdoc />
@@ -249,22 +242,65 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _isNavigating = false;
         _currentManeuver = null;
         _currentStatus = null;
-        _lastNaviSig = null;
 
-        await _bleManager.ExecuteNavigationStopAsync();
         await StopKeepAliveAsync();
+        await SendFinishAsync(_bleManager.ExecuteNavigationStopAsync);
     }
 
     /// <inheritdoc />
-    public Task OnRouteUpdatedAsync(RouteResponse response)
+    public async Task OnRouteUpdatedAsync(RouteResponse response)
     {
-        // BLE does not need the route geometry; maneuvers/status flow through the other sinks.
-        return Task.CompletedTask;
+        // Official capture: every RENAVI is followed by DEST + REM for the new
+        // route (10 of 10 reroutes). The route itself is already loaded, so
+        // TotalDistanceKm is the new total.
+        if (_isNavigating)
+            await SendStartSequenceAsync(_navigation.TotalDistanceKm);
     }
 
     // -- Helpers
 
-    private async Task SendUpdateAsync(bool sendNavi)
+    /// <summary>DEST + REM – the session start frames.</summary>
+    private Task SendStartSequenceAsync(double remainingKm) =>
+        _bleManager.ExecuteNavigationStartAsync(new NavigationStartInput
+        {
+            TotalDistanceKm = remainingKm,
+            TotalTimeMin = _navigation.TotalTimeMin,
+            UpcomingManeuvers = [],
+            DestinationLatitude = _destinationLat,
+            DestinationLongitude = _destinationLon
+        });
+
+    private async Task OnLinkUpAsync()
+    {
+        if (!_isNavigating)
+            return;
+
+        Log.Information("BLE link up during navigation – re-sending DEST/REM, full state follows with the next fix");
+        await SendStartSequenceAsync(_currentStatus?.RemainingDistanceKm ?? _navigation.TotalDistanceKm);
+        _lastStatusSent = DateTimeOffset.MinValue;
+    }
+
+    /// <summary>
+    /// FINISH ends the session and nothing re-sends it – a frame dropped by a
+    /// full W2R buffer would leave the bike on the last instruction. Retries
+    /// for ~5 s (the write path forces a write after 3 s of full buffer) and
+    /// gives up as soon as a new session has started.
+    /// </summary>
+    private async Task SendFinishAsync(Func<Task<bool>> send)
+    {
+        // Let an in-flight NAVI+SM tick finish first, so it cannot land after FINISH.
+        for (int i = 0; i < 20 && Volatile.Read(ref _isWriting) == 1; i++)
+            await Task.Delay(50);
+
+        for (int attempt = 0; attempt < 5 && !_isNavigating; attempt++)
+        {
+            if (await send())
+                return;
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+    }
+
+    private async Task SendUpdateAsync()
     {
         if (!_isNavigating || _currentManeuver == null || _currentStatus == null)
             return;
@@ -312,40 +348,17 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         bool delivered = false;
         try
         {
-            delivered = await _bleManager.ExecuteNavigationUpdateAsync(input, sendNavi);
+            delivered = await _bleManager.ExecuteNavigationUpdateAsync(input);
         }
         finally
         {
             Interlocked.Exchange(ref _isWriting, 0);
         }
 
-        // Remember the signature a NAVI write was requested with – even when
-        // the write was skipped (gate-busy) or failed (delivered == false).
-        // This is what breaks the 3 s retry-storm: a clogged W2R buffer must
-        // not make every subsequent 1-Hz tick re-request the same NAVI frame
-        // and block Shiny for 3 s. A stale instruction is discarded; the next
-        // real maneuver change updates the signature and triggers a fresh NAVI
-        // write automatically.
-        _lastNaviSig = NaviSignature();
-
-        // Stamp the PING skip-window only when a NAVI frame was actually
-        // delivered. A failed write must not keep pushing the keepalive back
-        // – during a W2R stall the PING (15 s cadence) is what keeps the bike
-        // session alive.
-        if (sendNavi && delivered)
-        {
+        // PING only fills pauses: it is skipped while NAVI frames are being
+        // delivered (official app: 1 PING in 5.7 min, during a 3 s pause).
+        if (delivered)
             _lastNaviWriteAt = DateTimeOffset.UtcNow;
-        }
     }
-
-    // -- Helpers
-
-    /// <summary>
-    /// Signature of the NAVI frame (the instruction the display shows). A new
-    /// NAVI write is due when the maneuver index or its display content
-    /// (instruction/street) changes.
-    /// </summary>
-    private string NaviSignature()
-        => _currentManeuver is not { } m ? "" : $"{m.Index}|{m.Instruction}|{m.StreetNames.FirstOrDefault() ?? ""}";
 
 }

@@ -66,7 +66,15 @@ public static class MauiProgram
         // RestoreIdentifier is what enables that on iOS/macOS.
         builder.Services.AddBluetoothLE<VegaBridgeBleDelegate>(new AppleBleConfiguration(
             ShowPowerAlert: true,
-            RestoreIdentifier: "vegabridge-ble"));
+            RestoreIdentifier: "vegabridge-ble")
+        {
+            // We stay connected in the background on purpose (bluetooth-central
+            // + location) and the bike streams GUI1 indications – per-event
+            // system alerts are noise (Shiny docs, 5.8.1+).
+            NotifyOnConnection = false,
+            NotifyOnDisconnection = false,
+            NotifyOnNotification = false
+        });
 #else
         // VegaBridgeBleDelegate exists only on Apple targets (BleDelegate
         // is Apple-only) – other platforms use the plain registration.
@@ -81,6 +89,7 @@ public static class MauiProgram
         builder.Services.AddShinyStores();
         builder.Services.AddGps<GpsDelegate>();
         builder.Services.AddSingleton<GpsService>();
+        builder.Services.AddSingleton<GpsSimulator>();
         // ── Serilog: structured console logging ──────────────────────────
         // Console output is not reliably visible in MAUI, so every line also
         // goes to the in-memory DebugLogSink (exportable from the Settings

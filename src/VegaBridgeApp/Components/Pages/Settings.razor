@@ -5,6 +5,7 @@
 @inject IGeocodingService GeocodingService
 @inject ISnackbar Snackbar
 @inject GpsService Gps
+@inject GpsSimulator Sim
 @inject RoadClosureService RoadClosureService
 <MudContainer MaxWidth="MaxWidth.Medium" Class="px-3 pt-2">
 
@@ -45,22 +46,23 @@
                             OnClick="@(async () => await BleManager.SendTestFrameAsync())">
                             Test Connection
                         </MudButton>
-                        <!-- While running the button must stay pressable:
-                             the second press cancels the test. Disabled only
-                             when idle AND not connected. -->
+                        <!-- Offline ride test: the next navigation started on the map is
+                             driven by simulated GPS through the live-ride code path. -->
                         <MudButton
                             Variant="Variant.Text"
                             Color="Color.Secondary"
                             Size="Size.Small"
-                            Disabled="(!IsConnected && !_simRunning)"
+                            Disabled="Sim.IsRunning"
                             StartIcon="@Icons.Material.Filled.Route"
                             FullWidth="true"
-                            OnClick="@RunW2rRouteSimAsync">
-                            @(_simRunning ? "W2R Test läuft … (Stop)" : "W2R Live-Profil-Test (25 min, ≈77 Frames/min)")
+                            OnClick="@ToggleRideSimulation">
+                            @(Sim.IsRunning ? "Fahrt-Simulation läuft – zum Stoppen Navigation auf der Karte beenden"
+                              : Sim.IsArmed ? "Fahrt-Simulation scharf – jetzt Navigation auf der Karte starten (Tippen = abbrechen)"
+                              : "Fahrt-Simulation für die nächste Navigation scharf schalten")
                         </MudButton>
-                        @if (!string.IsNullOrEmpty(_simResult))
+                        @if (!string.IsNullOrEmpty(Sim.LastResult))
                         {
-                            <MudText Typo="Typo.caption" Style="font-family: monospace;">@_simResult</MudText>
+                            <MudText Typo="Typo.caption" Style="font-family: monospace;">@Sim.LastResult · @BleManager.W2rStats</MudText>
                         }
                     </MudStack>
 

@@ -45,6 +45,8 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             _homeLocation = new GeoResult(homeLabel, homeLat, homeLon, "home");
         }
         
+        Sim.StateChanged += OnSimStateChanged;
+
         // Subscribe to BLE manager reactive streams
         _stateSubscription = BleManager.State.Subscribe(OnConnectionStateChanged);
         _devicesSubscription = BleManager.Devices.Subscribe(UpdateDevices);
@@ -125,66 +127,25 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         });
     }
 
-    // ── W2R live-profile density test (25 min) ────────────────────────────
-    // Navigation start (PING keepalive) → 1 Hz SM ticks + NAVI every ~30 s
-    // (simulated urban maneuver change), both on-change; SM1 rides the
-    // on-change gate in the plugin (≈ 8 sends per maneuver, skipped for
-    // straight maneuvers). FINISH ≈ 77 frames/min – the traffic profile of a
-    // live ride after the on-change
-    // traffic reduction. Answers whether the connection survives ~25 minutes
-    // at live-ride traffic density (≈20 min is the known critical point).
-    // Runs independently of the UI; progress and summary are logged under
-    // "W2R-SIM" for later analysis.
+    // ── Offline ride test (GpsSimulator) ──────────────────────────────────
 
-    private bool _simRunning;
-    private string _simResult = string.Empty;
-    private CancellationTokenSource? _simCts;
     private bool _disposed;
 
-    private async Task RunW2rRouteSimAsync()
+    private void ToggleRideSimulation()
     {
-        if (_simRunning)
+        if (Sim.IsArmed)
         {
-            // Second press = stop
-            _simCts?.Cancel();
+            Sim.Disarm();
             return;
         }
-        if (!IsConnected)
-            return;
+        BleManager.ResetW2rStats();
+        Sim.Arm();
+    }
 
-        _simCts = new CancellationTokenSource();
-        _simRunning = true;
-        _simResult = string.Empty;
-        StateHasChanged();
-
-        // The test method enables + clears the log capture itself, and
-        // additionally writes its timeline to a file that survives a
-        // process kill (display-off runs can outlive the app).
-        try
-        {
-            double? lat = Gps.LastReading?.Position.Latitude;
-            double? lon = Gps.LastReading?.Position.Longitude;
-            W2rRouteSimResult result = await new W2rRouteSim(BleManager).RunAsync(lat, lon, _simCts.Token);
-            _simResult = result.Summary;
-        }
-        catch (OperationCanceledException)
-        {
-            _simResult = "W2R-SIM stopped (cancelled)";
-        }
-        catch (Exception ex)
-        {
-            _simResult = $"W2R-SIM failed: {ex.Message}";
-        }
-        finally
-        {
-            _simRunning = false;
-            _simCts?.Dispose();
-            _simCts = null;
-            // The run lasts 25 min: the component may have been disposed
-            // (navigation away) by the time it finishes – guard the refresh.
-            if (!_disposed)
-                _ = InvokeAsync(StateHasChanged);
-        }
+    private void OnSimStateChanged()
+    {
+        if (!_disposed)
+            _ = InvokeAsync(StateHasChanged);
     }
 
     // ── User actions ──────────────────────────────────────────────────────
@@ -344,6 +305,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
+        Sim.StateChanged -= OnSimStateChanged;
         _stateSubscription?.Dispose();
         _devicesSubscription?.Dispose();
         _errorSubscription?.Dispose();

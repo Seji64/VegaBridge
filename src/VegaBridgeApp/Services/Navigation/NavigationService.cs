@@ -152,6 +152,11 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     public double TotalDistanceKm { get; private set; }
     public double TotalTimeMin { get; private set; }
 
+    // Read-only snapshots for the GPS ride simulation. Both lists are replaced
+    // (never mutated) on start/reroute, so a held reference stays consistent.
+    public IReadOnlyList<Coordinate> RouteCoordinates => _routeCoords;
+    public IReadOnlyList<Maneuver> Maneuvers => _maneuvers;
+
     // ── Public API ───────────────────────────────────────────────────────
 
     private int GetDisplayManeuverIndex()
@@ -276,9 +281,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             TotalDistanceKm = TotalDistanceKm,
             TotalTimeMin = TotalTimeMin,
             ManeuverCount = maneuvers.Count,
-            // Real start coordinates for the DEST frame on the bike display.
-            StartLatitude = _routeCoords.Count > 0 ? _routeCoords[0].Latitude : null,
-            StartLongitude = _routeCoords.Count > 0 ? _routeCoords[0].Longitude : null
+            DestinationLatitude = destination.Lat,
+            DestinationLongitude = destination.Lon
         }));
 
         await gps.StartTrackingAsync(backgroundMode: true);
