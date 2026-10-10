@@ -82,7 +82,7 @@ public static class MauiProgram
 #endif
         
         builder.Services.AddSingleton<BleManagerService>();
-        builder.Services.AddTransient<IBleDevicePlugin, MvAgustaBlePlugin>();
+        builder.Services.AddSingleton<IBleDevicePlugin, MvAgustaBlePlugin>(); // stateful (SM1 timer, roundabout icon)
 
         // ── GPS / Location (Shiny.Locations) ───────────────────────────────
         builder.Services.AddSingleton(TimeProvider.System);

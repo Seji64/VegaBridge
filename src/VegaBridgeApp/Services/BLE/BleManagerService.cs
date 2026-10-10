@@ -41,9 +41,6 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     private static readonly TimeSpan AutoConnectTimeout = TimeSpan.FromSeconds(15);
     private int _autoConnectRunning;
 
-    // Expose active plugin for advanced access (e.g., session ID)
-    public IBleDevicePlugin? ActivePlugin => _activePlugin;
-
     // ── Reactive State ──────────────────────────────────────────────────
 
     private readonly BehaviorSubject<BleConnectionState> _state = new(BleConnectionState.Idle);
@@ -52,7 +49,6 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     private readonly BehaviorSubject<IReadOnlyList<BleDeviceInfo>> _devices = new([]);
     public IObservable<IReadOnlyList<BleDeviceInfo>> Devices => _devices.AsObservable();
-    public IReadOnlyList<BleDeviceInfo> CurrentDevices => _devices.Value;
 
     private readonly BehaviorSubject<string> _errorMessage = new(string.Empty);
     public IObservable<string> ErrorMessages => _errorMessage.AsObservable();
@@ -225,7 +221,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             _state.OnNext(BleConnectionState.Connecting);
             Log.Information("Attempting to connect to device {Uuid}", deviceUuid);
 
-            // No explicit ConnectionConfig: Shiny 5.7.2 defaults a null config
+            // No explicit ConnectionConfig: Shiny 5.9 defaults a null config
             // to AutoConnect = true, so Shiny owns link recovery (dropped
             // links, adapter power cycles ≥ 5.6). Per the docs we must NOT
             // run our own WhenDisconnected→Connect loop on top of it.
@@ -263,8 +259,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             if (_activePlugin != null)
                 Preferences.Set(LastDeviceUuidKey, peripheral.Uuid);
 
+            // WhenConnected() replays the current status, so this runs
+            // OnLinkRestored (notifications etc.) right away for this link.
             SetupWhenConnected(peripheral);
-            SetupNotifications(peripheral);
 
             // No keepalive re-arm needed on (re)connect: the navigation
             // coordinator's 15 s PING tick picks up the new link on its
@@ -298,7 +295,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             Log.Information("Disconnecting from {Uuid}", _activePeripheral.Uuid);
 
             // Deliberate disconnect: Shiny's DisconnectAsync() extension
-            // calls CancelConnection() internally (5.7.2), which disposes
+            // calls CancelConnection() internally (5.9), which disposes
             // the peripheral's auto-reconnect. The intent flag makes that
             // stick – no resume/send path may silently reconnect.
             _userInitiatedDisconnect = true;
@@ -456,27 +453,34 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 #if IOS || MACCATALYST
     /// <summary>
     /// Write-without-response straight on the native CBPeripheral of the Shiny
-    /// connection. Returns false when not handled here (not an Apple
-    /// peripheral, link down, or the characteristic is not discovered yet) –
-    /// the caller then uses Shiny's write, which also runs the discovery.
-    /// Throws when the frame is dropped because the W2R buffer stays full.
+    /// connection – never through Shiny's own W2R write, the path that froze.
+    /// Throws when the frame is not written (link down, characteristic not
+    /// found, or dropped because the W2R buffer stays full).
     /// </summary>
-    private Task<bool> TryWriteNativeAsync(IPeripheral peripheral, string serviceUuid, string characteristicUuid, byte[] data)
+    private Task WriteNativeAsync(Shiny.BluetoothLE.Peripheral apple, string serviceUuid, string characteristicUuid, byte[] data)
     {
-        if (peripheral is not Shiny.BluetoothLE.Peripheral apple)
-            return Task.FromResult(false);
-
         return MainThread.InvokeOnMainThreadAsync(async () =>
         {
             CoreBluetooth.CBPeripheral native = apple.Native;
+            if (native.State != CoreBluetooth.CBPeripheralState.Connected)
+                throw new InvalidOperationException("BLE link down – frame dropped");
+
             CoreBluetooth.CBUUID serviceId = CoreBluetooth.CBUUID.FromString(serviceUuid);
             CoreBluetooth.CBUUID charId = CoreBluetooth.CBUUID.FromString(characteristicUuid);
             // Looked up per write: a reconnect invalidates the old CBCharacteristic.
-            CoreBluetooth.CBCharacteristic? ch = native.Services?
+            CoreBluetooth.CBCharacteristic? Find() => native.Services?
                 .FirstOrDefault(s => s.UUID.Equals(serviceId))?.Characteristics?
                 .FirstOrDefault(c => c.UUID.Equals(charId));
-            if (ch == null || native.State != CoreBluetooth.CBPeripheralState.Connected)
-                return false;
+            CoreBluetooth.CBCharacteristic? ch = Find();
+            if (ch == null)
+            {
+                // First write on a fresh link: the notify hook discovers only the
+                // read characteristic. Shiny's GATT queue (serialized with its own
+                // discovery) finds the write one; cached for the rest of the link.
+                using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+                await apple.GetCharacteristicAsync(serviceUuid, characteristicUuid, timeout.Token);
+                ch = Find() ?? throw new InvalidOperationException($"Characteristic {characteristicUuid} not found – frame dropped");
+            }
 
             // A NAVI (3 link-layer packets) briefly fills iOS' W2R buffer; it
             // normally drains within a few connection intervals.
@@ -507,7 +511,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 if (watchdog)
                 {
                     _w2rLastWatchdog = now;
-                    ReconnectStalledLink(peripheral, blocked);
+                    ReconnectStalledLink(apple, blocked);
                 }
 
                 if (watchdog || blocked < W2rForceInterval || now - _w2rLastForced < W2rForceInterval)
@@ -525,7 +529,6 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             }
 
             native.WriteValue(Foundation.NSData.FromArray(data), ch, CoreBluetooth.CBCharacteristicWriteType.WithoutResponse);
-            return true;
         });
     }
 
@@ -576,8 +579,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         {
             if (!await EnsureConnectedAsync())
             {
+                // UI message comes from the status handler ("reconnecting").
                 Log.Warning("{Action}: link not healthy, skipping write", action);
-                UpdateError("Connection lost. Reconnection attempts failed.", isCritical: false);
                 return false;
             }
 
@@ -604,7 +607,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// </summary>
     public async Task ExecuteNavigationStartAsync(NavigationStartInput input)
     {
-        await WithLiveLinkAsync("SendNavigationStartAsync", d => _activePlugin!.SendNavigationStartAsync(d, input));
+        await WithLiveLinkAsync("SendNavigationStartAsync", d => _activePlugin!.SendNavigationStartAsync(d, input), critical: true);
     }
 
     /// <summary>
@@ -779,17 +782,19 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         Log.Information("Setting up notifications for {Uuid} using plugin {Plugin}", peripheral.Uuid, _activePlugin.DisplayName);
 
-        // Docs: NotifyCharacteristic re-subscribes itself on auto-reconnect
-        // as long as this observable subscription is still alive – so we
-        // only re-run it after a user-initiated disconnect (Dispose above).
+        // Re-run on every link-up (OnLinkRestored). Shiny re-hooks a live
+        // subscription on reconnect by itself, but one that ended with an
+        // error (e.g. link lost during discovery) would otherwise stay dead.
         _notificationSubscription = peripheral.NotifyCharacteristic(
                 _activePlugin.ServiceUuid.ToString(),
                 _activePlugin.ReadCharacteristicUuid)
-            .Subscribe(result =>
-            {
-                Interlocked.Increment(ref _rxFrames); // link-alive evidence for the W2R stall logs
-                if (result.Data != null) _activePlugin.OnDataReceived(result.Data);
-            });
+            .Subscribe(
+                result =>
+                {
+                    Interlocked.Increment(ref _rxFrames); // link-alive evidence for the W2R stall logs
+                    if (result.Data != null) _activePlugin.OnDataReceived(result.Data);
+                },
+                ex => Log.Warning(ex, "BLE notifications for {Uuid} ended – re-subscribed on the next link-up", peripheral.Uuid));
     }
 
     private void UpdateDeviceFromScanResult(IPeripheral result)
@@ -820,8 +825,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                         // the non-nullable Name property – "Unknown" keeps
                         // plugin matching null-safe.
                         Name = string.IsNullOrWhiteSpace(p.Name) ? "Unknown" : p.Name,
-                        IsConnected = p.IsConnected(),
-                        LastSeen = DateTime.Now
+                        IsConnected = p.IsConnected()
                     };
                     
                     // Determine brand based on compatible plugin
@@ -927,26 +931,16 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     private class BleConnectedDeviceWrapper(BleManagerService owner, IPeripheral peripheral, IBleDevicePlugin plugin) : IBleConnectedDevice
     {
-        public Guid Uuid => Guid.Parse(peripheral.Uuid);
-        public string Name => peripheral.Name ?? "Unknown";
-
-        // No exception wrapping: Shiny's own exceptions (BleException etc.)
-        // propagate as-is; callers catch and log.
-        public async Task WriteAsync(string characteristicUuid, byte[] data, bool withResponse)
+        // No exception wrapping: write exceptions propagate as-is; callers
+        // catch and log.
+        public Task WriteAsync(string characteristicUuid, byte[] data)
         {
             string serviceUuid = plugin.ServiceUuid.ToString();
 #if IOS || MACCATALYST
-            if (!withResponse && await owner.TryWriteNativeAsync(peripheral, serviceUuid, characteristicUuid, data))
-                return;
+            if (peripheral is Shiny.BluetoothLE.Peripheral apple)
+                return owner.WriteNativeAsync(apple, serviceUuid, characteristicUuid, data);
 #endif
-            await peripheral.WriteCharacteristicAsync(serviceUuid, characteristicUuid, data, withResponse);
-        }
-
-        public async Task<byte[]?> ReadAsync(string characteristicUuid)
-        {
-            string serviceUuid = plugin.ServiceUuid.ToString();
-            BleCharacteristicResult result = await peripheral.ReadCharacteristicAsync(serviceUuid, characteristicUuid);
-            return result.Data;
+            return peripheral.WriteCharacteristicAsync(serviceUuid, characteristicUuid, data, withResponse: false);
         }
     }
 }

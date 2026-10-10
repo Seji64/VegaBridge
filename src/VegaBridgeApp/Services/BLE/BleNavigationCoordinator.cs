@@ -129,16 +129,6 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             .Where(s => s == BleConnectionState.Connected)
             .Subscribe(state => _ = OnLinkUpAsync()); // fire-and-forget: errors are logged inside
 
-        // Sync if already navigating (app restart, late DI resolution).
-        if (_navigation.IsNavigating)
-        {
-            _isNavigating = true;
-            _currentManeuver = _navigation.LastManeuverInfo;
-            // Keepalive must cover an active session that started before this
-            // coordinator subscribed (app restart, late DI resolution).
-            _ = StartKeepAliveAsync();
-        }
-
         Log.Information("BleNavigationCoordinator is now active.");
     }
 
@@ -206,16 +196,16 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     }
 
     /// <summary>
-    /// Re-sends the current maneuver + status to the bike after a reconnect.
-    /// Called when the app returns to the foreground and the BLE link was
-    /// rebuilt – the display otherwise keeps showing stale instructions.
+    /// Re-sends the current maneuver + status to the bike when the app
+    /// returns to the foreground with a live link, so the display does not
+    /// wait for the next GPS fix.
     /// </summary>
     public async Task ResendCurrentStateAsync()
     {
         if (!_isNavigating || _currentManeuver == null || _currentStatus == null)
             return;
 
-        Log.Information("Resending navigation state after reconnect");
+        Log.Information("Resending navigation state on app resume");
         await SendUpdateAsync();
     }
 
@@ -265,8 +255,6 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _bleManager.ExecuteNavigationStartAsync(new NavigationStartInput
         {
             TotalDistanceKm = remainingKm,
-            TotalTimeMin = _navigation.TotalTimeMin,
-            UpcomingManeuvers = [],
             DestinationLatitude = _destinationLat,
             DestinationLongitude = _destinationLon
         });
@@ -309,8 +297,6 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         NavigationStatus status = _currentStatus;
         NavigationManeuverInfo maneuver = _currentManeuver;
 
-        string intersectionName = maneuver.StreetNames.FirstOrDefault() ?? string.Empty;
-
         NavigationUpdateInput input = new()
         {
             // Valhalla emits kDestination (type 4) at the end of EVERY leg,
@@ -326,15 +312,13 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
                     : maneuver.ValhallaType),
             RoundaboutExitCount = maneuver.RoundaboutExitCount,
             InstructionText = maneuver.Instruction,
-            StreetName = intersectionName,
-            IntersectionName = intersectionName,
+            StreetName = maneuver.StreetNames.FirstOrDefault() ?? string.Empty,
             DistanceToTurnM = status.DistanceToNextTurnM,
             SpeedKmh = status.SpeedKmh,
             RemainingDistanceKm = status.RemainingDistanceKm,
             RemainingTimeMin = status.RemainingTimeMin,
             CurrentManeuverIndex = maneuver.Index,
-            TotalManeuvers = maneuver.Total,
-            IsFinal = maneuver.Index >= maneuver.Total - 1 && status.DistanceToNextTurnM <= 0
+            TotalManeuvers = maneuver.Total
         };
 
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE INPUT: icon={input.ManeuverIcon}, instr={input.InstructionText}, street={input.StreetName}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h, remDist={input.RemainingDistanceKm:F1}km, idx={input.CurrentManeuverIndex}/{input.TotalManeuvers}");

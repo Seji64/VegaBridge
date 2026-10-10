@@ -7,28 +7,10 @@ namespace VegaBridgeApp.Services.BLE;
 public interface IBleConnectedDevice
 {
     /// <summary>
-    /// Unique identifier of the device.
-    /// </summary>
-    Guid Uuid { get; }
-
-    /// <summary>
-    /// Human-readable name of the device.
-    /// </summary>
-    string Name { get; }
-
-    /// <summary>
-    /// Writes data to a specific GATT characteristic.
+    /// Writes data to a GATT characteristic without response – the only write
+    /// type the supported displays accept.
     /// </summary>
     /// <param name="characteristicUuid">The UUID of the characteristic to write to.</param>
     /// <param name="data">The raw byte array to send.</param>
-    /// <param name="withResponse">If true, waits for a response from the device.</param>
-    /// <returns>Task representing the asynchronous operation.</returns>
-    Task WriteAsync(string characteristicUuid, byte[] data, bool withResponse);
-
-    /// <summary>
-    /// Reads data from a specific GATT characteristic.
-    /// </summary>
-    /// <param name="characteristicUuid">The UUID of the characteristic to read.</param>
-    /// <returns>The raw byte array read from the device.</returns>
-    Task<byte[]?> ReadAsync(string characteristicUuid);
+    Task WriteAsync(string characteristicUuid, byte[] data);
 }

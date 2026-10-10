@@ -15,8 +15,8 @@ namespace VegaBridgeApp.Models.BLE;
 public sealed record NavigationUpdateInput
 {
     /// <summary>
-    /// Icon identifier for the motorcycle display (manufacturer-specific, e.g. "turn-left", "roundabout-right-1").
-    /// The plugin maps the Valhalla type to this format.
+    /// Plugin-agnostic semantic icon (NavigationIconMapper.Icon*); the plugin
+    /// maps it to the keys its display knows.
     /// </summary>
     public required string ManeuverIcon { get; init; }
 
@@ -35,11 +35,6 @@ public sealed record NavigationUpdateInput
     /// Street name of the current/upcoming segment.
     /// </summary>
     public required string StreetName { get; init; }
-
-    /// <summary>
-    /// Intersection/street of the destination/maneuver; often identical to StreetName in official captures.
-    /// </summary>
-    public string? IntersectionName { get; init; }
 
     /// <summary>
     /// Distance to the next maneuver in meters.
@@ -70,33 +65,19 @@ public sealed record NavigationUpdateInput
     /// Total number of maneuvers in the route.
     /// </summary>
     public required int TotalManeuvers { get; init; }
-
-    /// <summary>
-    /// Whether the destination has been reached (last maneuver completed).
-    /// </summary>
-    public required bool IsFinal { get; init; }
 }
 
 /// <summary>
-/// Input data for navigation start.
-/// Sent once when navigation begins.
+/// Input data for the navigation start frames. Sent when navigation begins,
+/// after a reroute and after a (re)connect mid-session.
 /// </summary>
 public sealed record NavigationStartInput
 {
     /// <summary>
-    /// Preview of upcoming maneuvers (optional, for displays with a route overview).
-    /// </summary>
-    public IReadOnlyList<NavigationUpdateInput>? UpcomingManeuvers { get; init; }
-
-    /// <summary>
-    /// Total route distance in kilometers.
+    /// Remaining route distance in kilometers (total at the start, current
+    /// remainder on a re-send after reroute or reconnect).
     /// </summary>
     public required double TotalDistanceKm { get; init; }
-
-    /// <summary>
-    /// Total route duration in minutes.
-    /// </summary>
-    public required double TotalTimeMin { get; init; }
 
     /// <summary>
     /// Final destination of the route, used by the plugin for the DEST frame.
