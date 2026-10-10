@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Storage;
 using Serilog;
 using Shiny.BluetoothLE;
@@ -392,7 +393,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         try
         {
-            BleConnectedDeviceWrapper wrapper = new(_activePeripheral, _activePlugin);
+            BleConnectedDeviceWrapper wrapper = new(this, _activePeripheral, _activePlugin);
             Log.Information("BLE-LOGGER: {Line}", "SEND TEST FRAME (via SendTestAsync)");
             await _activePlugin.SendTestAsync(wrapper);
         }
@@ -404,19 +405,127 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     }
 
 
-    // ── Accessors for the W2R route-sim (Services/BLE/W2rRouteSim.cs) ────
+    // ── W2R flow control (Apple) ──────────────────────────────────────────
+    // Live-ride logs (09-30, 10-07): iOS occasionally reports
+    // canSendWriteWithoutResponse = false and never sends the "ready" callback
+    // again – for minutes, while the link is up and the bike keeps streaming
+    // GUI1. Shiny's write waits for exactly that callback and never writes
+    // meanwhile, so the display froze. We therefore write on the CBPeripheral
+    // Shiny connected ourselves: short wait → drop (the next 1 Hz tick re-sends
+    // the full state) → one forced write every 3 s → reconnect after 10 s.
+    // Everything runs on the main queue, where Shiny runs CoreBluetooth
+    // (AppleBleConfiguration.DispatchQueue = null); state is main-thread only.
+    private static readonly TimeSpan W2rForceInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan W2rWatchdogAfter = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan W2rWatchdogCooldown = TimeSpan.FromSeconds(60);
+    private DateTime? _w2rBlockedSince;
+    private DateTime _w2rLastForced;
+    private DateTime _w2rLastWatchdog;
+    private int _rxFrames;
+    private int _w2rRxAtBlock;
+    private int _w2rEpisodes, _w2rDropped, _w2rForced, _w2rWatchdogReconnects;
 
-    /// <summary>Current live link pair; null while no connection.</summary>
-    public (IPeripheral Peripheral, IBleDevicePlugin Plugin)? ActiveLink
-        => _activePeripheral is { } peripheral && _activePlugin is { } plugin
-            ? (peripheral, plugin)
-            : null;
+    /// <summary>W2R flow-control counters since the last <see cref="ResetW2rStats"/> (shown after a simulated ride).</summary>
+    public string W2rStats =>
+        $"W2R: {_w2rEpisodes} Puffer-voll-Episoden, {_w2rDropped} Frames verworfen, {_w2rForced} erzwungen, {_w2rWatchdogReconnects} Watchdog-Reconnects";
 
-    public bool IsUserInitiatedDisconnect => _userInitiatedDisconnect;
+    public void ResetW2rStats() => _w2rEpisodes = _w2rDropped = _w2rForced = _w2rWatchdogReconnects = 0;
 
-    /// <summary>Builds a write wrapper around a specific live link pair.</summary>
-    public IBleConnectedDevice CreateConnectedDevice(IPeripheral peripheral, IBleDevicePlugin plugin)
-        => new BleConnectedDeviceWrapper(peripheral, plugin);
+#if IOS || MACCATALYST
+    /// <summary>
+    /// Write-without-response straight on the native CBPeripheral of the Shiny
+    /// connection. Returns false when not handled here (not an Apple
+    /// peripheral, link down, or the characteristic is not discovered yet) –
+    /// the caller then uses Shiny's write, which also runs the discovery.
+    /// Throws when the frame is dropped because the W2R buffer stays full.
+    /// </summary>
+    private Task<bool> TryWriteNativeAsync(IPeripheral peripheral, string serviceUuid, string characteristicUuid, byte[] data)
+    {
+        if (peripheral is not Shiny.BluetoothLE.Peripheral apple)
+            return Task.FromResult(false);
+
+        return MainThread.InvokeOnMainThreadAsync(async () =>
+        {
+            CoreBluetooth.CBPeripheral native = apple.Native;
+            CoreBluetooth.CBUUID serviceId = CoreBluetooth.CBUUID.FromString(serviceUuid);
+            CoreBluetooth.CBUUID charId = CoreBluetooth.CBUUID.FromString(characteristicUuid);
+            // Looked up per write: a reconnect invalidates the old CBCharacteristic.
+            CoreBluetooth.CBCharacteristic? ch = native.Services?
+                .FirstOrDefault(s => s.UUID.Equals(serviceId))?.Characteristics?
+                .FirstOrDefault(c => c.UUID.Equals(charId));
+            if (ch == null || native.State != CoreBluetooth.CBPeripheralState.Connected)
+                return false;
+
+            // A NAVI (3 link-layer packets) briefly fills iOS' W2R buffer; it
+            // normally drains within a few connection intervals.
+            for (int i = 0; i < 10 && !native.CanSendWriteWithoutResponse; i++)
+                await Task.Delay(25);
+
+            DateTime now = DateTime.UtcNow;
+            if (native.CanSendWriteWithoutResponse)
+            {
+                if (_w2rBlockedSince is { } since)
+                {
+                    Log.Information("BLE-LOGGER: {Line}", $"W2R buffer free again after {(now - since).TotalSeconds:F1} s");
+                    _w2rBlockedSince = null;
+                }
+            }
+            else
+            {
+                if (_w2rBlockedSince == null)
+                {
+                    _w2rBlockedSince = now;
+                    _w2rRxAtBlock = _rxFrames;
+                    _w2rEpisodes++;
+                    Log.Warning("BLE-LOGGER: {Line}", "W2R buffer full (canSendWriteWithoutResponse=false) – dropping frames");
+                }
+
+                TimeSpan blocked = now - _w2rBlockedSince.Value;
+                bool watchdog = blocked >= W2rWatchdogAfter && now - _w2rLastWatchdog >= W2rWatchdogCooldown;
+                if (watchdog)
+                {
+                    _w2rLastWatchdog = now;
+                    ReconnectStalledLink(peripheral, blocked);
+                }
+
+                if (watchdog || blocked < W2rForceInterval || now - _w2rLastForced < W2rForceInterval)
+                {
+                    _w2rDropped++;
+                    throw new InvalidOperationException("W2R buffer full – frame dropped");
+                }
+
+                // A write attempt while "not ready" is what Apple ties the ready
+                // callback to, and it shows whether iOS still delivers at all.
+                _w2rLastForced = now;
+                _w2rForced++;
+                Log.Warning("BLE-LOGGER: {Line}",
+                    $"W2R buffer full for {blocked.TotalSeconds:F1} s (rx +{_rxFrames - _w2rRxAtBlock} meanwhile) – forcing write");
+            }
+
+            native.WriteValue(Foundation.NSData.FromArray(data), ch, CoreBluetooth.CBCharacteristicWriteType.WithoutResponse);
+            return true;
+        });
+    }
+
+    /// <summary>
+    /// Watchdog: the W2R buffer stayed full although the link is up. A fresh
+    /// connection resets CoreBluetooth's per-link state. CancelConnection()
+    /// disarms Shiny's auto-reconnect and Connect() re-arms it (Shiny docs) –
+    /// a one-shot, not a competing WhenDisconnected→Connect loop.
+    /// </summary>
+    private void ReconnectStalledLink(IPeripheral peripheral, TimeSpan blocked)
+    {
+        _w2rWatchdogReconnects++;
+        Log.Warning("BLE-LOGGER: {Line}",
+            $"W2R watchdog: buffer full for {blocked.TotalSeconds:F0} s (rx +{_rxFrames - _w2rRxAtBlock} meanwhile) – reconnecting");
+        peripheral.WhenDisconnected().Take(1).Subscribe(_ =>
+        {
+            if (!_userInitiatedDisconnect && ReferenceEquals(_activePeripheral, peripheral))
+                peripheral.Connect(null);
+        });
+        peripheral.CancelConnection();
+    }
+#endif
 
 
     /// <summary>
@@ -450,7 +559,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 return false;
             }
 
-            await send(new BleConnectedDeviceWrapper(peripheral, plugin));
+            await send(new BleConnectedDeviceWrapper(this, peripheral, plugin));
             return true;
         }
         catch (Exception ex)
@@ -477,14 +586,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     }
 
     /// <summary>
-    /// Sends a navigation-update frame through the active plugin.
-    /// Returns whether the frame was actually delivered to the device –
-    /// false when skipped (no device), the link is unhealthy, or the
-    /// write failed. Callers use this to decide whether a NAVI write must
-    /// be re-requested.
+    /// Sends the full navigation state through the active plugin. Returns
+    /// whether the NAVI frame was written – false when skipped (no device),
+    /// the link is unhealthy, or the frame was dropped/failed.
     /// </summary>
-    public Task<bool> ExecuteNavigationUpdateAsync(NavigationUpdateInput input, bool sendNavi = true)
-        => WithLiveLinkAsync("SendNavigationUpdateAsync", d => _activePlugin!.SendNavigationUpdateAsync(d, input, sendNavi));
+    public Task<bool> ExecuteNavigationUpdateAsync(NavigationUpdateInput input)
+        => WithLiveLinkAsync("SendNavigationUpdateAsync", d => _activePlugin!.SendNavigationUpdateAsync(d, input));
 
     /// <summary>
     /// Sends an off-route alert (RENAVI) through the active plugin.
@@ -497,10 +604,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// <summary>
     /// Handles destination reached via the active plugin.
     /// </summary>
-    public async Task ExecuteNavigationFinishAsync()
-    {
-        await WithLiveLinkAsync("SendNavigationFinishAsync", d => _activePlugin!.SendNavigationFinishAsync(d), critical: true);
-    }
+    public Task<bool> ExecuteNavigationFinishAsync()
+        => WithLiveLinkAsync("SendNavigationFinishAsync", d => _activePlugin!.SendNavigationFinishAsync(d), critical: true);
 
     /// <summary>
     /// Sends the manufacturer's keepalive frame (MV Agusta: PING) through
@@ -516,10 +621,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// <summary>
     /// Handles user-cancelled navigation via the active plugin.
     /// </summary>
-    public async Task ExecuteNavigationStopAsync()
-    {
-        await WithLiveLinkAsync("SendNavigationStopAsync", d => _activePlugin!.SendNavigationStopAsync(d), critical: true);
-    }
+    public Task<bool> ExecuteNavigationStopAsync()
+        => WithLiveLinkAsync("SendNavigationStopAsync", d => _activePlugin!.SendNavigationStopAsync(d), critical: true);
 
     private void RefreshConnectedPeripherals()
     {
@@ -610,6 +713,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         if (!ReferenceEquals(_activePeripheral, peripheral)) return;
 
         Log.Information("BLE link (re)established for {Uuid} – re-running per-connection setup", peripheral.Uuid);
+        _w2rBlockedSince = null; // fresh link, fresh CoreBluetooth W2R state
         _state.OnNext(BleConnectionState.Connected);
         _errorMessage.OnNext(string.Empty);
 
@@ -661,6 +765,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 _activePlugin.ReadCharacteristicUuid)
             .Subscribe(result =>
             {
+                Interlocked.Increment(ref _rxFrames); // link-alive evidence for the W2R stall logs
                 if (result.Data != null) _activePlugin.OnDataReceived(result.Data);
             });
     }
@@ -799,7 +904,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     // ── HAL Implementation ────────────────────────────────────────────────
 
-    private class BleConnectedDeviceWrapper(IPeripheral peripheral, IBleDevicePlugin plugin) : IBleConnectedDevice
+    private class BleConnectedDeviceWrapper(BleManagerService owner, IPeripheral peripheral, IBleDevicePlugin plugin) : IBleConnectedDevice
     {
         public Guid Uuid => Guid.Parse(peripheral.Uuid);
         public string Name => peripheral.Name ?? "Unknown";
@@ -809,6 +914,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         public async Task WriteAsync(string characteristicUuid, byte[] data, bool withResponse)
         {
             string serviceUuid = plugin.ServiceUuid.ToString();
+#if IOS || MACCATALYST
+            if (!withResponse && await owner.TryWriteNativeAsync(peripheral, serviceUuid, characteristicUuid, data))
+                return;
+#endif
             await peripheral.WriteCharacteristicAsync(serviceUuid, characteristicUuid, data, withResponse);
         }
 

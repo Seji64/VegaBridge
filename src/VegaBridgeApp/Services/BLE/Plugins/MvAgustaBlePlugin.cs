@@ -88,17 +88,13 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
 
         // DEST format (from pklg capture): DEST|\x1e|lon\x1e|lat\x1e|
         // Field 1 (address) is empty in the official MV Ride app.
-        // Field 2 = longitude, field 3 = latitude (both 6 decimal places).
-        // The start coordinates come from the NavigationService (first route
-        // point). 0/0 only happens for test sequences without a real route.
-        double startLon = input.StartLongitude ?? 0;
-        double startLat = input.StartLatitude ?? 0;
-        string lon = startLon != 0 ? startLon.ToString("F6", CultureInfo.InvariantCulture) : "0.000000";
-        string lat = startLat != 0 ? startLat.ToString("F6", CultureInfo.InvariantCulture) : "0.000000";
-        // No manual pacing between W2R writes: Shiny's write queue already
-        // waits on CoreBluetooth's flow control (CanSendWriteWithoutResponse)
-        // per the Shiny.BluetoothLE docs – fixed Task.Delay pacing was our
-        // own quirk and only added latency.
+        // Field 2 = longitude, field 3 = latitude (both 6 decimal places) of
+        // the DESTINATION – identical in all 10 DEST frames of the capture,
+        // across reroutes. 0/0 only for test sequences without a real route.
+        string lon = (input.DestinationLongitude ?? 0).ToString("F6", CultureInfo.InvariantCulture);
+        string lat = (input.DestinationLatitude ?? 0).ToString("F6", CultureInfo.InvariantCulture);
+        // No manual pacing: W2R flow control is handled by the write wrapper
+        // in BleManagerService.
         await SendAsync(device, Commands.DEST, "", lon, lat);
 
         // REM format (from pklg capture): REM|\x1e|<meters>\x1e|
@@ -113,7 +109,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         // SendKeepAliveAsync on the live connection.
     }
 
-    public async Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input, bool sendNavi = true)
+    public async Task SendNavigationUpdateAsync(IBleConnectedDevice device, NavigationUpdateInput input)
     {
         Log.Debug("MV Agusta: Navigation Update - Maneuver {Index}/{Total}: {Icon}, Dist: {Dist:F0}m, Speed: {Speed:F0}km/h", 
             input.CurrentManeuverIndex + 1, input.TotalManeuvers, input.ManeuverIcon, input.DistanceToTurnM, input.SpeedKmh);
@@ -142,30 +138,18 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         if (intersectionName.Length > maxLen)
             intersectionName = intersectionName[..maxLen];
         
-        // NAVI = the instruction frame the display shows; per the official
-        // MV Ride profile it is written on maneuver change only. Status ticks
-        // (sendNavi: false) skip it and refresh SM/SM1. The coordinator's
-        // PING keepalive tick skips itself for 5 s after a delivered NAVI
-        // write – the NAVI+SM pair already warmed the W2R path.
-        if (sendNavi)
-        {
-            byte[] naviFrame = BuildFrame(Commands.NAVI,
-                input.ManeuverIcon,
-                navigationGuide,
-                intersectionName);
-            Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
-            // No flow-control pre-check and no artificial pacing: on Apple,
-            // Shiny's write queue already waits on CoreBluetooth's flow
-            // control (peripheralIsReadyToSendWriteWithoutResponse) inside
-            // its operation queue – the Shiny.BluetoothLE docs say to just
-            // await each write in turn, never to poll
-            // CanSendWriteWithoutResponse ourselves (it is not part of the
-            // public IPeripheral API anyway). A clogged bike-side buffer
-            // surfaces as a failed/timed-out write (delivered == false);
-            // the coordinator's signature/stamp logic then keeps the 1-Hz
-            // ticks retry-free without gating off the PING keepalive.
-            await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
-        }
+        // NAVI = the instruction frame the display shows. Written on EVERY
+        // tick, like the official MV Ride app (289 NAVI+SM pairs in 5.7 min
+        // of the capture): a frame lost to a W2R stall is healed by the next
+        // tick instead of freezing the display until the next maneuver.
+        // Flow control (buffer full → drop/force, watchdog) lives in the
+        // write wrapper of BleManagerService.
+        byte[] naviFrame = BuildFrame(Commands.NAVI,
+            input.ManeuverIcon,
+            navigationGuide,
+            intersectionName);
+        Log.Information("BLE-LOGGER: {Line}", $"SEND NAVI frame: {BitConverter.ToString(naviFrame)}");
+        await device.WriteAsync(ControlWriteCharacteristicUuid, naviFrame, withResponse: false);
 
         // SM and SM1 are non-critical (status display). If the BLE queue
         // is full after NAVI, skip them instead of throwing. NAVI is the
@@ -205,31 +189,22 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             // monotonic, so buckets never repeat and GPS jitter within the
             // same bucket is suppressed instead of re-sent.
             string sm1Key = $"{input.CurrentManeuverIndex}|{sm1Type}|{countdown}";
-            if (sm1Key != _lastSm1Key && !sendNavi)
+            if (sm1Key != _lastSm1Key)
             {
-                // Set the key immediately before writing. If the write fails,
-                // we still do not want to block subsequent 1-Hz ticks in a
-                // tight 3-second retry-blockade loop. A missing SM1 frame is
-                // non-critical; the next bucket change triggers a fresh write.
-                _lastSm1Key = sm1Key;
                 try
                 {
                     await SendSm1CountdownAsync(device, sm1Type, countdown);
+                    // Marked only once delivered: a frame dropped by a full
+                    // W2R buffer is retried on the next tick (writes no longer
+                    // block, so there is no retry storm to guard against).
+                    _lastSm1Key = sm1Key;
                 }
                 catch (Exception ex)
                 {
                     // Non-critical frame. Log for field diagnostics.
-                    Log.Debug(ex, "SM1 frame failed – skipping");
+                    Log.Debug(ex, "SM1 frame failed – retry next tick");
                 }
             }
-            // On a NAVI tick (sendNavi) the SM1 is deliberately not written and
-            // its key not updated: the tick already carries NAVI+SM, and a 3rd
-            // back-to-back frame would make a microburst that clogs the
-            // bike-side W2R buffer. Leaving the key unset means the next
-            // SM-only tick re-sends it ~1 s later (SM1 is a non-critical 40 m
-            // countdown, one tick late is fine). This keeps the NAVI tick at
-            // the official app's 2-frame NAVI+SM shape instead of a 3-frame
-            // burst.
         }
         // Log the navigation update for debugging
         Log.Information("BLE-LOGGER: {Line}", $"NAV UPDATE: idx={input.CurrentManeuverIndex}, icon={input.ManeuverIcon}, dist={input.DistanceToTurnM:F0}m, speed={input.SpeedKmh:F0}km/h");
@@ -282,16 +257,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
 
     // ─── Incoming Data Handling ──────────────────────────────────────────
 
-    // Total RX frames received on the notification characteristic – the
-    // W2R-SIM test samples this into its durable timeline file as an RX
-    // liveness signal (the RAM-only debug log does not survive a process
-    // kill on display-off runs).
-    private int _rxFrameCount;
-    public int RxFrameCount => _rxFrameCount;
-
     public void OnDataReceived(byte[] data)
     {
-        Interlocked.Increment(ref _rxFrameCount);
         if (TryParseFrame(data, out string command, out string[] fields))
         {
             // GUI1 notification from the bike: log the session ID for

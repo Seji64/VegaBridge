@@ -34,7 +34,7 @@ public class GpsService : IDisposable
 
     // ── Events ───────────────────────────────────────────────────────────
 
-    /// <summary>Fired on the UI thread whenever a new GPS reading arrives.</summary>
+    /// <summary>Fired once per GPS fix – on Shiny's background GPS queue (iOS 18+), not the UI thread.</summary>
     public event Action<GpsReading>? ReadingReceived;
 
     /// <summary>Fired when tracking starts or stops.</summary>
@@ -199,19 +199,36 @@ public class GpsService : IDisposable
 
     // ── Internal event handlers ──────────────────────────────────────────
 
-    private void OnForegroundReading(object? sender, GpsReading reading)
+    /// <summary>
+    /// Set by <see cref="GpsSimulator"/> while it drives a simulated ride:
+    /// real fixes are dropped so only the simulated positions reach the
+    /// navigation (the real listener keeps running – it is what keeps the app
+    /// alive in the background, exactly like on a live ride).
+    /// </summary>
+    public bool IsSimulating { get; set; }
+
+    /// <summary>Feeds a simulated fix through the same path as a real one.</summary>
+    public void PublishSimulated(GpsReading reading) => Publish(reading);
+
+    private void OnForegroundReading(object? sender, GpsReading reading) => OnRealReading(reading);
+
+    private void OnBackgroundReading(GpsReading reading) => OnRealReading(reading);
+
+    private GpsReading? _lastRealReading;
+
+    private void OnRealReading(GpsReading reading)
     {
-        LastReading = reading;
-        lock (_breadcrumbLock)
-        {
-            _breadcrumb.Add(reading);
-            if (_breadcrumb.Count > BreadcrumbMaxPoints)
-                _breadcrumb.RemoveRange(0, _breadcrumb.Count - BreadcrumbMaxPoints);
-        }
-        ReadingReceived?.Invoke(reading);
+        // Shiny raises every fix twice on iOS (GpsReadingReceived AND the
+        // IGpsDelegate, same record) – navigation must see it once. On
+        // Android the two paths depend on the background mode, so both stay
+        // subscribed and the duplicate is dropped by value.
+        if (IsSimulating || reading == _lastRealReading)
+            return;
+        _lastRealReading = reading;
+        Publish(reading);
     }
 
-    private void OnBackgroundReading(GpsReading reading)
+    private void Publish(GpsReading reading)
     {
         LastReading = reading;
         lock (_breadcrumbLock)

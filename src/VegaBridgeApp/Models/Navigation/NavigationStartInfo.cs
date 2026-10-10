@@ -10,9 +10,10 @@ public sealed class NavigationStartInfo
     public required int ManeuverCount { get; init; }
 
     /// <summary>
-    /// Start coordinates of the route (first route point), used by the BLE
-    /// plugin for the DEST frame. Null when the route has no geometry.
+    /// Final destination of the route, used by the BLE plugin for the DEST
+    /// frame (official MV Ride capture: DEST carries the destination, constant
+    /// across reroutes).
     /// </summary>
-    public double? StartLatitude { get; init; }
-    public double? StartLongitude { get; init; }
+    public double? DestinationLatitude { get; init; }
+    public double? DestinationLongitude { get; init; }
 }
