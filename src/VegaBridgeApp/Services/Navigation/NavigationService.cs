@@ -104,9 +104,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     //
     // Local thresholds for SUSPECT detection (triggers locate API call):
     private const double SuspectXteM = 20.0;        // cross-track error
-    private const double SuspectManeuverXteM = 40.0; // higher during turns
-    private const int OffRouteConfirmCount = 3;      // locate confirms → RENAVI
+    private const double SuspectManeuverXteM = 40.0; // higher near turns (GPS lag, corner cutting)
+    private const double TurnZoneM = 30.0;           // "near a turn" = this close (along the route)
+    private const double ClearlyOffRouteXteM = 50.0; // beyond: off-route candidate without locate
+    private const int OffRouteConfirmCount = 3;      // confirms → RENAVI
     private const int LocateThrottleSec = 2;          // max 1 locate per 2s
+    private const int LocateCooldownSec = 4;          // after a locate confirmed "on route"
+    // Throttles/cooldowns run on GPS fix timestamps (≈ wall clock at 1 Hz).
 
     // Topology: way_ids of the route; null while the index is being built
     // (a locate result can't be judged then).
@@ -114,7 +118,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private DateTimeOffset _lastLocateAt = DateTimeOffset.MinValue;
     private int _topologyOffRouteCounter;
     private bool _isOffRoute;
-    private int _offRouteCounter; // local XTE hysteresis
+    private DateTimeOffset _locateCooldownUntil;
 
     // Wrong-way detection: heading vs route bearing
     private const double WrongWayHeadingThresholdDeg = 135.0;
@@ -280,13 +284,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _destination = destination;
             _viaLocations = viaLocations is { Count: > 0 } ? [.. viaLocations] : [];
             _isNavigating = true;
-            _offRouteCounter = 0;
             _topologyOffRouteCounter = 0;
             _routeWayIds = null;
             _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
             _gpsTickCount = 0;
             _gpsBuffer.Clear();
+            _lastRerouteAt = DateTimeOffset.MinValue;
         }
 
         if (wasNavigating)
@@ -347,7 +351,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _maneuvers = [];
             _destination = null;
             _viaLocations = [];
-            _offRouteCounter = 0;
             _topologyOffRouteCounter = 0;
             _routeWayIds = null;
             _currentHeadingDeg = -1;
@@ -493,9 +496,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// request, no network, or off route again right after a reroute).
     /// Runs in the service, so it works without the map page. Call under _lock.
     /// </summary>
-    private void RerouteIfDue()
+    private void RerouteIfDue(DateTimeOffset now)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
         if ((now - _lastRerouteAt).TotalSeconds < RerouteMinIntervalSec) return;
         if (gps.LastReading is not { } fix) return;
         _lastRerouteAt = now;
@@ -512,7 +514,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         {
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
             _isOffRoute = false;
-            _offRouteCounter = 0;
             _topologyOffRouteCounter = 0;
             _routeWayIds = null;
             _currentHeadingDeg = -1;
@@ -755,17 +756,19 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon);
             if (snappedIndex < 0) return;
 
-            // Maneuver span check
-            bool inManeuverSpan = false;
+            // Near a turn? (Not "inside a maneuver span": every route point
+            // lies in one, so the turn threshold applied everywhere.)
+            bool nearTurn = false;
             foreach (Maneuver m in _maneuvers)
             {
-                if (snappedIndex >= m.BeginShapeIndex && snappedIndex <= m.EndShapeIndex)
+                int begin = Math.Min(m.BeginShapeIndex, _cumulativeDistances.Length - 1);
+                if (Math.Abs(_cumulativeDistances[begin] - _cumulativeDistances[snappedIndex]) <= TurnZoneM)
                 {
-                    inManeuverSpan = true;
+                    nearTurn = true;
                     break;
                 }
             }
-            double suspectThreshold = inManeuverSpan ? SuspectManeuverXteM : SuspectXteM;
+            double suspectThreshold = nearTurn ? SuspectManeuverXteM : SuspectXteM;
 
             // ── Wrong-Way Detection ────────────────────────────────────
             // Even if XTE is small (same road), heading in opposite direction
@@ -800,7 +803,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             if (distanceMeters <= suspectThreshold && !isWrongWay)
             {
                 // ON_ROUTE
-                _offRouteCounter = 0;
                 _topologyOffRouteCounter = 0;
                 _isOffRoute = false;
                 _telemetryTicksOnRoute++;
@@ -809,19 +811,25 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             {
                 // SUSPECT (either XTE too high or wrong way)
                 _telemetryTicksSuspect++;
-                if (_offRouteCounter < 10) _offRouteCounter++;
-                // Verify on the FIRST suspect tick, not the second: the slow
-                // path (2s throttle + OffRouteConfirmCount + 10-tick
-                // cooldown) is the stability mechanism, so starting it one
-                // tick earlier is free. A single glitch tick costs at most
-                // one locate call and cannot trigger RENAVI on its own.
-                if (_offRouteCounter >= 1)
+                if (isWrongWay || distanceMeters > ClearlyOffRouteXteM)
                 {
-                    _ = VerifyTopologyAsync(navLat, navLon, distanceMeters, reading.Speed, _currentHeadingDeg, isWrongWay);
+                    // Clear evidence, no locate call needed – counted every
+                    // tick. (A U-turn, or a wrong turn onto the route's own
+                    // street, would even match the route's way_id.)
+                    CountTopologyOffRouteCandidate(isWrongWay ? "wrong_way" : "far_from_route",
+                        navLat, navLon, distanceMeters);
+                }
+                else if (reading.Timestamp >= _locateCooldownUntil)
+                {
+                    // Ambiguous band: GPS drift on the right road or a road
+                    // next to it? Ask Valhalla – with the raw fix, the smoothed
+                    // one lags behind when leaving the route.
+                    _ = VerifyTopologyAsync(reading.Position.Latitude, reading.Position.Longitude,
+                        distanceMeters, reading.Speed, _currentHeadingDeg, reading.Timestamp);
                 }
                 if (_isOffRoute)
                 {
-                    RerouteIfDue();
+                    RerouteIfDue(reading.Timestamp);
                     return;
                 }
             }
@@ -1141,9 +1149,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// Only called when local XTE check is SUSPECT (not every tick).
     /// Throttled to max 1 call per 2 seconds.
     /// </summary>
-    private async Task VerifyTopologyAsync(double lat, double lon, double distanceMeters, double speedMs, double heading, bool isWrongWay)
+    private async Task VerifyTopologyAsync(double lat, double lon, double distanceMeters, double speedMs, double heading, DateTimeOffset now)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
         if ((now - _lastLocateAt).TotalSeconds < LocateThrottleSec)
         {
             _telemetryLocateCallsSkipped++;
@@ -1151,13 +1158,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         }
         _lastLocateAt = now;
 
-        // Wrong way (U-turn on the route road): the way_id matches by
-        // definition, so locate can't confirm anything – count directly.
-        if (isWrongWay)
-        {
-            CountTopologyOffRouteCandidate("wrong_way", lat, lon, distanceMeters);
-            return;
-        }
         // Index still being built (start / right after a reroute): no verdict.
         if (_routeWayIds is not { } routeWayIds) return;
 
@@ -1229,7 +1229,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                     if (_isOffRoute)
                         Log.Information("Back on route (topology: way_id match)");
                     _isOffRoute = false;
-                    _offRouteCounter = -10; // cooldown before next locate
+                    _locateCooldownUntil = now.AddSeconds(LocateCooldownSec);
                     _topologyOffRouteCounter = 0;
                 }
                 else

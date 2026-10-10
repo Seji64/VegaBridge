@@ -25,7 +25,8 @@ public class NavigationServiceTests
     private static readonly Coordinate C = new(48.0090, 9.0134, null); // ~1 km east
     private static readonly Coordinate D = new(48.0000, 9.0134, null);
 
-    private const int Depart = 1, Arrive = 4, Right = 10;
+    private const int Depart = 1, Arrive = 4, Right = 10, Left = 15;
+    private const double LonPerMeter = 1 / 74_490.0; // at 48° N
 
     private readonly GpsService _gps;
     private readonly IValhallaClient _valhalla = Substitute.For<IValhallaClient>();
@@ -39,12 +40,9 @@ public class NavigationServiceTests
         gpsManager.GetCurrentStatus(Arg.Any<GpsRequest>()).Returns(AccessState.Available);
         _gps = new GpsService(gpsManager);
 
-        // Rider is always on "the route road" (way 1) – only wrong-way can
-        // make it off route. Reroutes fail (no Valhalla in tests).
-        _valhalla.LocateAsync(Arg.Any<List<(double, double)>>(), Arg.Any<double>(), Arg.Any<double>(), Arg.Any<CancellationToken>())
-            .Returns(ci => ((List<(double, double)>)ci[0])
-                .Select(_ => (LocateResponse?)new LocateResponse { Edges = [new LocateEdge { WayId = 1, PercentAlong = 0.5 }] })
-                .ToList());
+        // By default the rider is on "the route road" (way 1) wherever GPS
+        // puts them. Reroutes fail (no Valhalla in tests).
+        LocateWay((_, _) => 1);
         _valhalla.GetRouteAsync(Arg.Any<RouteRequest>(), Arg.Any<CancellationToken>())
             .Returns(Result.Failure("no route in tests"));
 
@@ -55,7 +53,7 @@ public class NavigationServiceTests
     [Fact]
     public async Task RoundTrip_FirstFixAtStart_DoesNotFinishImmediately()
     {
-        await StartAsync(Leg(Depart, A, B, C, D, A));
+        await StartAsync(Leg(Right, A, B, C, D, A));
 
         // 7 m east of A – on the final D→A segment, i.e. nearer to the route
         // END than to its start. Used to snap there → "destination reached".
@@ -69,7 +67,7 @@ public class NavigationServiceTests
     [Fact]
     public async Task RoundTrip_RideWholeLoop_FinishesOnlyAtTheEnd()
     {
-        await StartAsync(Leg(Depart, A, B, C, D, A));
+        await StartAsync(Leg(Right, A, B, C, D, A));
 
         List<Coordinate> ride = Ride(A, B, C, D, A);
         foreach (Coordinate p in ride)
@@ -89,7 +87,7 @@ public class NavigationServiceTests
     [Fact]
     public async Task UTurnOnRouteRoad_IsDetectedAsOffRoute()
     {
-        await StartAsync(Leg(Depart, A, B, C, D, A));
+        await StartAsync(Leg(Right, A, B, C, D, A));
         foreach (Coordinate p in Ride(A, Lerp(A, B, 0.4)))
             Fix(p, speedMs: 14);
 
@@ -97,10 +95,7 @@ public class NavigationServiceTests
         // to cancel the wrong-way detection forever.
         Coordinate here = Lerp(A, B, 0.4);
         for (int i = 1; i <= 6 && !_sink.OffRoute; i++)
-        {
             Fix(new Coordinate(here.Latitude - i * 0.0002, here.Longitude, null), speedMs: 14, headingDeg: 180);
-            Thread.Sleep(i >= 3 ? 2100 : 0); // locate/off-route checks are throttled to one per 2 s
-        }
 
         Assert.True(_sink.OffRoute);
     }
@@ -110,7 +105,7 @@ public class NavigationServiceTests
     {
         // Waypoints B and D as stops (one leg each, like Map.StartNavigation).
         await StartAsync(
-            [Leg(Depart, A, B), Leg(Depart, B, C, D), Leg(Depart, D, A)],
+            [Leg(Right, A, B), Leg(Right, B, C, D), Leg(Right, D, A)],
             vias: [Loc(B), Loc(D)]);
 
         Coordinate pos = Lerp(B, C, 0.5);
@@ -119,14 +114,90 @@ public class NavigationServiceTests
 
         await _nav.PerformRerouteAsync(pos.Latitude, pos.Longitude, skipNextWaypoint: false);
 
-        RouteRequest request = (RouteRequest)_valhalla.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(IValhallaClient.GetRouteAsync))
-            .GetArguments()[0]!;
+        RouteRequest request = LastRouteRequest();
         // current position → D (B already passed) → destination A
         Assert.Equal(3, request.Locations!.Count);
         Assert.Equal(D.Latitude, request.Locations[1].Lat, 6);
         Assert.Equal(D.Longitude, request.Locations[1].Lon, 6);
         Assert.Equal("break", request.Locations[1].Type);
+    }
+
+    [Fact]
+    public async Task WrongTurnInCity_IsRerouted_WithinSeconds()
+    {
+        // Route: 330 m north to X, then LEFT (west). Rider turns RIGHT (east).
+        // 36 km/h, a fix every 10 m.
+        Coordinate x = Lerp(A, B, 1.0 / 3);
+        Coordinate west = new(x.Latitude, x.Longitude - 300 * LonPerMeter, null);
+        await StartAsync(Leg(Left, A, x, west));
+        LocateWay((_, lon) => lon > x.Longitude + 15 * LonPerMeter ? 3 : 1); // east street = way 3
+
+        foreach (Coordinate p in Ride(10, A, x))
+            Fix(p, speedMs: 10, headingDeg: 0);
+        Assert.False(_sink.OffRoute);
+
+        int seconds = 0;
+        Coordinate pos = x;
+        while (!RerouteRequested() && seconds < 30)
+        {
+            seconds++;
+            pos = new Coordinate(x.Latitude, x.Longitude + seconds * 10 * LonPerMeter, null);
+            Fix(pos, speedMs: 10, headingDeg: 90);
+        }
+
+        Assert.True(_sink.OffRoute);
+        Assert.True(seconds <= 6, $"reroute after {seconds} s / {seconds * 10} m");
+        // New route starts where the rider is now, in their direction.
+        Location origin = LastRouteRequest().Locations[0];
+        Assert.Equal(pos.Latitude, origin.Lat, 6);
+        Assert.Equal(pos.Longitude, origin.Lon, 6);
+        Assert.Equal(90, origin.Heading);
+    }
+
+    [Fact]
+    public async Task ParallelRoad_IsDetectedAsOffRoute()
+    {
+        // Route on the motorway (straight north); the rider takes the parallel
+        // road 40 m east of it. 120 km/h, a fix every 33 m.
+        await StartAsync(Leg(Right, A, B));
+        LocateWay((_, lon) => lon > A.Longitude + 25 * LonPerMeter ? 2 : 1);
+
+        List<Coordinate> motorway = Ride(33, A, Lerp(A, B, 0.3));
+        foreach (Coordinate p in motorway)
+            Fix(p, speedMs: 33, headingDeg: 0);
+        Assert.False(_sink.OffRoute);
+
+        // Exit ramp drifts east over ~100 m, then runs parallel at 40 m.
+        Coordinate last = motorway[^1];
+        int seconds = 0;
+        while (!RerouteRequested() && seconds < 30)
+        {
+            seconds++;
+            double east = Math.Min(40, seconds * 13.5);
+            Fix(new Coordinate(last.Latitude + seconds * 33 / 111_320.0, last.Longitude + east * LonPerMeter, null),
+                speedMs: 33, headingDeg: 0);
+        }
+
+        Assert.True(_sink.OffRoute);
+        Assert.True(seconds <= 8, $"reroute after {seconds} s / {seconds * 33} m");
+    }
+
+    [Fact]
+    public async Task GpsDriftInCity_OnTheRouteRoad_IsNotOffRoute()
+    {
+        // Urban canyon: GPS puts the rider 35 m beside the route for 15 s,
+        // but locate finds them on the route road (default fake) – no reroute.
+        await StartAsync(Leg(Right, A, B));
+        List<Coordinate> ride = Ride(10, A, Lerp(A, B, 0.5));
+        for (int i = 0; i < ride.Count; i++)
+        {
+            bool drift = i is >= 20 and < 35;
+            Coordinate p = drift ? new Coordinate(ride[i].Latitude, ride[i].Longitude + 35 * LonPerMeter, null) : ride[i];
+            Fix(p, speedMs: 10, headingDeg: 0);
+        }
+
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -139,12 +210,12 @@ public class NavigationServiceTests
         await _nav.StartNavigation(shape, maneuvers, km, min, Loc(A), vias);
     }
 
-    /// <summary>One leg: depart, a right turn at every inner point, arrive.</summary>
-    private static Leg Leg(int departType, params Coordinate[] points)
+    /// <summary>One leg: depart, a <paramref name="turnType"/> turn at every inner point, arrive.</summary>
+    private static Leg Leg(int turnType, params Coordinate[] points)
     {
-        List<Maneuver> maneuvers = [new() { Type = departType, BeginShapeIndex = 0, EndShapeIndex = 1 }];
+        List<Maneuver> maneuvers = [new() { Type = Depart, BeginShapeIndex = 0, EndShapeIndex = 1 }];
         for (int i = 1; i < points.Length - 1; i++)
-            maneuvers.Add(new Maneuver { Type = Right, BeginShapeIndex = i, EndShapeIndex = i + 1 });
+            maneuvers.Add(new Maneuver { Type = turnType, BeginShapeIndex = i, EndShapeIndex = i + 1 });
         maneuvers.Add(new Maneuver { Type = Arrive, BeginShapeIndex = points.Length - 1, EndShapeIndex = points.Length - 1 });
 
         double km = 0;
@@ -159,14 +230,16 @@ public class NavigationServiceTests
         };
     }
 
-    /// <summary>Points every ~50 m along the polyline.</summary>
-    private static List<Coordinate> Ride(params Coordinate[] points)
+    private static List<Coordinate> Ride(params Coordinate[] points) => Ride(50, points);
+
+    /// <summary>Points every ~<paramref name="stepM"/> along the polyline.</summary>
+    private static List<Coordinate> Ride(double stepM, params Coordinate[] points)
     {
         List<Coordinate> ride = [];
         for (int i = 1; i < points.Length; i++)
         {
             double m = GeoMath.DistanceMeters(points[i - 1].Latitude, points[i - 1].Longitude, points[i].Latitude, points[i].Longitude);
-            int steps = Math.Max(1, (int)(m / 50));
+            int steps = Math.Max(1, (int)(m / stepM));
             for (int s = 1; s <= steps; s++)
                 ride.Add(Lerp(points[i - 1], points[i], (double)s / steps));
         }
@@ -187,6 +260,21 @@ public class NavigationServiceTests
             SpeedAccuracy: 1,
             IsStationary: speedMs == 0));
     }
+
+    /// <summary>Fake Valhalla locate: which OSM way is at a position.</summary>
+    private void LocateWay(Func<double, double, long> wayAt) =>
+        _valhalla.LocateAsync(Arg.Any<List<(double, double)>>(), Arg.Any<double>(), Arg.Any<double>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ((List<(double Lat, double Lon)>)ci[0])
+                .Select(p => (LocateResponse?)new LocateResponse { Edges = [new LocateEdge { WayId = wayAt(p.Lat, p.Lon), PercentAlong = 0.5 }] })
+                .ToList());
+
+    private bool RerouteRequested() => RouteRequests().Any();
+
+    private RouteRequest LastRouteRequest() => RouteRequests().Last();
+
+    private IEnumerable<RouteRequest> RouteRequests() => _valhalla.ReceivedCalls()
+        .Where(c => c.GetMethodInfo().Name == nameof(IValhallaClient.GetRouteAsync))
+        .Select(c => (RouteRequest)c.GetArguments()[0]!);
 
     private static Coordinate Lerp(Coordinate a, Coordinate b, double t) =>
         new(a.Latitude + t * (b.Latitude - a.Latitude), a.Longitude + t * (b.Longitude - a.Longitude), null);
