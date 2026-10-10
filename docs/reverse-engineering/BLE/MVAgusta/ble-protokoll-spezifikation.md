@@ -467,7 +467,7 @@ Detaillierte Anleitung für BLE-Analyse mit iPhone + LightBlue App:
 
 **Offene Punkte:**
 - DEST: Feldreihenfolge lat/lon (Android) vs. lon/lat (iOS) → am Bike prüfen, welche das TFT korrekt verarbeitet (bzw. ob DEST überhaupt angezeigt wird).
-- SM Feld 1: Einheit m/s (Android) vs. `0` (iOS) → prüfen, ob das TFT den Wert anzeigt.
+- SM Feld 1: Einheit m/s (Android) vs. `0` (iOS) → prüfen, ob das TFT den Wert anzeigt. **Hypothese:** Der iOS-Capture entstand bei einer **simulierten** Fahrt, ohne echte GPS-Geschwindigkeit (`CLLocation.speed` dann −1/0). Die `0` ist daher vermutlich kein festes iOS-Verhalten. Klärung nur über einen Capture von einer echten Fahrt. VegaBridge sendet bis dahin weiter `0`.
 
 ---
 
