@@ -141,14 +141,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     public int TotalManeuvers => _maneuvers.Count;
     public Maneuver? CurrentManeuver =>
         _maneuvers.Count > _currentManeuverIndex ? _maneuvers[_currentManeuverIndex] : null;
-
-    /// <summary>
-    /// Last maneuver snapshot delivered via <c>OnManeuverAsync</c> – lets
-    /// late-subscribing sinks resync without waiting for the next maneuver
-    /// change. Null before the first maneuver fires.
-    /// </summary>
-    public NavigationManeuverInfo? LastManeuverInfo => _lastManeuverInfo;
-    private NavigationManeuverInfo? _lastManeuverInfo;
     public double TotalDistanceKm { get; private set; }
     public double TotalTimeMin { get; private set; }
 
@@ -1167,7 +1159,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             targetIndex + 1, _maneuvers.Count,
             m.Instruction, m.Type);
 
-        _lastManeuverInfo = info;
         _ = NotifySinksAsync(s => s.OnManeuverAsync(info));
     }
 }
