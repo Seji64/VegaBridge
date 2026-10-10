@@ -37,6 +37,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     private const string LastDeviceUuidKey = "ble_last_device_uuid";
     private const string AutoConnectEnabledKey = "ble_autoconnect_enabled";
+    // A bike in range connects within a few seconds; longer means it is off.
+    private static readonly TimeSpan AutoConnectTimeout = TimeSpan.FromSeconds(15);
+    private int _autoConnectRunning;
 
     // Expose active plugin for advanced access (e.g., session ID)
     public IBleDevicePlugin? ActivePlugin => _activePlugin;
@@ -113,11 +116,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 .Subscribe(UpdateDeviceFromScanResult);
             
             await Task.Delay(TimeSpan.FromSeconds(30), scanToken);
-            if (CurrentState == BleConnectionState.Scanning)
-            {
-                Log.Information("BLE scan automatic timeout reached");
-                StopScanning();
-            }
+            // Unconditional: a connect during the scan moves the state away
+            // from Scanning, and the scan must still end here (StopScanning
+            // only resets the state while it is still Scanning).
+            Log.Information("BLE scan automatic timeout reached");
+            StopScanning();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -200,25 +203,34 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     public async Task<bool> ConnectAsync(Guid deviceUuid)
     {
+        if (!_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out IPeripheral? peripheral))
+        {
+            UpdateError("Device not found. Please scan again.", isCritical: false);
+            return false;
+        }
+
+        return await ConnectAsync(peripheral, TimeSpan.FromSeconds(30), reportFailure: true);
+    }
+
+    /// <param name="reportFailure">false for auto-connect: a failed attempt is
+    /// logged only – the bike is usually just not switched on yet, which is
+    /// not worth an error banner.</param>
+    private async Task<bool> ConnectAsync(IPeripheral peripheral, TimeSpan timeout, bool reportFailure)
+    {
         if (CurrentState == BleConnectionState.Connecting) return false;
 
+        Guid deviceUuid = Guid.Parse(peripheral.Uuid);
         try
         {
             _state.OnNext(BleConnectionState.Connecting);
             Log.Information("Attempting to connect to device {Uuid}", deviceUuid);
 
-            string uuidKey = deviceUuid.ToString();
-            if (!_discoveredPeripherals.TryGetValue(uuidKey.ToUpper(), out IPeripheral? peripheral))
-            {
-                UpdateError("Device not found. Please scan again.", isCritical: false);
-                return false;
-            }
-
             // No explicit ConnectionConfig: Shiny 5.7.2 defaults a null config
             // to AutoConnect = true, so Shiny owns link recovery (dropped
             // links, adapter power cycles ≥ 5.6). Per the docs we must NOT
             // run our own WhenDisconnected→Connect loop on top of it.
-            await peripheral.ConnectAsync(timeout: TimeSpan.FromSeconds(30));
+            // A timeout cancels the pending connect (Shiny's ConnectAsync).
+            await peripheral.ConnectAsync(timeout: timeout);
 
             _userInitiatedDisconnect = false;
             _activePeripheral = peripheral;
@@ -245,9 +257,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             _state.OnNext(BleConnectionState.Connected);
             Log.Information("Successfully connected to {Uuid} using plugin {Plugin}", deviceUuid, _activePlugin?.DisplayName ?? "None");
             
-            // Persist last connected device for auto-connect on next launch
-            Preferences.Set(LastDeviceUuidKey, deviceUuid.ToString());
-            
+            // Remember the bike for auto-connect – only a device a plugin can
+            // drive, so a random peripheral never becomes the target. The
+            // platform identifier is what GetKnownPeripheral() resolves.
+            if (_activePlugin != null)
+                Preferences.Set(LastDeviceUuidKey, peripheral.Uuid);
+
             SetupWhenConnected(peripheral);
             SetupNotifications(peripheral);
 
@@ -260,9 +275,16 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Connection failed for {Uuid}", deviceUuid);
             _state.OnNext(BleConnectionState.Idle);
-            UpdateError($"Connection failed: {ex.Message}");
+            if (reportFailure)
+            {
+                Log.Error(ex, "Connection failed for {Uuid}", deviceUuid);
+                UpdateError($"Connection failed: {ex.Message}");
+            }
+            else
+            {
+                Log.Information("BLE auto-connect to {Uuid} did not complete: {Error}", deviceUuid, ex.Message);
+            }
             return false;
         }
     }
@@ -831,75 +853,74 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         _errorMessage.Dispose();
     }
 
-    /// <summary>
-    /// Attempts to auto-connect to the last paired device if auto-connect is enabled.
-    /// Called after BLE access is granted on app start.
-    /// </summary>
-    public async Task TryAutoConnectAsync()
-    {
-        if (!Preferences.Get(AutoConnectEnabledKey, true))
-        {
-            Log.Debug("BLE auto-connect disabled in settings");
-            return;
-        }
+    // ── Auto-connect (last connected motorcycle) ──────────────────────────
 
-        string? lastUuid = Preferences.Get(LastDeviceUuidKey, (string?)null);
-        if (string.IsNullOrEmpty(lastUuid))
-        {
-            Log.Debug("BLE: no last device UUID stored, skipping auto-connect");
-            return;
-        }
-
-        if (!Guid.TryParse(lastUuid, out Guid deviceUuid))
-        {
-            Log.Warning("BLE: invalid last device UUID stored, clearing");
-            Preferences.Remove(LastDeviceUuidKey);
-            return;
-        }
-
-        // Check if device is already connected (iOS state restoration)
-        if (bleManager.GetConnectedPeripherals().Any(p => p.Uuid.Equals(deviceUuid.ToString(), StringComparison.OrdinalIgnoreCase)))
-        {
-            Log.Information("BLE: last device {Uuid} already connected via OS, skipping explicit connect", deviceUuid);
-            return;
-        }
-
-        Log.Information("BLE: attempting auto-connect to last device {Uuid}", deviceUuid);
-        
-        // Try to find in discovered peripherals (from scan or RefreshConnectedPeripherals)
-        if (!_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out IPeripheral? peripheral))
-        {
-            Log.Information("BLE: last device {Uuid} not in discovered list, starting scan to find it", deviceUuid);
-            await StartScanningAsync();
-            // Give scan a moment to populate
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            
-            if (!_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out peripheral))
-            {
-                Log.Information("BLE: last device {Uuid} not found in scan, auto-connect aborted", deviceUuid);
-                return;
-            }
-        }
-
-        // Use existing ConnectAsync logic
-        await ConnectAsync(deviceUuid);
-    }
-
-    /// <summary>
-    /// Clears the stored last device UUID (called on user-initiated disconnect if desired).
-    /// </summary>
-    public void ClearLastDevice()
-    {
-        Preferences.Remove(LastDeviceUuidKey);
-    }
-
-    /// <summary>
-    /// Gets or sets the auto-connect enabled preference.
-    /// </summary>
+    /// <summary>User setting (Settings page), default on.</summary>
     public bool AutoConnectEnabled
     {
         get => Preferences.Get(AutoConnectEnabledKey, true);
         set => Preferences.Set(AutoConnectEnabledKey, value);
+    }
+
+    /// <summary>
+    /// Connects to the last connected motorcycle when the app starts or
+    /// returns to the foreground. No scan: GetKnownPeripheral() resolves the
+    /// remembered identifier directly (Apple: CoreBluetooth's known
+    /// peripherals – also a bike that is already linked at OS level and no
+    /// longer advertises; Android: from the address). No-op while a device is
+    /// tracked (Shiny's auto-reconnect owns that link) and after a
+    /// user-initiated disconnect (stays disconnected until the next launch or
+    /// a manual connect). Never prompts, never raises an error banner.
+    /// Returns whether the bike is connected afterwards.
+    /// </summary>
+    public async Task<bool> TryAutoConnectAsync()
+    {
+        string? lastUuid = Preferences.Get(LastDeviceUuidKey, (string?)null);
+        if (!AutoConnectEnabled || string.IsNullOrEmpty(lastUuid)
+            || _activePeripheral != null || _userInitiatedDisconnect)
+            return false;
+
+        // Launch and resume can overlap – one attempt at a time.
+        if (Interlocked.Exchange(ref _autoConnectRunning, 1) == 1)
+            return false;
+
+        try
+        {
+            // Raw Shiny call, not RequestAccessAsync(): a denied/disabled
+            // adapter must stay silent here. Waits out CoreBluetooth's brief
+            // "Unknown" state on a cold start.
+            AccessState access = await bleManager.RequestAccessAsync();
+            if (access != AccessState.Available)
+            {
+                Log.Information("BLE auto-connect skipped: adapter {Access}", access);
+                return false;
+            }
+
+            // The user may have connected manually in the meantime.
+            if (_activePeripheral != null)
+                return false;
+
+            IPeripheral? peripheral = bleManager.GetKnownPeripheral(lastUuid);
+            if (peripheral == null)
+            {
+                Log.Information("BLE auto-connect skipped: last device {Uuid} is unknown to the OS", lastUuid);
+                return false;
+            }
+
+            Log.Information("BLE auto-connect to last device {Uuid} ({Name})", peripheral.Uuid, peripheral.Name ?? "Unknown");
+            // Listed like a scanned device, so the Settings page shows it.
+            _discoveredPeripherals[peripheral.Uuid.ToUpper()] = peripheral;
+            return await ConnectAsync(peripheral, AutoConnectTimeout, reportFailure: false);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "BLE auto-connect failed");
+            return false;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _autoConnectRunning, 0);
+        }
     }
 
     // ── HAL Implementation ────────────────────────────────────────────────

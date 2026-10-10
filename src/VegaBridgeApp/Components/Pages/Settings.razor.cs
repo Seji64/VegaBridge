@@ -61,11 +61,9 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             return;
         }
         
-        // Try auto-connect to last paired device
-        await BleManager.TryAutoConnectAsync();
-        
-        // If not connected, start scanning
-        if (!BleManager.IsAnyDeviceConnected)
+        // Auto-connect runs at app level (App.xaml.cs) – don't scan over a
+        // connect that is in flight, and not while a device is connected.
+        if (ConnectionState != BleConnectionState.Connecting && !BleManager.IsAnyDeviceConnected)
         {
             await BleManager.StartScanningAsync();
         }
@@ -111,6 +109,9 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     private void UpdateDevices(IReadOnlyList<BleDeviceInfo> devices)
     {
         Devices = [.. devices];
+        // An auto-connected bike was never picked in the list – select it so
+        // the connection details show its name.
+        _selectedUuid ??= devices.FirstOrDefault(d => d.IsConnected)?.Uuid;
         _ = InvokeAsync(StateHasChanged);
     }
     
@@ -218,15 +219,16 @@ public partial class Settings : ComponentBase, IAsyncDisposable
     // ── Debug logging (collects in-memory while enabled) ────────────────
 
     private bool DebugLoggingEnabled => DebugLogSink.Instance.IsEnabled;
-    
-    private bool BleAutoConnectEnabled
+
+    // ── BLE auto-connect ─────────────────────────────────────────────────
+
+    private bool BleAutoConnectEnabled => BleManager.AutoConnectEnabled;
+
+    private void SetBleAutoConnect(bool enabled)
     {
-        get => BleManager.AutoConnectEnabled;
-        set
-        {
-            BleManager.AutoConnectEnabled = value;
-            StateHasChanged();
-        }
+        BleManager.AutoConnectEnabled = enabled;
+        Log.Information("BLE auto-connect {State} (from Settings)", enabled ? "enabled" : "disabled");
+        StateHasChanged();
     }
 
     // ── Road closure providers ───────────────────────────────────────────

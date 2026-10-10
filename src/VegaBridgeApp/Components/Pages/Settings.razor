@@ -134,7 +134,26 @@
                 </MudCardContent>
             </MudCard>
         }
-        
+
+        <!-- ── BLE Auto-Connect ─────────────────────────────────────────── -->
+        <MudCard Elevation="2" Style="border-radius: 16px;">
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2" Class="mb-3">@L["BleAutoConnectTitle"]</MudText>
+
+                <MudSwitch T="bool"
+                           Color="Color.Secondary"
+                           Value="@BleAutoConnectEnabled"
+                           ValueChanged="(bool v) => SetBleAutoConnect(v)"
+                           Class="mb-3">
+                    @L["BleAutoConnectToggle"]
+                </MudSwitch>
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @L["BleAutoConnectHelp"]
+                </MudText>
+            </MudCardContent>
+        </MudCard>
+
         <!-- ── Navigation Settings ──────────────────────────────────────── -->
         <MudCard Elevation="2" Style="border-radius: 16px;">
             <MudCardContent>

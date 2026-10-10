@@ -215,7 +215,7 @@
 
   <!-- BLE Auto-Connect -->
   <data name="BleAutoConnectTitle" xml:space="preserve"><value>Auto-Connect</value></data>
-  <data name="BleAutoConnectToggle" xml:space="preserve"><value>Connect automatically to last paired motorcycle</value></data>
-  <data name="BleAutoConnectHelp" xml:space="preserve"><value>When enabled, VegaBridge will automatically connect to the last paired motorcycle on app launch if it is nearby.</value></data>
+  <data name="BleAutoConnectToggle" xml:space="preserve"><value>Connect automatically to the last motorcycle</value></data>
+  <data name="BleAutoConnectHelp" xml:space="preserve"><value>When the app opens, VegaBridge connects automatically to the last connected motorcycle if it is switched on and nearby. After a manual disconnect, only on the next app start.</value></data>
 
 </root>

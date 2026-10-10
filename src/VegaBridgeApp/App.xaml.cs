@@ -21,9 +21,10 @@ public partial class App : Application
         // Bluetooth power cycle is reconnected by Shiny itself, and its
         // WhenConnected() hook (BleManagerService.SetupWhenConnected) re-runs
         // our per-connection setup. On app resume we only verify the status
-        // and re-send the current navigation state so the bike display does
-        // not stay on stale instructions. A user-initiated disconnect is
-        // never overridden (intent flag in BleManagerService).
+        // (or auto-connect when no device is tracked at all) and re-send the
+        // current navigation state so the bike display does not stay on
+        // stale instructions. A user-initiated disconnect is never
+        // overridden (intent flag in BleManagerService).
         // Timeline marker for display-off runs: from here the app is
         // backgrounded (and soon suspended) – anything logged before this
         // line happened while the app was active.
@@ -39,6 +40,15 @@ public partial class App : Application
             Log.Information("App deactivated (backgrounded) – BLE keepalive continues in background, app may be suspended");
         };
 
+        // Auto-connect to the last connected motorcycle (setting on the
+        // Settings page). Swallows its own failures and is a no-op while a
+        // device is tracked or after a user-initiated disconnect.
+        window.Created += async (_, _) =>
+        {
+            if (_services == null) return;
+            await _services.GetRequiredService<BleManagerService>().TryAutoConnectAsync();
+        };
+
         window.Resumed += async (_, _) =>
         {
             try
@@ -46,7 +56,7 @@ public partial class App : Application
                 if (_services == null) return;
 
                 BleManagerService ble = _services.GetRequiredService<BleManagerService>();
-                bool connected = await ble.EnsureConnectedAsync();
+                bool connected = await ble.EnsureConnectedAsync() || await ble.TryAutoConnectAsync();
                 Log.Information("App resumed – BLE connection {State}", connected ? "alive" : "unavailable");
 
                 if (!connected) return;
