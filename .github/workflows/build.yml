@@ -13,7 +13,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-27
+    # The .NET iOS/MacCatalyst 27 workload requires Xcode 27; macos-26 only ships 26.x.
+    # GitHub's images are now per Xcode major (there is no macos-27 label).
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
 
