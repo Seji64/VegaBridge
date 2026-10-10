@@ -56,7 +56,7 @@ User taps "Start Navigation" on Map
                 or "From the beginning" (planned start = first waypoint)
   → Map.razor calls ValhallaClient.GetRouteAsync() (from the current position)
   → Route response (polyline, maneuvers, summary)
-  → NavigationService.StartNavigation(shape, maneuvers, ...)
+  → NavigationService.StartNavigation(shape, maneuvers, ..., avoid)
   → Polyline densification (max 20m segments)
   → Way-ID index built via ONE Valhalla /locate call
     (every ~1 km + middle of every maneuver)
@@ -121,10 +121,31 @@ Off-Route detected (3 candidates)
     (works without the map page / screen off), from the latest GPS fix
     and heading; retried every 30s while still off route
   → Valhalla /route API with the waypoints still ahead (passed = progress
-    beyond the waypoint's leg end), all as "break"
+    beyond the waypoint's leg end), all as "break", avoiding the same road
+    types as the planned route
   → Route replaced in-place
   → INavigationSink.OnRouteUpdatedAsync()
 ```
+
+---
+
+## Route Options: Avoid Highways / Tolls / Ferries
+
+The route planning panel has filter chips "Vermeiden: Autobahnen · Maut ·
+Fähren" (`RoadAvoidance` flags). The last choice is remembered
+(Preferences `route_avoid`) and saved with a route (`SavedRoute.Avoid`).
+
+`CostingOptions.Avoiding()` sends every avoided type twice:
+
+| | Soft `use_highways` / `use_tolls` / `use_ferry` = 0 | Hard `exclude_highways` / `exclude_tolls` / `exclude_ferries` |
+|------|------|------|
+| Effect | Preference only – Lyon → Marseille with `use_tolls=0` still took 31 km of tolled A7 | Road type removed (except at start/end) |
+| Server | Always available | Needs `service_limits.allow_hard_exclusions` (valhalla1.openstreetmap.de: yes; otherwise ignored with a warning) |
+| Risk | – | No path at all (island only reachable by ferry → error 442) |
+
+On error 442 with hard exclusions `ValhallaClient` retries with the soft
+preferences only. If the route still uses an avoided type (`has_highway` /
+`has_toll` / `has_ferry` in the trip summary), the map shows a snackbar.
 
 ---
 
@@ -273,10 +294,11 @@ Valhalla maneuvers describe the action at their BEGIN index (the turn happens AT
 | `BleNavigationCoordinator.cs` | Mediator: translates nav events → BLE frame sends |
 | `BleManagerService.cs` | BLE transport: scanning, connecting, reconnecting |
 | `MvAgustaBlePlugin.cs` | MV Agusta protocol: frame encoding, keepalive, session |
-| `ValhallaClient.cs` | Valhalla HTTP client: route, trace_route, locate |
+| `ValhallaClient.cs` | Valhalla HTTP client: route, trace_route, locate; Valhalla error messages, hard → soft avoid fallback |
 | `GpsService.cs` | GPS tracking via Shiny.Locations |
 | `DebugLogSink.cs` | In-memory Serilog sink for log export |
-| `VegaBridgeApp.Tests/NavigationServiceTests.cs` | Simulated rides: round trip, wrong turn, U-turn, parallel road, GPS drift, reroute waypoints (`dotnet test src/VegaBridgeApp.Tests`) |
+| `VegaBridgeApp.Tests/NavigationServiceTests.cs` | Simulated rides: round trip, wrong turn, U-turn, parallel road, GPS drift, reroute waypoints and avoid options (`dotnet test src/VegaBridgeApp.Tests`) |
+| `VegaBridgeApp.Tests/ValhallaClientTests.cs` | Valhalla error reporting, hard → soft avoid fallback |
 
 ---
 

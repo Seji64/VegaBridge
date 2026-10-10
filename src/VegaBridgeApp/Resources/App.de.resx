@@ -22,6 +22,11 @@
   <data name="WaypointMoved" xml:space="preserve"><value>Wegpunkt verschoben</value></data>
   <data name="MapClickMoveHint" xml:space="preserve"><value>Tippe auf die Karte, um die neue Position zu wählen</value></data>
   <data name="CalculateRoute" xml:space="preserve"><value>Route berechnen</value></data>
+  <data name="Avoid" xml:space="preserve"><value>Vermeiden</value></data>
+  <data name="AvoidHighways" xml:space="preserve"><value>Autobahnen</value></data>
+  <data name="AvoidTolls" xml:space="preserve"><value>Maut</value></data>
+  <data name="AvoidFerries" xml:space="preserve"><value>Fähren</value></data>
+  <data name="AvoidNotPossible" xml:space="preserve"><value>Ließ sich nicht ganz vermeiden: {0}</value></data>
   <data name="SaveRoute" xml:space="preserve"><value>Route speichern</value></data>
   <data name="StartNavigation" xml:space="preserve"><value>Navigation starten</value></data>
   <data name="GPSOff" xml:space="preserve"><value>GPS aus</value></data>

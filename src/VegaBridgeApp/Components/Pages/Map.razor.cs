@@ -50,6 +50,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private bool _isSaving;
     private RouteResponse? _currentRouteResponse;
     private string? _savedRouteId;
+    // Route options: road types to avoid. The last choice is remembered; a
+    // loaded saved route brings its own.
+    private const string AvoidPreferenceKey = "route_avoid";
+    private IReadOnlyCollection<RoadAvoidance> _avoidSelection = [];
     private bool _mapLoaded;
     // Remember the user's zoom level so recalculating a route or a reroute
     // does not reset the view. Only user zooms after the first route display
@@ -87,6 +91,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     protected override void OnInitialized()
     {
+        _avoidSelection = ToSelection((RoadAvoidance)Preferences.Get(AvoidPreferenceKey, 0));
+
         // Subscribe to GPS position updates
         Gps.ReadingReceived += OnGpsReading;
         Gps.TrackingChanged += OnGpsTrackingChanged;
@@ -148,6 +154,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                     {
                         await _map.SetCenter(new OpenLayers.Blazor.Coordinate(startCoord.Longitude, startCoord.Latitude));
                     }
+
+                    if (savedRoute.Avoid is { } avoid)
+                        _avoidSelection = ToSelection(avoid);
 
                     Snackbar.Add(string.Format(L["RouteLoaded"], savedRoute.Name), Severity.Info);
 
@@ -788,6 +797,21 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     // ── Route Calculation ──
 
+    private RoadAvoidance Avoid => _avoidSelection.Aggregate(RoadAvoidance.None, (all, a) => all | a);
+
+    private static IReadOnlyCollection<RoadAvoidance> ToSelection(RoadAvoidance avoid) =>
+        Enum.GetValues<RoadAvoidance>().Where(a => a != RoadAvoidance.None && avoid.HasFlag(a)).ToList();
+
+    private async Task OnAvoidSelectionChanged(IReadOnlyCollection<RoadAvoidance>? selection)
+    {
+        _avoidSelection = selection ?? [];
+        Preferences.Set(AvoidPreferenceKey, (int)Avoid);
+
+        // The shown route no longer matches the options.
+        if (_currentRouteResponse != null)
+            await CalculateRoute();
+    }
+
     private Task CalculateRoute() => CalculateRouteAsync(fromCurrentPosition: false);
 
     /// <param name="fromCurrentPosition">Start at the current GPS position
@@ -858,6 +882,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             {
                 Locations = locs,
                 Costing = "motorcycle",
+                CostingOptions = CostingOptions.Avoiding(Avoid),
                 DirectionsOptions = new DirectionsOptions { Units = "kilometers" }
             };
 
@@ -866,6 +891,16 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             if (result is { IsSuccess: true, Response: not null })
             {
                 _currentRouteResponse = result.Response;
+
+                // Avoiding is not always possible (island only reachable by
+                // ferry …) – then Valhalla only keeps it short.
+                RoadAvoidance notAvoided = Avoid & (result.Response.Trip?.Summary?.AvoidableRoads ?? RoadAvoidance.None);
+                if (notAvoided != RoadAvoidance.None)
+                {
+                    string roads = string.Join(", ", ToSelection(notAvoided).Select(a => L[$"Avoid{a}"].Value));
+                    Snackbar.Add(string.Format(L["AvoidNotPossible"], roads), Severity.Warning);
+                }
+
                 await ShowRouteOnMap(result.Response);
                 _ = CheckClosuresForRouteAsync(result.Response);
             }
@@ -942,6 +977,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 NavService.PrepareNavigationData(_currentRouteResponse!.Trip!.Legs);
 
             route.Name = routeName;
+            route.Avoid = Avoid;
             route.Polyline6 = combinedShape;
             route.DistanceKm = Math.Round(totalDistanceKm, 2);
             route.TimeMinutes = Math.Round(totalTimeMinutes, 2);
@@ -1039,7 +1075,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             await NavService.StartNavigation(
                 mergedShape, allManeuvers, totalKm, totalMin,
-                CreateLocation(_destinationLocation), viaLocations);
+                CreateLocation(_destinationLocation), viaLocations, Avoid);
             Snackbar.Add(L["NavigationStarted"], Severity.Success);
 
             // Nav-app behavior: zoom in on the current position and rotate

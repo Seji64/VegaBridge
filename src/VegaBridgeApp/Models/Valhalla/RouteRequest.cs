@@ -13,8 +13,9 @@ public class RouteRequest
     [JsonPropertyName("costing")]
     public string Costing { get; set; } = "auto";
 
+    /// <summary>Keyed by costing name, see <c>CostingOptions.Avoiding</c>.</summary>
     [JsonPropertyName("costing_options")]
-    public Dictionary<string, object>? CostingOptions { get; set; }
+    public Dictionary<string, CostingOptions>? CostingOptions { get; set; }
 
     [JsonPropertyName("directions_options")]
     public DirectionsOptions? DirectionsOptions { get; set; }

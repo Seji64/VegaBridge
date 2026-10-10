@@ -132,6 +132,10 @@ public static class MauiProgram
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true,
             });
+            // Per-attempt timeout inside the retry, so a hung request is
+            // retried. HttpClient.Timeout covers all attempts together – on its
+            // own it cancels the hung first attempt with nothing left to retry.
+            builder.AddTimeout(TimeSpan.FromSeconds(ValhallaOptions.AttemptTimeoutSeconds));
         });
 
         builder.Services.AddSingleton<IValhallaClient, ValhallaClient>();

@@ -22,6 +22,11 @@
   <data name="WaypointMoved" xml:space="preserve"><value>Waypoint moved</value></data>
   <data name="MapClickMoveHint" xml:space="preserve"><value>Tap the map to choose the new position</value></data>
   <data name="CalculateRoute" xml:space="preserve"><value>Calculate Route</value></data>
+  <data name="Avoid" xml:space="preserve"><value>Avoid</value></data>
+  <data name="AvoidHighways" xml:space="preserve"><value>Highways</value></data>
+  <data name="AvoidTolls" xml:space="preserve"><value>Tolls</value></data>
+  <data name="AvoidFerries" xml:space="preserve"><value>Ferries</value></data>
+  <data name="AvoidNotPossible" xml:space="preserve"><value>Could not be avoided completely: {0}</value></data>
   <data name="SaveRoute" xml:space="preserve"><value>Save Route</value></data>
   <data name="StartNavigation" xml:space="preserve"><value>Start Navigation</value></data>
   <data name="GPSOff" xml:space="preserve"><value>GPS off</value></data>

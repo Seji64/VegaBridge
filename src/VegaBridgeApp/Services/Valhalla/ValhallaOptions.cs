@@ -13,9 +13,16 @@ public static class ValhallaOptions
     public const string DefaultBaseUrl = "https://valhalla1.openstreetmap.de";
 
     /// <summary>
-    /// Request timeout in seconds.
+    /// Request timeout in seconds, all retry attempts together.
     /// </summary>
     public const int TimeoutSeconds = 30;
+
+    /// <summary>
+    /// Timeout of a single attempt in seconds (the public server needs ≈ 2 s
+    /// even for 2000 km avoiding highways). Lets a hung attempt be retried
+    /// within <see cref="TimeoutSeconds"/>.
+    /// </summary>
+    public const int AttemptTimeoutSeconds = 10;
 
     /// <summary>
     /// Maximum number of retry attempts on transient failures.

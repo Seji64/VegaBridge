@@ -21,4 +21,20 @@ public class Summary
 
     [JsonPropertyName("max_lon")]
     public double? MaxLon { get; set; }
+
+    [JsonPropertyName("has_highway")]
+    public bool HasHighway { get; set; }
+
+    [JsonPropertyName("has_toll")]
+    public bool HasToll { get; set; }
+
+    [JsonPropertyName("has_ferry")]
+    public bool HasFerry { get; set; }
+
+    /// <summary>The avoidable road types this route uses.</summary>
+    [JsonIgnore]
+    public RoadAvoidance AvoidableRoads =>
+        (HasHighway ? RoadAvoidance.Highways : RoadAvoidance.None)
+        | (HasToll ? RoadAvoidance.Tolls : RoadAvoidance.None)
+        | (HasFerry ? RoadAvoidance.Ferries : RoadAvoidance.None);
 }

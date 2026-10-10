@@ -241,6 +241,24 @@
 
                     </div>
 
+                    <!-- Route options: road types to avoid -->
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@L["Avoid"]</MudText>
+                        <MudChipSet T="RoadAvoidance"
+                                    SelectionMode="SelectionMode.MultiSelection"
+                                    SelectedValues="@_avoidSelection"
+                                    SelectedValuesChanged="@OnAvoidSelectionChanged"
+                                    CheckMark="true"
+                                    Size="Size.Small"
+                                    Variant="Variant.Outlined"
+                                    SelectedColor="Color.Primary"
+                                    Disabled="@(_isLoading || _closureCheckRunning)">
+                            <MudChip Value="RoadAvoidance.Highways" Text="@L["AvoidHighways"]"/>
+                            <MudChip Value="RoadAvoidance.Tolls" Text="@L["AvoidTolls"]"/>
+                            <MudChip Value="RoadAvoidance.Ferries" Text="@L["AvoidFerries"]"/>
+                        </MudChipSet>
+                    </MudStack>
+
                     <MudLoadingButton FullWidth="true"
                                       Class="mt-2"
                                       Variant="Variant.Filled"

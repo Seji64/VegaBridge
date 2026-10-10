@@ -83,6 +83,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     // the route through the remaining waypoints instead of dropping them.
     private List<Models.Valhalla.Location> _viaLocations = [];
 
+    // Road types the rider avoids – a reroute must not lead onto them either.
+    private RoadAvoidance _avoid;
+
     // ── Session state ────────────────────────────────────────────────────
     private double _distanceToNextTurnM;
     private double _remainingDistanceKm;
@@ -236,13 +239,15 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// <param name="destination">Final destination location.</param>
     /// <param name="viaLocations">Intermediate waypoints (without start/destination).
     /// Kept so a reroute keeps driving through the remaining waypoints.</param>
+    /// <param name="avoid">Road types the route avoids; reroutes avoid them too.</param>
     public async Task StartNavigation(
         string mergedShape,
         List<Maneuver> maneuvers,
         double totalDistanceKm,
         double totalTimeMin,
         Models.Valhalla.Location destination,
-        IReadOnlyList<Models.Valhalla.Location>? viaLocations = null)
+        IReadOnlyList<Models.Valhalla.Location>? viaLocations = null,
+        RoadAvoidance avoid = RoadAvoidance.None)
     {
         bool wasNavigating;
         lock (_lock)
@@ -275,6 +280,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
             _destination = destination;
             _viaLocations = viaLocations is { Count: > 0 } ? [.. viaLocations] : [];
+            _avoid = avoid;
             _isNavigating = true;
             _topologyOffRouteCounter = 0;
             _routeWayIds = null;
@@ -343,6 +349,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _maneuvers = [];
             _destination = null;
             _viaLocations = [];
+            _avoid = RoadAvoidance.None;
             _topologyOffRouteCounter = 0;
             _routeWayIds = null;
             _currentHeadingDeg = -1;
@@ -439,6 +446,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             {
                 Locations = locs,
                 Costing = "motorcycle",
+                CostingOptions = CostingOptions.Avoiding(_avoid),
                 DirectionsOptions = new DirectionsOptions { Units = "kilometers" }
             };
 
