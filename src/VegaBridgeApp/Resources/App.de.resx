@@ -77,6 +77,10 @@
 
   <!-- Common -->
   <data name="Cancel" xml:space="preserve"><value>Abbrechen</value></data>
+  <data name="StartModeTitle" xml:space="preserve"><value>Navigation starten</value></data>
+  <data name="StartModeMessage" xml:space="preserve"><value>Du bist bereits auf der Route ({0} Wegpunkt(e) hinter dir). Intelligent starten macht hier weiter und überspringt sie – Von vorne fährt die komplette Route.</value></data>
+  <data name="StartModeSmart" xml:space="preserve"><value>Intelligent starten</value></data>
+  <data name="StartModeFromStart" xml:space="preserve"><value>Von vorne</value></data>
   <data name="OK" xml:space="preserve"><value>OK</value></data>
   <data name="Delete" xml:space="preserve"><value>Löschen</value></data>
   <data name="Close" xml:space="preserve"><value>Schließen</value></data>

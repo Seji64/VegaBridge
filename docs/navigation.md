@@ -51,11 +51,15 @@ The system works with the screen OFF — the UI is only needed for optional glan
 
 ```
 User taps "Start Navigation" on Map
-  → Map.razor calls ValhallaClient.GetRouteAsync()
+  → Rider somewhere along the route (not at its start)?
+      → dialog: "Smart start" (skip waypoints already passed)
+                or "From the beginning" (planned start = first waypoint)
+  → Map.razor calls ValhallaClient.GetRouteAsync() (from the current position)
   → Route response (polyline, maneuvers, summary)
   → NavigationService.StartNavigation(shape, maneuvers, ...)
   → Polyline densification (max 20m segments)
-  → Way-ID index built via Valhalla /locate API
+  → Way-ID index built via ONE Valhalla /locate call
+    (every ~1 km + middle of every maneuver)
   → GPS tracking started
   → INavigationSink.OnStartAsync() fired to all sinks
 ```
@@ -67,21 +71,25 @@ GpsService.ReadingReceived → OnGpsReading()
   │
   ├─ GPS Accuracy Guard: accuracy > 40m → SKIP (hold state)
   │
-  ├─ EMA smoothing (α=0.7)
+  ├─ EMA smoothing (α=0.7, reset after a GPS gap > 3s)
   │
   ├─ Heading tracking (GPS course or buffer-derived)
   │
-  ├─ Snap to route (FindNearestRouteIndex)
+  ├─ Snap to route (SnapToRoute: window around the progress,
+  │   100m back / 500m ahead – a later pass over the same road,
+  │   e.g. a round trip's end at its start, is never matched early)
   │
   ├─ Off-Route Detection (Gated Topology)
-  │   ├─ FAST PATH: XTE ≤ 20m (40m in maneuvers) → ON_ROUTE
-  │   │   └─ Wrong-Way check: heading vs route bearing > 135° → SUSPECT
+  │   ├─ FAST PATH: XTE ≤ 20m (40m within 30m of a turn) → ON_ROUTE
+  │   │   └─ Wrong-Way check: heading vs local route bearing > 135° (3 ticks)
   │   │
-  │   └─ SLOW PATH: XTE > 20m for 1+ ticks → SUSPECT
-  │       └─ VerifyTopologyAsync (throttled, 1/2s)
+  │   └─ SUSPECT
+  │       ├─ Wrong way OR XTE > 50m → off-route candidate (every tick, no API call)
+  │       └─ else VerifyTopologyAsync (throttled 1/2s, raw GPS fix)
   │           └─ Valhalla /locate → way_id comparison
-  │               ├─ Match → ON_ROUTE (10-tick cooldown)
-  │               └─ No match × 3 → OFF_ROUTE → RENAVI
+  │               ├─ Match → ON_ROUTE (4s locate cooldown)
+  │               └─ No match → off-route candidate
+  │       3 candidates → OFF_ROUTE → RENAVI + reroute
   │
   ├─ Maneuver tracking (advance index when snapped passes begin)
   │
@@ -105,11 +113,15 @@ NavigationService fires OnStatusAsync()
 ### 4. Off-Route → Reroute
 
 ```
-Off-Route detected (3 topology confirmations)
+Off-Route detected (3 candidates)
   → INavigationSink.OnOffRouteAsync()
-  → BleNavigationCoordinator sends RENAVI frame
-  → NavigationService.PerformRerouteAsync()
-  → Valhalla /route API (with remaining waypoints)
+      → BleNavigationCoordinator sends RENAVI frame
+      → Map only shows a snackbar
+  → NavigationService.PerformRerouteAsync() – started by the service itself
+    (works without the map page / screen off), from the latest GPS fix
+    and heading; retried every 30s while still off route
+  → Valhalla /route API with the waypoints still ahead (passed = progress
+    beyond the waypoint's leg end), all as "break"
   → Route replaced in-place
   → INavigationSink.OnRouteUpdatedAsync()
 ```
@@ -129,19 +141,25 @@ GPS-to-polyline distance is unreliable for off-route detection:
 
 **Layer 1: Fast Path (every GPS tick, no API cost)**
 - Cross-Track Error (XTE) check against threshold
-- Threshold: 20m straight, 40m during maneuvers
-- Wrong-way detection: heading vs route bearing > 135°
+- Threshold: 20m, 40m within 30m (along the route) of a maneuver
+- Wrong-way detection: heading vs local route bearing > 135°
 
 If XTE ≤ threshold AND heading OK → ON_ROUTE. No API call.
 
-**Layer 2: Slow Path (only when SUSPECT, throttled)**
-- Valhalla `/locate` API → returns OSM Way ID at GPS position
-- Compare against route's Way IDs (pre-built on load)
-- Sliding window: only check next 10 Way IDs ahead
+Clear evidence counts as an off-route candidate on every tick, without an
+API call: wrong way, or XTE > 50m. (A U-turn on the route road, or a wrong
+turn onto the route's own street, would match the route's Way ID.)
+
+**Layer 2: Slow Path (only for 20–50m, throttled)**
+- Valhalla `/locate` API with the raw GPS fix → OSM Way ID at the position
+- Compare against the route's Way IDs (built once per route; no verdict
+  while the index is still being built)
 - Throttled: max 1 API call per 2 seconds
 
-If Way ID matches route → ON_ROUTE (10-tick cooldown).
-If Way ID doesn't match × 3 → OFF_ROUTE → RENAVI.
+If Way ID matches route → ON_ROUTE (no locate for 4s).
+3 off-route candidates → OFF_ROUTE → RENAVI + reroute.
+
+Throttles and cooldowns run on the GPS fix timestamps (≈ wall clock at 1 Hz).
 
 ### Edge Cases Handled
 
@@ -149,16 +167,20 @@ If Way ID doesn't match × 3 → OFF_ROUTE → RENAVI.
 |---|---|
 | Hairpin curve (XTE 35m) | Fast path SUSPECT → locate confirms way_id → ON_ROUTE |
 | GPS glitch (2 ticks off) | Hysteresis doesn't reach threshold → resets |
-| Wrong way / U-turn | Heading divergence > 135° → SUSPECT even at XTE 0m |
-| Parallel road (20m, same heading) | Locate returns different way_id → OFF_ROUTE |
+| Wrong way / U-turn | Heading divergence > 135° → off-route even at XTE 0m |
+| Wrong turn in the city | Wrong way at the corner / XTE > 50m → reroute after ~5s (36 km/h) |
+| Parallel road (≥ 20m, same heading) | Locate returns different way_id → reroute after ~6s (120 km/h) |
+| Parallel road < 20m | Not detected – not separable by GPS |
+| GPS drift on the route road (city) | Locate confirms way_id → ON_ROUTE |
 | Tunnel / bad GPS (accuracy > 40m) | Tick ignored entirely, state frozen |
-| Figure-8 / overlapping route | Sliding window prevents false back-on-route |
+| Round trip / overlapping route | Progress window: later pass is not matched early |
 
 ### Cost Optimization
 
 Without gating: 1 API call per second = 3600/hour.
 With gating: ~95% of ticks pass fast path → ~180 API calls/hour max.
-With cooldown: after way_id match, 10-tick pause → even fewer calls.
+With cooldown: after way_id match, 4s pause → even fewer calls.
+Wrong way and XTE > 50m need no API call at all.
 
 ### Telemetry
 
@@ -254,6 +276,7 @@ Valhalla maneuvers describe the action at their BEGIN index (the turn happens AT
 | `ValhallaClient.cs` | Valhalla HTTP client: route, trace_route, locate |
 | `GpsService.cs` | GPS tracking via Shiny.Locations |
 | `DebugLogSink.cs` | In-memory Serilog sink for log export |
+| `VegaBridgeApp.Tests/NavigationServiceTests.cs` | Simulated rides: round trip, wrong turn, U-turn, parallel road, GPS drift, reroute waypoints (`dotnet test src/VegaBridgeApp.Tests`) |
 
 ---
 
@@ -262,9 +285,14 @@ Valhalla maneuvers describe the action at their BEGIN index (the turn happens AT
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `SuspectXteM` | 20m | XTE threshold for SUSPECT (straight segments) |
-| `SuspectManeuverXteM` | 40m | XTE threshold during maneuvers |
-| `OffRouteConfirmCount` | 3 | Topology mismatches before RENAVI |
+| `SuspectManeuverXteM` | 40m | XTE threshold near a maneuver |
+| `TurnZoneM` | 30m | "Near a maneuver" (along the route) |
+| `ClearlyOffRouteXteM` | 50m | Off-route candidate without /locate |
+| `OffRouteConfirmCount` | 3 | Off-route candidates before RENAVI |
 | `LocateThrottleSec` | 2s | Min interval between /locate API calls |
+| `LocateCooldownSec` | 4s | No /locate after a way_id match |
+| `RerouteMinIntervalSec` | 30s | Min interval between automatic reroutes |
+| `SnapBackToleranceM` / `SnapForwardWindowM` | 100m / 500m | Snap window around the progress |
 | `WrongWayHeadingThresholdDeg` | 135° | Heading divergence for wrong-way detection |
 | `WrongWayMinSpeedMs` | 2.78 m/s | Min speed for wrong-way check (10 km/h) |
 | `GpsSmoothingAlpha` | 0.7 | EMA weight for newest reading |

@@ -38,6 +38,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private List<WaypointViewModel> _waypoints = [];
     private readonly List<(WaypointViewModel Waypoint, Marker Marker)> _waypointPins = [];
     private readonly HashSet<Guid> _skippedWaypointIds = [];
+    // "Start from the beginning" while away from the planned start: the
+    // planned start is ridden to first, as an extra leading waypoint.
+    // Navigation only – cleared on exit.
+    private GeoResult? _navStartVia;
     private WaypointViewModel? _pendingMoveWaypoint;
     private DateTime _lastMarkerClickUtc = DateTime.MinValue;
     private bool _actionsDialogOpen;
@@ -60,7 +64,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private int _markerUpdating;
     private DateTime _lastUiRefresh = DateTime.MinValue;
     private DateTime _lastBreadcrumbUpdate = DateTime.MinValue;
-    private DateTime _lastRerouteTime = DateTime.MinValue;
     private DateTime _lastMarkerUpdate = DateTime.MinValue;
     private double _lastMarkerLon;
     private double _lastMarkerLat;
@@ -489,17 +492,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     public async Task OnOffRouteAsync(double latitude, double longitude, double distanceMeters)
     {
-        if (_disposed || _destinationLocation == null || _isLoading) return;
-        if ((DateTime.UtcNow - _lastRerouteTime).TotalSeconds < 30) return;
-        _lastRerouteTime = DateTime.UtcNow;
-
-        // Sink callbacks arrive on the GPS thread – all UI work (snackbar,
-        // reroute dialog flow) must run on the Blazor dispatcher.
-        await InvokeAsync(async () =>
-        {
-            Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning);
-            await RerouteAsync(latitude, longitude);
-        });
+        if (_disposed) return;
+        // The NavigationService reroutes on its own (also without this page);
+        // the UI only informs. Sink callbacks arrive on the GPS thread.
+        await InvokeAsync(() => Snackbar.Add(string.Format(L["OffRouteDetected"], distanceMeters), Severity.Warning));
     }
 
     public async Task OnRouteUpdatedAsync(RouteResponse response)
@@ -510,7 +506,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         // MarkersList and calls StateHasChanged, so it must run on the
         // Blazor dispatcher. Without this the reroute map update throws
         // and the route disappears from the map.
-        await InvokeAsync(async () => await ShowRouteOnMap(response));
+        await InvokeAsync(async () =>
+        {
+            await ShowRouteOnMap(response);
+            Snackbar.Add(L["RouteRecalculated"], Severity.Success);
+        });
 
         // Road closure check for the (re)routed path – fire and forget, the
         // service reports via snackbar/pins on the dispatcher itself.
@@ -788,7 +788,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     // ── Route Calculation ──
 
-    private async Task CalculateRoute()
+    private Task CalculateRoute() => CalculateRouteAsync(fromCurrentPosition: false);
+
+    /// <param name="fromCurrentPosition">Start at the current GPS position
+    /// instead of the planned start (navigation). Also implied while
+    /// navigating.</param>
+    private async Task CalculateRouteAsync(bool fromCurrentPosition)
     {
         try
         {
@@ -810,9 +815,11 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             _isLoading = true;
             StateHasChanged();
 
-            // Start position: take fresh GPS data when "current position" is selected
+            // Start position: take fresh GPS data when "current position" is
+            // selected or the route is for navigation.
+            bool fromHere = fromCurrentPosition || NavService.IsNavigating || _startLocation?.Type == "current";
             double startLat = 0, startLon = 0;
-            if (_startLocation?.Type == "current")
+            if (fromHere)
             {
                 await Gps.GetLastReadingOrCurrentAsync();
                 if (Gps.LastReading != null)
@@ -834,11 +841,14 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             List<Location> locs = [new() { Lat = startLat, Lon = startLon, Type = "break" }];
 
+            if (fromHere && _navStartVia != null)
+                locs.Add(CreateLocation(_navStartVia, "break"));
+
             if (_waypoints is { Count: > 0 })
             {
                 locs.AddRange(
                     from waypoint in _waypoints
-                    where waypoint.Location != null
+                    where waypoint.Location != null && !_skippedWaypointIds.Contains(waypoint.Id)
                     select CreateLocation(waypoint.Location, "break"));
             }
 
@@ -848,7 +858,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             {
                 Locations = locs,
                 Costing = "motorcycle",
-                DirectionsOptions = new DirectionsOptions { Units = "kilometers", Language = "de" }
+                DirectionsOptions = new DirectionsOptions { Units = "kilometers" }
             };
 
             Result result = await ValhallaClient.GetRouteAsync(request);
@@ -968,14 +978,46 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             }
         }
 
-        // Always start from current position to avoid "planning from far away" bug
-        _startLocation = new GeoResult(L["CurrentPos"], Gps.LastReading!.Position.Latitude, Gps.LastReading!.Position.Longitude, "current");
-        await CalculateRoute();
+        double lat = Gps.LastReading!.Position.Latitude;
+        double lon = Gps.LastReading!.Position.Longitude;
+        _skippedWaypointIds.Clear();
+        _navStartVia = null;
+
+        // Fixed planned start (saved route / picked address) the rider is not
+        // at: the planned route from there tells where on it the rider is.
+        // Otherwise the route is calculated from here right away.
+        bool awayFromPlannedStart = _startLocation is { Type: not "current" } plannedStart
+            && GeoMath.DistanceMeters(lat, lon, plannedStart.Latitude, plannedStart.Longitude) > AtPlannedStartM;
+        await CalculateRouteAsync(fromCurrentPosition: !awayFromPlannedStart);
 
         if (_currentRouteResponse?.Trip?.Legs == null || _currentRouteResponse.Trip.Legs.Count == 0)
         {
             Snackbar.Add(L["NoRoute"], Severity.Error);
             return;
+        }
+
+        StartMode mode = await AskStartModeAsync(lat, lon, awayFromPlannedStart);
+        if (mode == StartMode.Cancelled)
+        {
+            _skippedWaypointIds.Clear();
+            return;
+        }
+        if (mode == StartMode.FromPlannedStart && awayFromPlannedStart)
+            _navStartVia = _startLocation;
+
+        // Navigation always starts here. Recalculate unless the route already
+        // is the route from here through all waypoints.
+        if (awayFromPlannedStart || mode == StartMode.Smart)
+        {
+            await CalculateRouteAsync(fromCurrentPosition: true);
+            if (_currentRouteResponse?.Trip?.Legs == null || _currentRouteResponse.Trip.Legs.Count == 0)
+            {
+                _skippedWaypointIds.Clear();
+                _navStartVia = null;
+                await RefreshWaypointMarkersAsync(force: true);
+                Snackbar.Add(L["NoRoute"], Severity.Error);
+                return;
+            }
         }
 
         try
@@ -986,10 +1028,14 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             // Pass the intermediate waypoints to the navigation service so a
             // reroute (off-route or skip-waypoint) keeps driving through the
             // remaining waypoints instead of dropping them all.
+            // Same order as CalculateRouteAsync: planned start (if ridden
+            // to first), then the waypoints not skipped.
             List<Location> viaLocations = _waypoints
-                .Where(w => w.Location != null)
+                .Where(w => w.Location != null && !_skippedWaypointIds.Contains(w.Id))
                 .Select(w => CreateLocation(w.Location!, "break"))
                 .ToList();
+            if (_navStartVia != null)
+                viaLocations.Insert(0, CreateLocation(_navStartVia, "break"));
 
             await NavService.StartNavigation(
                 mergedShape, allManeuvers, totalKm, totalMin,
@@ -1005,6 +1051,133 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             Snackbar.Add(string.Format(L["NavigationError"], ex.Message), Severity.Error);
         }
     }
+
+    // ── Start mode: smart start vs. from the beginning ──────────────────
+
+    private enum StartMode { FromHere, Smart, FromPlannedStart, Cancelled }
+
+    private const double AtPlannedStartM = 300;      // closer = normal start
+    private const double NearPlannedRouteM = 100;    // "on the planned route"
+    private const double RouteCrossingRadiusM = 50;  // route passes here again
+    private const double FinalApproachM = 500;       // round trip: end is here too
+
+    /// <summary>
+    /// When the rider is somewhere along the route (not at its start), asks
+    /// whether to start smart (skip the waypoints already passed) or from the
+    /// beginning. Expects <see cref="_currentRouteResponse"/> to be the
+    /// planned route (<paramref name="awayFromPlannedStart"/>) or the route
+    /// from here through all waypoints. Marks the passed waypoints as skipped
+    /// for a smart start.
+    /// </summary>
+    private async Task<StartMode> AskStartModeAsync(double lat, double lon, bool awayFromPlannedStart)
+    {
+        if (_currentRouteResponse?.Trip?.Legs is not { Count: > 0 } legs) return StartMode.FromHere;
+        List<Coordinate> coords = legs
+            .Where(l => !string.IsNullOrEmpty(l.Shape))
+            .SelectMany(l => PolylineEncoder.DecodePolyline6(l.Shape!))
+            .ToList();
+
+        // Planned route: where on it is the rider? Route from here: does it
+        // come back here later – i.e. first back to waypoints already passed
+        // (restart mid-ride)? A round trip's final approach doesn't count.
+        int hereIndex = awayFromPlannedStart
+            ? FindLastRoutePass(coords, lat, lon, NearPlannedRouteM, skipInitialPass: false)
+            : FindLastRoutePass(coords, lat, lon, RouteCrossingRadiusM, skipInitialPass: true);
+        if (hereIndex < 0) return StartMode.FromHere;
+
+        List<WaypointViewModel> passed = _waypoints
+            .Where(w => w.Location != null && !_skippedWaypointIds.Contains(w.Id))
+            .Where(w => FindNearestRoutePointIndex(w.Location!.Latitude, w.Location.Longitude, coords) < hereIndex)
+            .ToList();
+        if (!awayFromPlannedStart && passed.Count == 0) return StartMode.FromHere;
+
+        bool? smart = await DialogService.ShowMessageBoxAsync(
+            L["StartModeTitle"],
+            string.Format(L["StartModeMessage"], passed.Count),
+            yesText: L["StartModeSmart"],
+            noText: L["StartModeFromStart"],
+            cancelText: L["Cancel"]);
+        switch (smart)
+        {
+            case null:
+                return StartMode.Cancelled;
+            case true:
+                foreach (WaypointViewModel w in passed)
+                    _skippedWaypointIds.Add(w.Id);
+                return StartMode.Smart;
+            default:
+                return StartMode.FromPlannedStart;
+        }
+    }
+
+    /// <summary>
+    /// Index of the route point where the route passes the position for the
+    /// last time (within <paramref name="radiusM"/>), ignoring the final
+    /// approach to the destination and, with <paramref name="skipInitialPass"/>,
+    /// the beginning of a route that starts here. -1 if there is none.
+    /// </summary>
+    private static int FindLastRoutePass(
+        List<Coordinate> coords, double lat, double lon, double radiusM, bool skipInitialPass)
+    {
+        if (coords.Count < 2) return -1;
+
+        // Route distance from each point to the end.
+        double[] toEnd = new double[coords.Count];
+        for (int i = coords.Count - 2; i >= 0; i--)
+        {
+            toEnd[i] = toEnd[i + 1] + GeoMath.DistanceMeters(
+                coords[i].Latitude, coords[i].Longitude,
+                coords[i + 1].Latitude, coords[i + 1].Longitude);
+        }
+
+        int first = 0;
+        if (skipInitialPass)
+        {
+            while (first < coords.Count - 1
+                   && SegmentDistanceM(coords[first], coords[first + 1], lat, lon, out _) <= radiusM)
+                first++;
+        }
+
+        // Latest segment of the last pass, then back along that pass to its
+        // closest point (the latest segment can be up to radiusM ahead).
+        int seg = coords.Count - 2;
+        while (seg >= first
+               && (toEnd[seg + 1] <= FinalApproachM
+                   || SegmentDistanceM(coords[seg], coords[seg + 1], lat, lon, out _) > radiusM))
+            seg--;
+        if (seg < first) return -1;
+
+        int bestIndex = -1;
+        double bestDist = double.MaxValue;
+        for (; seg >= first; seg--)
+        {
+            double d = SegmentDistanceM(coords[seg], coords[seg + 1], lat, lon, out double t);
+            if (d > radiusM) break; // left the pass
+            if (d >= bestDist) continue;
+            bestDist = d;
+            bestIndex = t >= 0.5 ? seg + 1 : seg;
+        }
+        return bestIndex;
+    }
+
+    /// <summary>Distance (m) from the position to segment a→b; t = projection (0..1).</summary>
+    private static double SegmentDistanceM(Coordinate a, Coordinate b, double lat, double lon, out double t)
+    {
+        // Local equirectangular projection around the position – exact
+        // enough for the few hundred meters this is used for.
+        double kx = Math.Cos(GeoMath.ToRad(lat)) * 111_320.0;
+        const double ky = 110_540.0;
+        double ax = (a.Longitude - lon) * kx, ay = (a.Latitude - lat) * ky;
+        double bx = (b.Longitude - lon) * kx, by = (b.Latitude - lat) * ky;
+        double dx = bx - ax, dy = by - ay;
+        double len2 = dx * dx + dy * dy;
+        t = len2 > 0 ? Math.Clamp(-(ax * dx + ay * dy) / len2, 0, 1) : 0;
+        double px = ax + t * dx, py = ay + t * dy;
+        return Math.Sqrt(px * px + py * py);
+    }
+
+    private static bool IsSameLocation(GeoResult location, double lat, double lon) =>
+        Math.Abs(location.Latitude - lat) < 1e-5 && Math.Abs(location.Longitude - lon) < 1e-5;
 
     // ── Navigation view: zoom in + rotate towards travel direction ──────
 
@@ -1074,6 +1247,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         // Skipped waypoints were only skipped for the running navigation –
         // the planned route (list + pins) stays intact after stopping.
         _skippedWaypointIds.Clear();
+        _navStartVia = null;
         await ClearGpsMarkersAsync();
         if (_map != null)
         {
@@ -1118,31 +1292,35 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         {
             // Reroute calculation lives in the NavigationService (state + sink notify).
             // Map update happens via OnRouteUpdatedAsync.
-            (bool rerouted, int skippedViaIndex) = await NavService.PerformRerouteAsync(
+            (bool rerouted, Location? skippedVia) = await NavService.PerformRerouteAsync(
                 currentLat, currentLon, skipNextWaypoint);
 
-            if (rerouted && skippedViaIndex >= 0)
+            if (rerouted && skippedVia != null)
             {
-                // skippedViaIndex refers to the waypoints WITH a location
-                // minus those already skipped (same filtered list the
-                // service works with). Map it back to the raw _waypoints
-                // list, which may contain empty entries.
-                List<WaypointViewModel> skippable = _waypoints
-                    .Where(w => w.Location != null && !_skippedWaypointIds.Contains(w.Id))
-                    .ToList();
-                if (skippedViaIndex < skippable.Count)
+                if (_navStartVia != null && IsSameLocation(_navStartVia, skippedVia.Lat, skippedVia.Lon))
                 {
-                    // Mark as skipped instead of removing: the waypoint must
-                    // still be there when navigation ends (planning list +
-                    // pins). Only the running navigation drops it.
-                    _skippedWaypointIds.Add(skippable[skippedViaIndex].Id);
-                    await RefreshWaypointMarkersAsync(force: true);
+                    // Skipped riding to the planned start first.
+                    _navStartVia = null;
+                }
+                else
+                {
+                    WaypointViewModel? skipped = _waypoints.FirstOrDefault(w =>
+                        w.Location != null && !_skippedWaypointIds.Contains(w.Id)
+                        && IsSameLocation(w.Location, skippedVia.Lat, skippedVia.Lon));
+                    if (skipped != null)
+                    {
+                        // Mark as skipped instead of removing: the waypoint must
+                        // still be there when navigation ends (planning list +
+                        // pins). Only the running navigation drops it.
+                        _skippedWaypointIds.Add(skipped.Id);
+                        await RefreshWaypointMarkersAsync(force: true);
+                    }
                 }
             }
 
-            Snackbar.Add(
-                rerouted ? L["RouteRecalculated"] : L["RerouteNoRoute"],
-                rerouted ? Severity.Success : Severity.Error);
+            // Success is announced by OnRouteUpdatedAsync (also for automatic reroutes).
+            if (!rerouted)
+                Snackbar.Add(L["RerouteNoRoute"], Severity.Error);
         }
         catch (Exception ex)
         {
@@ -1280,7 +1458,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
             List<Location> locations = response.Trip.Locations;
 
-            // Trip order matches CalculateRoute: non-null waypoints only.
+            // Waypoints of this route: non-null and not skipped.
             List<WaypointViewModel> routeWaypoints = _waypoints
                 .Where(w => w.Location != null && !_skippedWaypointIds.Contains(w.Id))
                 .ToList();
@@ -1303,9 +1481,14 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                 map.MarkersList.Add(marker);
 
                 // Middle locations are waypoints – keep them tappable (move/delete).
-                if (i > 0 && i < locations.Count - 1 && i - 1 < routeWaypoints.Count)
+                // Matched by position, not index: a reroute drops passed
+                // waypoints and navigation can lead with the planned start.
+                if (i > 0 && i < locations.Count - 1)
                 {
-                    _waypointPins.Add((routeWaypoints[i - 1], marker));
+                    WaypointViewModel? waypoint = routeWaypoints.FirstOrDefault(w =>
+                        IsSameLocation(w.Location!, loc.Lat, loc.Lon));
+                    if (waypoint != null)
+                        _waypointPins.Add((waypoint, marker));
                 }
             }
         }
@@ -1571,7 +1754,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         // Clear the map reference – the JS object may no longer exist
         _map = null;
 
-        if (Gps.IsTracking)
+        // Navigation owns the GPS while it runs – leaving the page (e.g. to
+        // settings) must not freeze it.
+        if (Gps.IsTracking && !NavService.IsNavigating)
         {
             await Gps.StopTrackingAsync();
         }

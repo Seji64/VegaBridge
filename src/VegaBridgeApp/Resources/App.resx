@@ -77,6 +77,10 @@
 
   <!-- Common -->
   <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="StartModeTitle" xml:space="preserve"><value>Start navigation</value></data>
+  <data name="StartModeMessage" xml:space="preserve"><value>You are already on the route ({0} waypoint(s) behind you). Smart start continues from here and skips them – From the beginning rides the complete route.</value></data>
+  <data name="StartModeSmart" xml:space="preserve"><value>Smart start</value></data>
+  <data name="StartModeFromStart" xml:space="preserve"><value>From the beginning</value></data>
   <data name="OK" xml:space="preserve"><value>OK</value></data>
   <data name="Delete" xml:space="preserve"><value>Delete</value></data>
   <data name="Close" xml:space="preserve"><value>Close</value></data>

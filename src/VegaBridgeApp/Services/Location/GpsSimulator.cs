@@ -124,15 +124,17 @@ public sealed class GpsSimulator : INavigationSink
 
                 if (!ReferenceEquals(coords, route))
                 {
-                    // Start or reroute: continue from the route point nearest
-                    // to where the simulated rider is now.
-                    Coordinate here = route == null ? coords[0] : PositionAt(route, cum, seg, along);
+                    // Start: begin at the route start (on a round trip the
+                    // route end is just as close and would finish the ride
+                    // instantly). Reroute: continue from the route point
+                    // nearest to where the simulated rider is now.
+                    Coordinate? here = route == null ? null : PositionAt(route, cum, seg, along);
                     route = coords;
                     cum = Cumulative(coords);
                     int nearest = 0;
-                    for (int i = 1; i < coords.Count; i++)
+                    for (int i = 1; here != null && i < coords.Count; i++)
                     {
-                        if (Distance(coords[i], here) < Distance(coords[nearest], here))
+                        if (Distance(coords[i], here.Value) < Distance(coords[nearest], here.Value))
                             nearest = i;
                     }
                     seg = Math.Min(nearest, coords.Count - 2);
