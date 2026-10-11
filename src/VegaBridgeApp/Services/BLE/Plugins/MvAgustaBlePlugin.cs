@@ -28,6 +28,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     // the following roundabout-EXIT maneuver keeps showing the same icon.
     private string? _lastRoundaboutIcon;
 
+    private static readonly TimeSpan RxRepeatLogInterval = TimeSpan.FromSeconds(10);
+    private readonly Dictionary<string, DateTime> _rxLoggedAt = [];
+
     // MV Agusta devices typically have "MV" or "BRUTALE" in their name.
     public bool IsCompatible(BleDeviceInfo device) =>
         device.Name.Contains("MV", StringComparison.OrdinalIgnoreCase) ||
@@ -173,6 +176,21 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
 
     public void OnDataReceived(byte[] data)
     {
+        // While riding the bike streams ~7 GUI1 frames/s, mostly the battery
+        // voltage flickering between two values (live log 09-30: 9386 frames
+        // in 22 min). With three log lines per frame the 60k-line ring buffer
+        // held only ~35 min. Each distinct frame is now logged at most every
+        // 10 s; link liveness is the rx counter in the NAV ACTION lines.
+        // Notifications arrive on the CoreBluetooth (main) queue, so the
+        // dictionary needs no lock.
+        // shortcut: never pruned – a ride yields a few hundred distinct
+        // frames at most; prune if a sensor ever streams wide-ranging values.
+        string hex = BitConverter.ToString(data);
+        DateTime now = DateTime.UtcNow;
+        if (_rxLoggedAt.TryGetValue(hex, out DateTime last) && now - last < RxRepeatLogInterval)
+            return;
+        _rxLoggedAt[hex] = now;
+
         if (TryParseFrame(data, out string command, out string[] fields))
         {
             // GUI1 notification from the bike: log the session ID for
@@ -181,13 +199,12 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             // (official MV Ride capture shows 0 GUI1 writes from the phone).
             Log.Information("BLE-LOGGER: {Line}",
                 command == "GUI1" && fields.Length > 0
-                    ? $"RECV GUI1 frame: {BitConverter.ToString(data)}, sessionId={fields[0]}"
-                    : $"RECV {command} frame: {BitConverter.ToString(data)}");
-            Log.Debug("MV Agusta Frame Received: {Command}, Fields: {Fields}", command, string.Join(", ", fields));
+                    ? $"RECV GUI1 frame: {hex}, sessionId={fields[0]}"
+                    : $"RECV {command} frame: {hex}");
         }
         else
         {
-            Log.Information("BLE-LOGGER: {Line}", $"RECV INVALID frame: {BitConverter.ToString(data)}");
+            Log.Information("BLE-LOGGER: {Line}", $"RECV INVALID frame: {hex}");
         }
     }
 

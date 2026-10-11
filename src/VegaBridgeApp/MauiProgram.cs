@@ -101,6 +101,14 @@ public static class MauiProgram
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
             .MinimumLevel.Override("System", LogEventLevel.Warning)
             .Enrich.FromLogContext()
+            // Shiny logs every notification ("[UpdatedCharacterteristicValue]
+            // - / - ERROR: null", ~7/s while riding) – the plugin logs the
+            // frames itself. Notification errors still get through.
+            .Filter.ByExcluding(e =>
+                e.Properties.TryGetValue("methodName", out LogEventPropertyValue? method)
+                && method is ScalarValue { Value: "UpdatedCharacterteristicValue" }
+                && e.Properties.TryGetValue("error", out LogEventPropertyValue? error)
+                && error is ScalarValue { Value: null })
             .WriteTo.Sink(DebugLogSink.Instance)
             .CreateLogger();
 
