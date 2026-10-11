@@ -788,8 +788,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 Coordinate here = _routeCoords[snappedIndex];
                 Coordinate nextPoint = _routeCoords[Math.Min(snappedIndex + 2, _routeCoords.Count - 1)];
                 double routeBearing = GeoMath.BearingDeg(here.Latitude, here.Longitude, nextPoint.Latitude, nextPoint.Longitude);
-                double headingDiff = Math.Abs(_currentHeadingDeg - routeBearing);
-                if (headingDiff > 180) headingDiff = 360 - headingDiff;
+                double headingDiff = GeoMath.BearingDifferenceDeg(_currentHeadingDeg, routeBearing);
                 if (headingDiff > WrongWayHeadingThresholdDeg)
                 {
                     _wrongWayCounter++;

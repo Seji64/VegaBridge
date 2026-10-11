@@ -1283,18 +1283,8 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         List<Coordinate> coords = PolylineEncoder.DecodePolyline6(legs[0].Shape);
         foreach (Coordinate c in coords)
         {
-            if (GeoMath.DistanceMeters(lat, lon, c.Latitude, c.Longitude) < 30)
-                continue;
-
-            // Initial bearing (great-circle) from position to the route point.
-            double phi1 = GeoMath.ToRad(lat);
-            double phi2 = GeoMath.ToRad(c.Latitude);
-            double dLon = GeoMath.ToRad(c.Longitude - lon);
-            double y = Math.Sin(dLon) * Math.Cos(phi2);
-            double x = Math.Cos(phi1) * Math.Sin(phi2) -
-                       Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
-            double bearingDeg = (GeoMath.ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
-            return bearingDeg;
+            if (GeoMath.DistanceMeters(lat, lon, c.Latitude, c.Longitude) >= 30)
+                return GeoMath.BearingDeg(lat, lon, c.Latitude, c.Longitude);
         }
         return null;
     }
