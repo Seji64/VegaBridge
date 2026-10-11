@@ -9,6 +9,14 @@
     <img src="https://img.shields.io/badge/status-Beta-orange?style=flat" alt="Beta">
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat" alt="License MIT">
   </p>
+
+  <p>
+    <a href="https://testflight.apple.com/join/bzVYsT1u"><img src="https://img.shields.io/badge/TestFlight-Join%20the%20Beta-0D96F6?logo=apple&logoColor=white&style=for-the-badge" alt="Join the TestFlight beta"></a>
+  </p>
+
+  <p>An alternative to the official MV Ride app on iPhone.<br>
+  Developed and tested on a <strong>Brutale 800</strong>. Riding another MV Agusta model?
+  <a href="https://github.com/Seji64/VegaBridge/issues">Tell us if it works</a>.</p>
 </div>
 
 ---
