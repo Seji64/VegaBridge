@@ -40,7 +40,7 @@ public partial class AddressAutocomplete
 
     [Parameter] public string? AdornmentIcon { get; set; }
 
-    [Parameter] public Color AdornmentColor { get; set; } = Color.Secondary;
+    [Parameter] public MudBlazor.Color AdornmentColor { get; set; } = MudBlazor.Color.Secondary;
 
     [Parameter] public EventCallback<MouseEventArgs> OnAdornmentClick { get; set; }
 
