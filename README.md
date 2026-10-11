@@ -106,7 +106,7 @@ dotnet publish src/VegaBridgeApp -f net10.0-ios -c Release
 `.github/workflows/testflight.yml` builds a signed IPA and uploads it to TestFlight.
 
 - **Push a tag** `v1.2.3` → version `1.2.3`, or **run it manually** (Actions → testflight) → version from the `.csproj`.
-- The build number is `100 + run number` and grows with every run; `ApplicationVersion` in the `.csproj` is only used for local builds.
+- The build number is `17 + run number` (run #1 → 18, continuing the builds uploaded by hand) and can be overridden per manual run (`build_number`); `ApplicationVersion` in the `.csproj` is only used for local builds.
 
 Required repository secrets (Settings → Secrets and variables → Actions):
 

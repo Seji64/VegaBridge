@@ -7,6 +7,10 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Build number (CFBundleVersion); empty = run number + offset'
+        required: false
 
 # Never cancel a run mid-upload; queue them instead.
 concurrency:
@@ -18,9 +22,9 @@ permissions:
 
 env:
   PROJECT: src/VegaBridgeApp/VegaBridgeApp.csproj
-  # CFBundleVersion = run number + offset. It must grow with every upload; the
-  # offset keeps CI builds above the ones uploaded by hand from the dev machine (<= 17).
-  BUILD_NUMBER_OFFSET: 100
+  # CFBundleVersion = run number + offset, so it grows with every upload. Run #1 -> 18
+  # continues the builds uploaded by hand from the dev machine (<= 17).
+  BUILD_NUMBER_OFFSET: 17
 
 jobs:
   testflight:
@@ -46,8 +50,15 @@ jobs:
 
       - name: Version
         id: version
+        env:
+          BUILD_NUMBER_INPUT: ${{ inputs.build_number }}
         run: |
-          echo "build=$(( GITHUB_RUN_NUMBER + BUILD_NUMBER_OFFSET ))" >> "$GITHUB_OUTPUT"
+          build="${BUILD_NUMBER_INPUT:-$(( GITHUB_RUN_NUMBER + BUILD_NUMBER_OFFSET ))}"
+          if [[ ! "$build" =~ ^[0-9]+$ ]]; then
+            echo "::error::Build number $build is not a positive integer"
+            exit 1
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             display="${GITHUB_REF_NAME#v}"
             # App Store Connect only accepts up to three dot-separated integers.
