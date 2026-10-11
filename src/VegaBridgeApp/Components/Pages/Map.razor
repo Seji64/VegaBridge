@@ -44,9 +44,18 @@
                                 @string.Format(L["NavManeuver"], _navManeuver.Index + 1, _navManeuver.Total)
                             </MudChip>
                         }
-                        <MudChip T="string" Size="Size.Small" Color="Color.Info">
-                            @string.Format(L["Accuracy"], Gps.CurrentAccuracy)
-                        </MudChip>
+                        @if (_navStatus?.IsEstimated == true)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.GpsOff">
+                                @L["GpsLostEstimated"]
+                            </MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                                @string.Format(L["Accuracy"], Gps.CurrentAccuracy)
+                            </MudChip>
+                        }
                     </MudStack>
                     <MudDivider Class="mb-8 mt-4"/>
                     

@@ -1046,7 +1046,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             // not the raw GPS course which is often 0/unset.
             Heading = _currentHeadingDeg >= 0 ? _currentHeadingDeg : reading.Heading,
             Accuracy = reading.PositionAccuracy,
-            IsStationary = reading.IsStationary
+            IsStationary = reading.IsStationary,
+            IsEstimated = estimated
         };
         _ = NotifySinksAsync(s => s.OnStatusAsync(status));
     }

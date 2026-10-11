@@ -229,13 +229,15 @@ public class NavigationServiceTests
             Fix(p, speedMs: 25, headingDeg: 0);
 
         GpsGap(seconds: 10);
-        Assert.InRange(_sink.LastStatus!.DistanceToNextTurnM, 500, 600);
+        Assert.True(_sink.LastStatus!.IsEstimated);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 500, 600);
         GpsGap(seconds: 18);
         Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 270, 330);
 
         Fix(Lerp(A, B, 0.9), speedMs: 25, headingDeg: 0);
 
-        Assert.Equal(1, _sink.LastStatus!.CurrentManeuverIndex);
+        Assert.False(_sink.LastStatus.IsEstimated);
+        Assert.Equal(1, _sink.LastStatus.CurrentManeuverIndex);
         Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 75, 125);
         Assert.InRange(_sink.LastStatus.RemainingDistanceKm, 1.05, 1.15);
 
