@@ -14,4 +14,5 @@ public class NavigationStatus
     public double Heading { get; init; }
     public double Accuracy { get; init; }
     public bool IsStationary { get; init; }
+    public bool IsEstimated { get; init; } // no GPS: position estimated along the route
 }

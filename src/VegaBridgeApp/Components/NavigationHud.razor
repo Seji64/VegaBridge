@@ -54,14 +54,18 @@
     }
 
     <!-- Status hints below the HUD -->
-    @if (ClosureCheckRunning || GpsWeak)
+    @if (ClosureCheckRunning || GpsWeak || GpsEstimated)
     {
         <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="0">
             @if (ClosureCheckRunning)
             {
                 <MudChip T="string" Color="Color.Info" Icon="@Icons.Material.Filled.Construction" Text="@L["ClosureCheckRunning"]"/>
             }
-            @if (GpsWeak)
+            @if (GpsEstimated)
+            {
+                <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.GpsOff" Text="@L["GpsLostEstimated"]"/>
+            }
+            else if (GpsWeak)
             {
                 <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.GpsNotFixed" Text="@string.Format(L["NavGpsWeak"], GpsAccuracyM)"/>
             }

@@ -26,6 +26,9 @@ public partial class NavigationHud : ComponentBase
 
     private bool GpsWeak => GpsAccuracyM > GpsIgnoredAccuracyM;
 
+    /// <summary>No GPS (tunnel): the position is estimated along the route.</summary>
+    private bool GpsEstimated => Status?.IsEstimated == true;
+
     /// <summary>Progress along the route by distance, 0-100 (a reroute does not reset it).</summary>
     private double ProgressPercent => Status == null || TotalDistanceKm <= 0
         ? 0

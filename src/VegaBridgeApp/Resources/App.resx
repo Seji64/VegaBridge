@@ -101,6 +101,7 @@
   <data name="GpxExportRouteDesc" xml:space="preserve"><value>Planned route – waypoints as route points</value></data>
   <data name="GpxTrackLabel" xml:space="preserve"><value>Track ({0} points)</value></data>
   <data name="GpxRouteLabel" xml:space="preserve"><value>Route ({0} points)</value></data>
+  <data name="GpsLostEstimated" xml:space="preserve"><value>No GPS – estimated</value></data>
   <data name="Meter" xml:space="preserve"><value>{0:F0} m</value></data>
   <data name="Km" xml:space="preserve"><value>{0:F1} km</value></data>
   <!-- Navigation HUD extended -->
