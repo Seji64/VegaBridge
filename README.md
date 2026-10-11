@@ -19,6 +19,8 @@
   <a href="https://github.com/Seji64/VegaBridge/issues">Tell us if it works</a>.</p>
 </div>
 
+<p align="center"><img src="screenshots/demo.gif" width="300" alt="VegaBridge demo"></p>
+
 ---
 
 ## Gallery
