@@ -35,7 +35,7 @@
 ## Features
 
 - **🗺️ Interactive Map** — Powered by OpenLayers with smooth pan/zoom, route preview, and GPS breadcrumb trail.
-- **🧭 Turn-by-Turn Navigation** — Routes calculated via [Valhalla](https://github.com/valhalla/valhalla) (OpenStreetMap data). Clear step‑by‑step instructions, distance, and ETA.
+- **🧭 Turn-by-Turn Navigation** — Routes calculated via [Valhalla](https://github.com/valhalla/valhalla) (OpenStreetMap data). Clear step‑by‑step instructions, distance, and ETA. Optionally avoid highways, tolls, and ferries.
 - **🏍️ BLE to Dashboard** — Connects to MV Agusta motorcycles via Bluetooth Low Energy. Sends turn instructions directly to the bike's dashboard using the proprietary MV Agusta protocol.
 - **📍 Real‑Time GPS** — Background location tracking with Shiny.Locations. Accurate position on map and automatic navigation state machine.
 - **💾 Route Management** — Save and load your favorite routes. Full [GPX](https://en.wikipedia.org/wiki/GPS_Exchange_Format) import and export support.

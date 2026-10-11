@@ -21,8 +21,22 @@ public class ValhallaClient : IValhallaClient
     }
 
     /// <inheritdoc />
-    public Task<Result> GetRouteAsync(RouteRequest request, CancellationToken cancellationToken = default) =>
-        PostAsync("route", request, cancellationToken);
+    public async Task<Result> GetRouteAsync(RouteRequest request, CancellationToken cancellationToken = default)
+    {
+        Result result = await PostAsync("route", request, cancellationToken);
+        if (result.ErrorCode != ValhallaError.NoPath
+            || request.CostingOptions is not { } costingOptions
+            || !costingOptions.Values.Any(o => o.HasHardExclusions))
+            return result;
+
+        // Hard exclusions can leave no path at all (island only reachable by
+        // ferry, pass road with toll …). Retry with the soft preferences only:
+        // Valhalla then keeps the avoided roads as short as possible.
+        Log.Information("No route with hard exclusions – retrying with soft avoidance only");
+        foreach (CostingOptions options in costingOptions.Values)
+            options.RemoveHardExclusions();
+        return await PostAsync("route", request, cancellationToken);
+    }
 
     /// <inheritdoc />
     public async Task<Result> GetMapMatchAsync(TraceRequest request, CancellationToken cancellationToken = default)
@@ -96,10 +110,31 @@ public class ValhallaClient : IValhallaClient
             Log.Debug("{Endpoint} succeeded: {Distance} km", endpoint, response.Trip.Summary?.Length ?? 0);
             return Result.Success(response);
         }
+        catch (FlurlHttpException ex) when (ex.StatusCode is >= 400 and < 500)
+        {
+            // Valhalla says what is wrong in the body ("No path could be found
+            // for input", "Path distance exceeds the max distance limit" …);
+            // Flurl's message only has the status code and URL.
+            ValhallaError? error = await TryReadErrorAsync(ex);
+            Log.Warning("Valhalla {Endpoint} rejected the request: {Code} {Error}", endpoint, error?.ErrorCode, error?.Error);
+            return Result.Failure(error?.Error ?? $"Error: {ex.Message}", ex, error?.ErrorCode);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Log.Error(ex, "Error calling Valhalla {Endpoint} API", endpoint);
             return Result.Failure($"Error: {ex.Message}", ex);
+        }
+    }
+
+    private static async Task<ValhallaError?> TryReadErrorAsync(FlurlHttpException ex)
+    {
+        try
+        {
+            return await ex.GetResponseJsonAsync<ValhallaError>();
+        }
+        catch (Exception)
+        {
+            return null; // no JSON body (e.g. a proxy error page)
         }
     }
 }

@@ -10,7 +10,9 @@ public interface IValhallaClient
     /// <summary>
     /// Request a route (turn‑by‑turn directions) from a Valhalla server.
     /// </summary>
-    /// <param name="request">The route request with locations and costing.</param>
+    /// <param name="request">The route request with locations and costing.
+    /// If its hard exclusions leave no path, they are dropped (the soft
+    /// preferences stay) and the request is sent again.</param>
     /// <param name="cancellationToken">Optional cancellation token.</param>
     /// <returns>Result with routing information.</returns>
     Task<Result> GetRouteAsync(RouteRequest request, CancellationToken cancellationToken = default);

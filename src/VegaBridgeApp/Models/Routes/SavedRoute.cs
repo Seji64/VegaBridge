@@ -32,4 +32,10 @@ public class SavedRoute
     /// The waypoints used to generate the route.
     /// </summary>
     public List<Coordinate>? Waypoints { get; set; } = [];
+
+    /// <summary>
+    /// Road types avoided when the route was planned. Null for routes saved
+    /// before route options existed (loading keeps the current choice).
+    /// </summary>
+    public RoadAvoidance? Avoid { get; set; }
 }

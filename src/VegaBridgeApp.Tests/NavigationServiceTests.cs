@@ -123,6 +123,22 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Reroute_AvoidsTheSameRoadTypes()
+    {
+        await StartAsync([Leg(Right, A, B, C, D, A)], [], RoadAvoidance.Highways | RoadAvoidance.Ferries);
+
+        await _nav.PerformRerouteAsync(B.Latitude, B.Longitude, skipNextWaypoint: false);
+
+        CostingOptions options = LastRouteRequest().CostingOptions!["motorcycle"];
+        Assert.Equal(0, options.UseHighways);
+        Assert.True(options.ExcludeHighways);
+        Assert.Equal(0, options.UseFerry);
+        Assert.True(options.ExcludeFerries);
+        Assert.Null(options.UseTolls);
+        Assert.Null(options.ExcludeTolls);
+    }
+
+    [Fact]
     public async Task WrongTurnInCity_IsRerouted_WithinSeconds()
     {
         // Route: 330 m north to X, then LEFT (west). Rider turns RIGHT (east).
@@ -204,10 +220,10 @@ public class NavigationServiceTests
 
     private Task StartAsync(Leg leg) => StartAsync([leg], []);
 
-    private async Task StartAsync(List<Leg> legs, List<Location> vias)
+    private async Task StartAsync(List<Leg> legs, List<Location> vias, RoadAvoidance avoid = RoadAvoidance.None)
     {
         (string shape, List<Maneuver> maneuvers, double km, double min) = _nav.PrepareNavigationData(legs);
-        await _nav.StartNavigation(shape, maneuvers, km, min, Loc(A), vias);
+        await _nav.StartNavigation(shape, maneuvers, km, min, Loc(A), vias, avoid);
     }
 
     /// <summary>One leg: depart, a <paramref name="turnType"/> turn at every inner point, arrive.</summary>

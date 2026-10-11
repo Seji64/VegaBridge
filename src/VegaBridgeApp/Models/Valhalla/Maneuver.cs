@@ -60,4 +60,11 @@ public class Maneuver
 
     [JsonPropertyName("internal_intersection_index")]
     public int? InternalIntersectionIndex { get; set; }
+
+    /// <summary>
+    /// Unpaved road. Valhalla starts a new maneuver where the surface
+    /// changes, so the maneuver is unpaved over its whole length.
+    /// </summary>
+    [JsonPropertyName("rough")]
+    public bool Rough { get; set; }
 }
