@@ -131,9 +131,10 @@ Off-Route detected (3 candidates)
 
 ## Route Options: Avoid Highways / Tolls / Ferries
 
-The route planning panel has filter chips "Vermeiden: Autobahnen · Maut ·
-Fähren" (`RoadAvoidance` flags). The last choice is remembered
-(Preferences `route_avoid`) and saved with a route (`SavedRoute.Avoid`).
+The route planning panel has filter chips "Vermeiden: Autobahn &
+Schnellstraße · Maut · Fähren" (`RoadAvoidance` flags). The last choice is
+remembered (Preferences `route_avoid`) and saved with a route
+(`SavedRoute.Avoid`).
 
 `CostingOptions.Avoiding()` sends every avoided type twice:
 
