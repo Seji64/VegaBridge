@@ -31,6 +31,7 @@
   <data name="UnpavedSections" xml:space="preserve"><value>Route includes {0:0.#} km of unpaved road</value></data>
   <data name="SaveRoute" xml:space="preserve"><value>Save Route</value></data>
   <data name="StartNavigation" xml:space="preserve"><value>Start Navigation</value></data>
+  <data name="RouteDurationApprox" xml:space="preserve"><value>approx. {0}</value></data>
   <data name="GPSOff" xml:space="preserve"><value>GPS off</value></data>
 
   <!-- Messages -->
@@ -69,13 +70,19 @@
   <data name="NavStop" xml:space="preserve"><value>Stop Navigation</value></data>
   <data name="NavMeters" xml:space="preserve"><value>{0} m</value></data>
   <data name="NavKm" xml:space="preserve"><value>{0} km</value></data>
+  <data name="NavEta" xml:space="preserve"><value>Arrival</value></data>
+  <data name="NavRemainingTime" xml:space="preserve"><value>Time left</value></data>
+  <data name="NavRemainingDistance" xml:space="preserve"><value>Distance left</value></data>
+  <data name="NavGpsWeak" xml:space="preserve"><value>Weak GPS (±{0:F0} m)</value></data>
+  <data name="NavStopConfirm" xml:space="preserve"><value>Really stop the navigation?</value></data>
+  <data name="NavStopYes" xml:space="preserve"><value>Stop</value></data>
   <data name="NavBLELog" xml:space="preserve"><value>BLE Commands (simulated)</value></data>
 
   <!-- My Routes -->
   <data name="MyRoutesTitle" xml:space="preserve"><value>My Routes</value></data>
   <data name="NoRoutes" xml:space="preserve"><value>No routes saved yet. Create a new route or import a GPX file.</value></data>
   <data name="DistanceKm" xml:space="preserve"><value>Distance: {0:F2} km</value></data>
-  <data name="TimeMin" xml:space="preserve"><value>Time: {0:F0} Min</value></data>
+  <data name="RouteDuration" xml:space="preserve"><value>Time: {0}</value></data>
   <data name="Created" xml:space="preserve"><value>Created: {0}</value></data>
   <data name="StartRoute" xml:space="preserve"><value>Start</value></data>
   <data name="ExportGPX" xml:space="preserve"><value>Export GPX</value></data>

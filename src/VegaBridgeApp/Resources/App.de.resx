@@ -31,6 +31,7 @@
   <data name="UnpavedSections" xml:space="preserve"><value>Route enthält {0:0.#} km unbefestigte Abschnitte</value></data>
   <data name="SaveRoute" xml:space="preserve"><value>Route speichern</value></data>
   <data name="StartNavigation" xml:space="preserve"><value>Navigation starten</value></data>
+  <data name="RouteDurationApprox" xml:space="preserve"><value>ca. {0}</value></data>
   <data name="GPSOff" xml:space="preserve"><value>GPS aus</value></data>
 
   <!-- Messages -->
@@ -69,13 +70,19 @@
   <data name="NavStop" xml:space="preserve"><value>Navigation beenden</value></data>
   <data name="NavMeters" xml:space="preserve"><value>{0} m</value></data>
   <data name="NavKm" xml:space="preserve"><value>{0} km</value></data>
+  <data name="NavEta" xml:space="preserve"><value>Ankunft</value></data>
+  <data name="NavRemainingTime" xml:space="preserve"><value>Restzeit</value></data>
+  <data name="NavRemainingDistance" xml:space="preserve"><value>Reststrecke</value></data>
+  <data name="NavGpsWeak" xml:space="preserve"><value>GPS ungenau (±{0:F0} m)</value></data>
+  <data name="NavStopConfirm" xml:space="preserve"><value>Navigation wirklich beenden?</value></data>
+  <data name="NavStopYes" xml:space="preserve"><value>Beenden</value></data>
   <data name="NavBLELog" xml:space="preserve"><value>BLE-Kommandos (simuliert)</value></data>
 
   <!-- My Routes -->
   <data name="MyRoutesTitle" xml:space="preserve"><value>Meine Routen</value></data>
   <data name="NoRoutes" xml:space="preserve"><value>Noch keine Routen gespeichert. Erstelle eine neue Route oder importiere eine GPX-Datei.</value></data>
   <data name="DistanceKm" xml:space="preserve"><value>Distanz: {0:F2} km</value></data>
-  <data name="TimeMin" xml:space="preserve"><value>Zeit: {0:F0} Min</value></data>
+  <data name="RouteDuration" xml:space="preserve"><value>Zeit: {0}</value></data>
   <data name="Created" xml:space="preserve"><value>Erstellt: {0}</value></data>
   <data name="StartRoute" xml:space="preserve"><value>Starten</value></data>
   <data name="ExportGPX" xml:space="preserve"><value>GPX exportieren</value></data>

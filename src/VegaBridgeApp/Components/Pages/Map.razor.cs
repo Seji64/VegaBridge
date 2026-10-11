@@ -73,7 +73,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     // ── Navigation state ──
     private NavigationManeuverInfo? _navManeuver;
     private NavigationStatus? _navStatus;
-    private double _navProgress;
+    // Route length at navigation start – progress is measured against it,
+    // so a reroute does not reset the progress bar.
+    private double? _navTotalKm;
 
     // ── Navigation follow-view state (map tracks the position) ──
     private DateTime _lastNavFollowUpdate = DateTime.MinValue;
@@ -454,9 +456,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     {
         if (_disposed) return;
         _navManeuver = maneuver;
-        _navProgress = maneuver.Total > 0
-            ? (double)(maneuver.Index + 1) / maneuver.Total * 100
-            : 0;
         await InvokeAsync(StateHasChanged);
     }
 
@@ -464,19 +463,16 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     {
         if (_disposed) return;
         _navStatus = status;
-        int progressIndex = status.DisplayManeuverIndex > 0 ? status.DisplayManeuverIndex : status.CurrentManeuverIndex;
-        _navProgress = status.TotalManeuvers > 0
-            ? Math.Clamp((double)(progressIndex + 1) / status.TotalManeuvers * 100, 0, 100)
-            : 0;
         await InvokeAsync(StateHasChanged);
     }
 
     public async Task OnFinishAsync()
     {
         if (_disposed) return;
-        await InvokeAsync(() =>
+        await InvokeAsync(async () =>
         {
             Snackbar.Add(L["DestinationReached"], Severity.Success);
+            await LeaveNavigationViewAsync();
             StateHasChanged();
         });
     }
@@ -493,7 +489,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     public async Task OnStartAsync(NavigationStartInfo start)
     {
-        // UI does not need anything on start; maybe a short toast
+        _navTotalKm = start.TotalDistanceKm;
         await InvokeAsync(StateHasChanged);
     }
 
@@ -582,11 +578,17 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private const double NavFollowIntervalSec = 1.0;
     private const double NavFollowMinMoveM = 10.0;
     private const double NavFollowMinHeadingDelta = 8.0; // degrees
+    // Below this the GPS course is noise – the map would spin at a red light.
+    private const double NavRotateMinSpeedKmh = 5.0;
+    // Heading-up view: the map center lies this far ahead of the rider, so
+    // the rider sits in the lower part of the map and more of the road
+    // ahead is visible. CSS pixels – converted with the zoom level.
+    private const double NavLookAheadPx = 150.0;
 
     /// <summary>
-    /// Centers the map on the current GPS fix and rotates it towards the
-    /// travel direction while navigating. Throttled to ~1 Hz and only when
-    /// the position moved enough, so the map does not jitter on every fix.
+    /// Keeps the map on the current GPS fix and turns the travel direction
+    /// up, like a navigation app. Throttled to ~1 Hz and only when the
+    /// position moved enough, so the map does not jitter on every fix.
     /// </summary>
     private async Task FollowNavigationViewAsync(GpsReading reading)
     {
@@ -606,27 +608,56 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         _lastFollowLat = lat;
         _lastFollowLon = lon;
 
-        await map.SetCenter(new OpenLayers.Blazor.Coordinate(lon, lat));
-
-        // Heading while moving comes from the NavigationService (computed
-        // travel direction: GPS course or buffer-derived) – the service owns
-        // the logic and also uses it for reroute requests. The route bearing
-        // is only a last resort here, e.g. before the first status arrives.
-        double heading = _navStatus?.Heading > 0 ? _navStatus!.Heading : 0;
-        if (heading <= 0)
-        {
-            double? routeBearing = BearingToNextRoutePoint(lat, lon);
-            if (routeBearing is { } rb)
-                heading = rb;
-        }
-
         // Only rotate when the heading changed notably – avoids map wobble
         // on small GPS course fluctuations.
-        if (heading > 0 && Math.Abs(heading - _lastFollowHeading) > NavFollowMinHeadingDelta)
+        if (NavHeading(lat, lon) is { } heading &&
+            (_lastFollowHeading < 0 || GeoMath.BearingDifferenceDeg(heading, _lastFollowHeading) > NavFollowMinHeadingDelta))
         {
-            map.Rotation = GeoMath.ToRad(heading);
-            _lastFollowHeading = heading;
+            await RotateHeadingUpAsync(map, heading);
         }
+
+        // Zoom as the rider left it (pinch); the event-tracked value is
+        // unset (5) before the first zoom change – fall back then.
+        double zoom = map.Zoom is >= 10 and <= 22 ? map.Zoom : NavigationViewZoom;
+        await map.SetCenter(LookAheadCenter(lat, lon, zoom));
+    }
+
+    /// <summary>
+    /// Travel direction for the heading-up view, or null to keep the
+    /// current rotation. Riding: the service-computed direction (GPS course
+    /// or buffer-derived – the service owns that logic and also uses it for
+    /// reroutes). Standing or crawling only the route direction, and only
+    /// before the map was turned at all (start of the navigation).
+    /// </summary>
+    private double? NavHeading(double lat, double lon)
+    {
+        if (_navStatus is { IsStationary: false, Heading: > 0 } status && status.SpeedKmh >= NavRotateMinSpeedKmh)
+            return status.Heading;
+        return _lastFollowHeading < 0 ? BearingToNextRoutePoint(lat, lon) : null;
+    }
+
+    private async Task RotateHeadingUpAsync(OpenStreetMap map, double heading)
+    {
+        // OpenLayers turns the map clockwise for a positive rotation – the
+        // travel direction points up when turned back by the heading. (The
+        // Rotation property alone never reaches the JS map.)
+        await map.SetRotation(-GeoMath.ToRad(heading));
+        _lastFollowHeading = heading;
+    }
+
+    /// <summary>
+    /// Map center that puts the rider <see cref="NavLookAheadPx"/> below
+    /// the middle of the heading-up map: ahead along the direction the map
+    /// is turned to. Not turned (yet): the rider is the center.
+    /// </summary>
+    private OpenLayers.Blazor.Coordinate LookAheadCenter(double lat, double lon, double zoom)
+    {
+        if (_lastFollowHeading < 0) return new OpenLayers.Blazor.Coordinate(lon, lat);
+
+        // Ground meters per CSS pixel (Web Mercator, 256 px tiles).
+        double metersPerPx = 156_543.03392 * Math.Cos(GeoMath.ToRad(lat)) / Math.Pow(2, zoom);
+        (double centerLat, double centerLon) = GeoMath.Offset(lat, lon, _lastFollowHeading, NavLookAheadPx * metersPerPx);
+        return new OpenLayers.Blazor.Coordinate(centerLon, centerLat);
     }
 
     private async Task ClearGpsMarkersAsync()
@@ -1066,6 +1097,9 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             if (_navStartVia != null)
                 viaLocations.Insert(0, CreateLocation(_navStartVia, "break"));
 
+            _navManeuver = null;
+            _navStatus = null;
+            _navTotalKm = null;
             await NavService.StartNavigation(
                 mergedShape, allManeuvers, totalKm, totalMin,
                 CreateLocation(_destinationLocation), viaLocations, Avoid);
@@ -1212,6 +1246,10 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
 
     private const double NavigationViewZoom = 16;
 
+    /// <summary>
+    /// Navigation view at the current position: zoomed in, travel direction
+    /// up, rider in the lower part of the map. Also "recenter" while riding.
+    /// </summary>
     private async Task EnterNavigationViewAsync()
     {
         OpenStreetMap? map = _map;
@@ -1221,26 +1259,20 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         double lat = reading.Position.Latitude;
         double lon = reading.Position.Longitude;
 
-        await map.SetCenter(new OpenLayers.Blazor.Coordinate(lon, lat));
         await map.SetZoom(NavigationViewZoom);
 
-        // Heading at start: the service-computed travel direction if already
-        // available, otherwise the bearing towards the next route point
-        // (still standing at the start – the route is the best guess for the
-        // upcoming direction).
-        double heading = _navStatus?.Heading > 0 ? _navStatus!.Heading : 0;
-        if (heading <= 0)
-        {
-            double? routeBearing = BearingToNextRoutePoint(lat, lon);
-            if (routeBearing is { } bearing)
-                heading = bearing;
-        }
+        // Standing at the start the route is the best guess for the upcoming
+        // direction (see NavHeading). Recenter keeps the last direction –
+        // and undoes a manual rotation.
+        double? heading = NavHeading(lat, lon) ?? (_lastFollowHeading >= 0 ? _lastFollowHeading : null);
+        if (heading is { } h)
+            await RotateHeadingUpAsync(map, h);
 
-        if (heading > 0)
-        {
-            // OpenLayers: positive rotation = clockwise, radians.
-            map.Rotation = GeoMath.ToRad(heading);
-        }
+        // Map.Zoom follows the zoom change asynchronously – use the new level.
+        await map.SetCenter(LookAheadCenter(lat, lon, NavigationViewZoom));
+        _lastNavFollowUpdate = DateTime.UtcNow;
+        _lastFollowLat = lat;
+        _lastFollowLon = lon;
     }
 
     /// <summary>
@@ -1270,24 +1302,51 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         return null;
     }
 
+    /// <summary>
+    /// Stop button: asks first – a wet or gloved tap must not end the
+    /// navigation (and the bike's dashboard guidance) mid-ride.
+    /// </summary>
+    private async Task ConfirmExitNavigation()
+    {
+        bool? stop = await DialogService.ShowMessageBoxAsync(
+            L["NavStop"],
+            L["NavStopConfirm"],
+            yesText: L["NavStopYes"],
+            cancelText: L["Cancel"]);
+        if (stop == true && NavService.IsNavigating)
+            await ExitNavigation();
+    }
+
     private async Task ExitNavigation()
     {
         await NavService.StopNavigation();
+        await LeaveNavigationViewAsync();
+        Snackbar.Add(L["NavigationStopped"], Severity.Info);
+    }
+
+    /// <summary>
+    /// Back to the planning view after the navigation ended (stopped or
+    /// destination reached).
+    /// </summary>
+    private async Task LeaveNavigationViewAsync()
+    {
         // Skipped waypoints were only skipped for the running navigation –
         // the planned route (list + pins) stays intact after stopping.
         _skippedWaypointIds.Clear();
         _navStartVia = null;
+        _navManeuver = null;
+        _navStatus = null;
+        _navTotalKm = null;
         await ClearGpsMarkersAsync();
         if (_map != null)
         {
             // Back to north-up view after navigation.
-            _map.Rotation = 0;
+            await _map.SetRotation(0);
         }
 
         // Reset follow-view state so the next navigation starts fresh.
         _lastNavFollowUpdate = DateTime.MinValue;
         _lastFollowHeading = -1;
-        Snackbar.Add(L["NavigationStopped"], Severity.Info);
     }
 
     private async Task SkipWaypoint()
@@ -1361,66 +1420,13 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
     }
 
-    private string GetTurnIcon(int valhallaType)
-    {
-        string iconKey = NavigationIconMapper.GetSemanticIcon(valhallaType);
-        return iconKey switch
-        {
-            NavigationIconMapper.IconTurnLeft => Icons.Material.Filled.TurnLeft,
-            NavigationIconMapper.IconTurnRight => Icons.Material.Filled.TurnRight,
-            NavigationIconMapper.IconSlightLeft => Icons.Material.Filled.TurnSlightLeft,
-            NavigationIconMapper.IconSlightRight => Icons.Material.Filled.TurnSlightRight,
-            NavigationIconMapper.IconSharpLeft => Icons.Material.Filled.TurnSharpLeft,
-            NavigationIconMapper.IconSharpRight => Icons.Material.Filled.TurnSharpRight,
-            NavigationIconMapper.IconUTurnLeft => Icons.Material.Filled.UTurnLeft,
-            NavigationIconMapper.IconUTurnRight => Icons.Material.Filled.UTurnRight,
-            NavigationIconMapper.IconExitLeft => Icons.Material.Filled.RampLeft,
-            NavigationIconMapper.IconExitRight => Icons.Material.Filled.RampRight,
-            NavigationIconMapper.IconStraight => Icons.Material.Filled.Straight,
-            NavigationIconMapper.IconFinish => Icons.Material.Filled.Flag,
-            NavigationIconMapper.IconRoundabout => Icons.Material.Filled.RotateRight,
-            _ => Icons.Material.Filled.Straight
-        };
-    }
-
-    private string GetTurnLabel(int valhallaType)
-    {
-        string iconKey = NavigationIconMapper.GetSemanticIcon(valhallaType);
-        return iconKey switch
-        {
-            NavigationIconMapper.IconTurnLeft => L["TurnLeft"],
-            NavigationIconMapper.IconTurnRight => L["TurnRight"],
-            NavigationIconMapper.IconSlightLeft => L["TurnSlightLeft"],
-            NavigationIconMapper.IconSlightRight => L["TurnSlightRight"],
-            NavigationIconMapper.IconSharpLeft => L["TurnSharpLeft"],
-            NavigationIconMapper.IconSharpRight => L["TurnSharpRight"],
-            NavigationIconMapper.IconUTurnLeft or NavigationIconMapper.IconUTurnRight => L["UTurn"],
-            NavigationIconMapper.IconExitLeft => L["ExitLeft"],
-            NavigationIconMapper.IconExitRight => L["ExitRight"],
-            NavigationIconMapper.IconStraight => L["Straight"],
-            NavigationIconMapper.IconFinish => L["Arrival"],
-            NavigationIconMapper.IconRoundabout => L["Roundabout"],
-            _ => L["Straight"]
-        };
-    }
-
-    private string FormatTime(double? minutes)
-    {
-        switch (minutes)
-        {
-            case null:
-            case < 0:
-                return "–";
-            case < 1:
-                return L["NavLessThanMinute"];
-            case < 60:
-                return string.Format(L["NavMin"], (int)minutes.Value);
-        }
-
-        int hours = (int)(minutes.Value / 60);
-        int mins = (int)(minutes.Value % 60);
-        return string.Format(L["NavHoursMinutes"], hours, mins);
-    }
+    /// <summary>
+    /// Skipping needs a waypoint ahead. Until the first status arrives the
+    /// planned waypoints tell.
+    /// </summary>
+    private bool HasWaypointToSkip => _navStatus != null
+        ? _navStatus.RemainingWaypoints > 0
+        : _navStartVia != null || _waypoints.Any(w => w.Location != null && !_skippedWaypointIds.Contains(w.Id));
 
     private async Task ShowRouteOnMapFromPolyline(string polyline6)
     {
@@ -1744,7 +1750,13 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         if (map == null) return;
 
         await Gps.GetLastReadingOrCurrentAsync();
-        
+
+        if (NavService.IsNavigating)
+        {
+            await EnterNavigationViewAsync();
+            return;
+        }
+
         if (Gps.LastReading != null)
         {
             GpsReading reading = Gps.LastReading;
