@@ -1,0 +1,162 @@
+name: testflight
+
+# Signed Release build of the iOS app, uploaded to App Store Connect / TestFlight.
+# Runs on a version tag (v1.2.3 -> CFBundleShortVersionString 1.2.3) or manually
+# (keeps ApplicationDisplayVersion from the .csproj).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Build number (CFBundleVersion); empty = run number'
+        required: false
+
+# Never cancel a run mid-upload; queue them instead.
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PROJECT: src/VegaBridgeApp/VegaBridgeApp.csproj
+
+jobs:
+  testflight:
+    # Same image as build.yml: the .NET iOS 27 workload requires Xcode 27.
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - name: Check secrets
+        env:
+          IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: |
+          missing=0
+          for name in IOS_DIST_CERT_P12_BASE64 IOS_DIST_CERT_PASSWORD IOS_PROVISIONING_PROFILE_BASE64 \
+                      APPSTORE_API_KEY_ID APPSTORE_API_ISSUER_ID APPSTORE_API_PRIVATE_KEY; do
+            if [[ -z "${!name}" ]]; then echo "::error::Repository secret $name is not set"; missing=1; fi
+          done
+          exit $missing
+
+      - name: Version
+        id: version
+        env:
+          BUILD_NUMBER_INPUT: ${{ inputs.build_number }}
+        run: |
+          # CFBundleVersion = run number, so it grows with every upload (run #1 -> build 1).
+          build="${BUILD_NUMBER_INPUT:-$GITHUB_RUN_NUMBER}"
+          if [[ ! "$build" =~ ^[0-9]+$ ]]; then
+            echo "::error::Build number $build is not a positive integer"
+            exit 1
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            display="${GITHUB_REF_NAME#v}"
+            # App Store Connect only accepts up to three dot-separated integers.
+            if [[ ! "$display" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+              echo "::error::Tag $GITHUB_REF_NAME is not a valid version (expected v1.2.3)"
+              exit 1
+            fi
+            echo "display=$display" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Test
+        run: dotnet test src/VegaBridgeApp.Tests/VegaBridgeApp.Tests.csproj
+
+      - name: Install MAUI workloads
+        run: dotnet workload install maui
+
+      - name: Install signing certificate and provisioning profile
+        env:
+          CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          # Throwaway keychain holding the "Apple Distribution" identity the .csproj
+          # asks for (CodesignKey); made the user search list so codesign finds it.
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -base64 32)
+          printf '%s' "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain"
+          rm "$RUNNER_TEMP/cert.p12"
+
+          # Profile "VegaBridgeDist" (CodesignProvision). Installed in both the
+          # pre-Xcode-16 and the current location; the .NET iOS SDK searches either.
+          profile="$RUNNER_TEMP/profile.mobileprovision"
+          printf '%s' "$PROFILE_BASE64" | base64 --decode > "$profile"
+          security cms -D -i "$profile" > "$RUNNER_TEMP/profile.plist"
+          uuid=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$RUNNER_TEMP/profile.plist")
+          for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" \
+                     "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            cp "$profile" "$dir/$uuid.mobileprovision"
+          done
+
+      - name: Publish IPA
+        id: publish
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          DISPLAY_VERSION: ${{ steps.version.outputs.display }}
+        run: |
+          dotnet publish "$PROJECT" -f net10.0-ios -c Release \
+            -p:ApplicationVersion="$BUILD_NUMBER" \
+            ${DISPLAY_VERSION:+-p:ApplicationDisplayVersion="$DISPLAY_VERSION"}
+          ipa=$(find src/VegaBridgeApp/bin/Release/net10.0-ios -name '*.ipa' -path '*/publish/*' | head -n 1)
+          if [[ -z "$ipa" ]]; then echo "::error::No .ipa produced"; exit 1; fi
+          echo "ipa=$ipa" >> "$GITHUB_OUTPUT"
+
+      # Kept before the upload so a failed upload can be retried by hand (Transporter).
+      - name: Keep IPA and dSYM
+        uses: actions/upload-artifact@v7
+        with:
+          name: VegaBridge-${{ steps.version.outputs.build }}
+          path: |
+            ${{ steps.publish.outputs.ipa }}
+            src/VegaBridgeApp/bin/Release/net10.0-ios/ios-arm64/*.dSYM
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload to TestFlight
+        env:
+          IPA: ${{ steps.publish.outputs.ipa }}
+          API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: |
+          # altool looks the key up by ID in ~/.appstoreconnect/private_keys.
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s\n' "$API_PRIVATE_KEY" > ~/.appstoreconnect/private_keys/"AuthKey_$API_KEY_ID.p8"
+          xcrun altool --upload-app --type ios --file "$IPA" \
+            --apiKey "$API_KEY_ID" --apiIssuer "$API_ISSUER_ID"
+
+      - name: Summary
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          DISPLAY_VERSION: ${{ steps.version.outputs.display }}
+        run: |
+          display="${DISPLAY_VERSION:-$(sed -n 's:.*<ApplicationDisplayVersion>\(.*\)</ApplicationDisplayVersion>.*:\1:p' "$PROJECT")}"
+          echo "Uploaded VegaBridge **$display ($BUILD_NUMBER)** to TestFlight." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -rf ~/.appstoreconnect/private_keys "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/profile.plist"

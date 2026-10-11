@@ -101,6 +101,24 @@ dotnet publish src/VegaBridgeApp -f net10.0-ios -c Release
 
 > **Note:** Release builds require a valid Apple Distribution certificate and provisioning profile configured in the `.csproj` (`CodesignKey` / `CodesignProvision`).
 
+### TestFlight via CI
+
+`.github/workflows/testflight.yml` builds a signed IPA and uploads it to TestFlight.
+
+- **Push a tag** `v1.2.3` → version `1.2.3`, or **run it manually** (Actions → testflight) → version from the `.csproj`.
+- The build number is the workflow's run number and can be overridden per manual run (`build_number`); `ApplicationVersion` in the `.csproj` is only used for local builds.
+
+Required repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Content |
+|--------|---------|
+| `IOS_DIST_CERT_P12_BASE64` | Apple Distribution certificate + private key, exported from Keychain as `.p12`, then `base64 -i cert.p12` |
+| `IOS_DIST_CERT_PASSWORD` | Password of that `.p12` |
+| `IOS_PROVISIONING_PROFILE_BASE64` | App Store profile `VegaBridgeDist`: `base64 -i VegaBridgeDist.mobileprovision` |
+| `APPSTORE_API_KEY_ID` | App Store Connect API key ID (Users and Access → Integrations, role *App Manager*) |
+| `APPSTORE_API_ISSUER_ID` | Issuer ID shown on the same page |
+| `APPSTORE_API_PRIVATE_KEY` | Content of the downloaded `AuthKey_<ID>.p8` |
+
 ---
 ## Contributions
 Interested in bringing other motorcycle brands to VegaBridge? We'd love the help! Feel free to explore the `IBleDevicePlugin` interface to see how you can implement a new manufacturer protocol and contribute.
