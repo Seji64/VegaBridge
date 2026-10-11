@@ -24,6 +24,8 @@ public partial class NavigationHud : ComponentBase
     /// <summary>Current GPS accuracy in meters (0 = unknown).</summary>
     [Parameter] public double GpsAccuracyM { get; set; }
 
+    private bool GpsWeak => GpsAccuracyM > GpsIgnoredAccuracyM;
+
     /// <summary>Progress along the route by distance, 0-100 (a reroute does not reset it).</summary>
     private double ProgressPercent => Status == null || TotalDistanceKm <= 0
         ? 0

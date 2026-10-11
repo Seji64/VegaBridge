@@ -1,73 +1,67 @@
 @* Navigation HUD: next maneuver + trip info, floating over the map.
    Display only – touches go through to the map. *@
-<div class="pa-2">
+<MudStack Spacing="1" Class="pa-2">
     @if (Maneuver != null || Status != null)
     {
-        <MudPaper Elevation="4" Class="overflow-hidden" Style="border-radius: 16px;">
+        <MudPaper Elevation="4" Class="overflow-hidden">
             @if (Maneuver != null)
             {
-                <!-- Next maneuver: arrow, distance, instruction -->
-                <div class="mud-theme-primary d-flex align-center gap-4 px-4 py-3">
-                    <div style="position: relative; flex-shrink: 0; line-height: 0;">
-                        <MudIcon Icon="@TurnIcon" Style="font-size: 3.5rem;"/>
-                        @if (Maneuver.RoundaboutExitCount is > 0)
-                        {
-                            <!-- Roundabout: which exit -->
-                            <span class="d-flex align-center justify-center"
-                                  style="position: absolute; right: -8px; bottom: -6px; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; font-size: 0.95rem; font-weight: 700; line-height: 1; background: var(--mud-palette-dark); color: var(--mud-palette-dark-text);">
-                                @RoundaboutExitText
-                            </span>
-                        }
-                    </div>
-                    <div style="min-width: 0;">
-                        <MudText Style="font-size: 2.25rem; font-weight: 700; line-height: 1.1;">
-                            @L.FormatTurnDistance(Status?.DistanceToNextTurnM)
-                        </MudText>
-                        <MudText Typo="Typo.subtitle1"
-                                 Style="font-size: 1.1rem; font-weight: 500; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
+                <!-- Next maneuver: arrow (+ roundabout exit), distance, instruction -->
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="4" Class="mud-theme-primary px-4 py-3">
+                    <MudBadge Content="@RoundaboutExitText"
+                              Visible="@(Maneuver.RoundaboutExitCount is > 0)"
+                              Color="Color.Secondary"
+                              Overlap="true"
+                              Bordered="true"
+                              Origin="Origin.BottomRight">
+                        <MudAvatar Color="Color.Dark" Size="Size.Large">
+                            @* The one size MudBlazor has no preset for: the turn arrow, read at a glance. *@
+                            <MudIcon Icon="@TurnIcon" Style="font-size: 3rem;"/>
+                        </MudAvatar>
+                    </MudBadge>
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.h2">@L.FormatTurnDistance(Status?.DistanceToNextTurnM)</MudText>
+                        <MudText Typo="Typo.h6">
                             @(string.IsNullOrWhiteSpace(Maneuver.Instruction) ? TurnLabel : Maneuver.Instruction)
                         </MudText>
-                    </div>
-                </div>
+                    </MudStack>
+                </MudStack>
             }
 
             @if (Status != null)
             {
                 <!-- Trip info + progress along the route (by distance) -->
-                <div class="d-flex justify-space-around align-start px-2 py-2">
-                    <div class="d-flex flex-column align-center">
-                        <MudText Style="font-size: 1.2rem; font-weight: 700;">@DisplayFormat.FormatArrivalTime(Status.RemainingTimeMin)</MudText>
+                <MudStack Row="true" Justify="Justify.SpaceAround" Class="pa-2">
+                    <MudStack Spacing="0" AlignItems="AlignItems.Center">
+                        <MudText Typo="Typo.h6">@DisplayFormat.FormatArrivalTime(Status.RemainingTimeMin)</MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">@L["NavEta"]</MudText>
-                    </div>
-                    <div class="d-flex flex-column align-center">
-                        <MudText Style="font-size: 1.2rem; font-weight: 700;">@L.FormatDuration(Status.RemainingTimeMin)</MudText>
+                    </MudStack>
+                    <MudStack Spacing="0" AlignItems="AlignItems.Center">
+                        <MudText Typo="Typo.h6">@L.FormatDuration(Status.RemainingTimeMin)</MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">@L["NavRemainingTime"]</MudText>
-                    </div>
-                    <div class="d-flex flex-column align-center">
-                        <MudText Style="font-size: 1.2rem; font-weight: 700;">@string.Format(L["Km"], Status.RemainingDistanceKm)</MudText>
+                    </MudStack>
+                    <MudStack Spacing="0" AlignItems="AlignItems.Center">
+                        <MudText Typo="Typo.h6">@string.Format(L["Km"], Status.RemainingDistanceKm)</MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">@L["NavRemainingDistance"]</MudText>
-                    </div>
-                </div>
+                    </MudStack>
+                </MudStack>
                 <MudProgressLinear Value="@ProgressPercent" Color="Color.Primary" Size="Size.Small"/>
             }
         </MudPaper>
     }
 
     <!-- Status hints below the HUD -->
-    <div class="d-flex flex-wrap gap-2 mt-2">
-        @if (ClosureCheckRunning)
-        {
-            <MudPaper Elevation="3" Class="d-flex align-center gap-2 px-3 py-1" Style="border-radius: 12px;">
-                <MudProgressCircular Color="Color.Warning" Size="Size.Small" Indeterminate="true"/>
-                <MudText Typo="Typo.body2">@L["ClosureCheckRunning"]</MudText>
-            </MudPaper>
-        }
-        @if (GpsAccuracyM > GpsIgnoredAccuracyM)
-        {
-            <MudPaper Elevation="3" Class="d-flex align-center gap-2 px-3 py-1" Style="border-radius: 12px;">
-                <MudIcon Icon="@Icons.Material.Filled.GpsNotFixed" Color="Color.Warning" Size="Size.Small"/>
-                <MudText Typo="Typo.body2">@string.Format(L["NavGpsWeak"], GpsAccuracyM)</MudText>
-            </MudPaper>
-        }
-    </div>
-</div>
+    @if (ClosureCheckRunning || GpsWeak)
+    {
+        <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="0">
+            @if (ClosureCheckRunning)
+            {
+                <MudChip T="string" Color="Color.Info" Icon="@Icons.Material.Filled.Construction" Text="@L["ClosureCheckRunning"]"/>
+            }
+            @if (GpsWeak)
+            {
+                <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.GpsNotFixed" Text="@string.Format(L["NavGpsWeak"], GpsAccuracyM)"/>
+            }
+        </MudStack>
+    }
+</MudStack>

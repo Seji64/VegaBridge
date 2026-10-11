@@ -58,7 +58,8 @@ public static class VegaTheme
         {
             Default = new DefaultTypography { FontFamily = ["Segoe UI", "system-ui", "sans-serif"] },
             H1 = new H1Typography { FontSize = "2.5rem" },
-            H2 = new H2Typography { FontSize = "2rem" },
+            // Distance to the next turn in the navigation HUD – bold, read at a glance.
+            H2 = new H2Typography { FontSize = "2rem", FontWeight = "700" },
             H3 = new H3Typography { FontSize = "1.5rem" },
             H4 = new H4Typography { FontSize = "1.25rem" },
             H5 = new H5Typography { FontSize = "1.1rem" },

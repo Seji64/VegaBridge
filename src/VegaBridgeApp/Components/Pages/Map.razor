@@ -150,15 +150,17 @@
                     <!-- Route summary: length and approximate riding time -->
                     @if (_currentRouteResponse?.Trip?.Summary is { } summary)
                     {
-                        <MudPaper Outlined="true" Class="d-flex justify-space-around align-center flex-wrap gap-2 mt-2 px-2 py-1">
-                            <div class="d-flex align-center gap-1">
-                                <MudIcon Icon="@Icons.Material.Filled.Straighten" Color="Color.Primary" Size="Size.Small"/>
-                                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@string.Format(L["Km"], summary.Length)</MudText>
-                            </div>
-                            <div class="d-flex align-center gap-1">
-                                <MudIcon Icon="@Icons.Material.Filled.Schedule" Color="Color.Primary" Size="Size.Small"/>
-                                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@string.Format(L["RouteDurationApprox"], L.FormatDuration(summary.Time / 60.0))</MudText>
-                            </div>
+                        <MudPaper Outlined="true" Class="mt-2 pa-2">
+                            <MudStack Row="true" Justify="Justify.SpaceAround" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudIcon Icon="@Icons.Material.Filled.Straighten" Color="Color.Primary" Size="Size.Small"/>
+                                    <MudText Typo="Typo.h6">@string.Format(L["Km"], summary.Length)</MudText>
+                                </MudStack>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudIcon Icon="@Icons.Material.Filled.Schedule" Color="Color.Primary" Size="Size.Small"/>
+                                    <MudText Typo="Typo.h6">@string.Format(L["RouteDurationApprox"], L.FormatDuration(summary.Time / 60.0))</MudText>
+                                </MudStack>
+                            </MudStack>
                         </MudPaper>
                     }
 
@@ -196,8 +198,8 @@
             
             <!-- Map buttons (bottom right): navigation actions above the
                  always visible my-location button. -->
-            <div class="d-flex flex-column align-center gap-4"
-                 style="position: absolute; bottom: 150px; right: 16px; z-index: 200; pointer-events: auto;">
+            <MudStack AlignItems="AlignItems.Center" Spacing="4"
+                      Style="position: absolute; bottom: 150px; right: 16px; z-index: 200; pointer-events: auto;">
                 @if (NavService.IsNavigating)
                 {
                     @if (HasWaypointToSkip)
@@ -220,7 +222,7 @@
                         StartIcon="@(Gps.IsTracking ? Icons.Material.Filled.MyLocation : Icons.Material.Outlined.MyLocation)"
                         Size="@(NavService.IsNavigating ? Size.Medium : Size.Small)"
                         OnClick="@GetMyCurrentPosition"/>
-            </div>
+            </MudStack>
         </div>
     </div>
 </MudContainer>
