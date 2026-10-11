@@ -168,6 +168,8 @@
                                          OpenOnFocus="true"
                                          Strict="true"
                                          DebounceInterval="300"
+                                         ShowProgressIndicator="true"
+                                         ProgressIndicatorColor="@Color.Info"
                                          Clearable="true">
                             <BeforeItemsTemplate>
                                 <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_startAuto, pin))"/>
@@ -226,6 +228,8 @@
                                          OpenOnFocus="true"
                                          Strict="true"
                                          DebounceInterval="300"
+                                         ShowProgressIndicator="true"
+                                         ProgressIndicatorColor="@Color.Info"
                                          Clearable="true">
                             <BeforeItemsTemplate>
                                 <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_destAuto, pin))"/>
