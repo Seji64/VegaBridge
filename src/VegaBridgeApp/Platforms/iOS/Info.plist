@@ -58,6 +58,11 @@
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>This app uses Bluetooth to communicate with your motorcycle for turn-by-turn navigation.</string>
 
+    <!-- Export Compliance: nur HTTPS über das OS (exempt). Ohne den Key hängt jeder
+         TestFlight-Build auf "Missing Compliance", bis die Frage manuell beantwortet ist. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+
     <!-- UIScene Lifecycle (Pflicht im iOS 27 SDK / Xcode 27, sonst Launch-Crash: NoSceneLifecycleAdoption) -->
     <key>UIApplicationSceneManifest</key>
     <dict>
