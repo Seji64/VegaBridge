@@ -77,7 +77,8 @@ GpsService.ReadingReceived → OnGpsReading()
   │
   ├─ Snap to route (SnapToRoute: window around the progress,
   │   100m back / 500m ahead – a later pass over the same road,
-  │   e.g. a round trip's end at its start, is never matched early)
+  │   e.g. a round trip's end at its start, is never matched early;
+  │   after a GPS gap the window also covers gap × 70 m/s)
   │
   ├─ Off-Route Detection (Gated Topology)
   │   ├─ FAST PATH: XTE ≤ 20m (40m within 30m of a turn) → ON_ROUTE
@@ -212,6 +213,7 @@ Throttles and cooldowns run on the GPS fix timestamps (≈ wall clock at 1 Hz).
 | Parallel road < 20m | Not detected – not separable by GPS |
 | GPS drift on the route road (city) | Locate confirms way_id → ON_ROUTE |
 | Tunnel / bad GPS (accuracy > 40m) | Tick ignored entirely, state frozen |
+| Long tunnel (no fix, > 500m) | Snap window grows with the gap → caught up at the exit, imprecise exit fixes are not "far from route" |
 | Round trip / overlapping route | Progress window: later pass is not matched early |
 
 ### Cost Optimization
@@ -333,6 +335,7 @@ Valhalla maneuvers describe the action at their BEGIN index (the turn happens AT
 | `LocateCooldownSec` | 4s | No /locate after a way_id match |
 | `RerouteMinIntervalSec` | 30s | Min interval between automatic reroutes |
 | `SnapBackToleranceM` / `SnapForwardWindowM` | 100m / 500m | Snap window around the progress |
+| `SnapGapMaxSpeedMs` | 70 m/s | After a GPS gap the forward window is at least gap × this |
 | `WrongWayHeadingThresholdDeg` | 135° | Heading divergence for wrong-way detection |
 | `WrongWayMinSpeedMs` | 2.78 m/s | Min speed for wrong-way check (10 km/h) |
 | `GpsSmoothingAlpha` | 0.7 | EMA weight for newest reading |

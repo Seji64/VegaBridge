@@ -216,6 +216,100 @@ public class NavigationServiceTests
         Assert.False(RerouteRequested());
     }
 
+    [Fact]
+    public async Task Tunnel_NoGps_CatchesUpAtTheExit()
+    {
+        // 700 m tunnel (longer than the snap window) at 90 km/h: no fix for
+        // 28 s, GPS is back 100 m before the right turn at B.
+        await StartAsync(Leg(Right, A, B, C));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 28);
+        Fix(Lerp(A, B, 0.9), speedMs: 25, headingDeg: 0);
+
+        Assert.Equal(1, _sink.LastStatus!.CurrentManeuverIndex);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 75, 125);
+        Assert.InRange(_sink.LastStatus.RemainingDistanceKm, 1.05, 1.15);
+
+        foreach (Coordinate p in Ride(25, Lerp(A, B, 0.9), B, Lerp(B, C, 0.3)))
+            Fix(p, speedMs: 25, headingDeg: p.Latitude < B.Latitude ? 0 : 90);
+        Assert.True(_nav.IsNavigating);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
+    [Fact]
+    public async Task Tunnel_TurnInsideTheTunnel_ContinuesWithTheNextManeuver()
+    {
+        // Junction inside a 1 km tunnel: the turn at B is passed without GPS.
+        await StartAsync(Leg(Right, A, B, C, D));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.5)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 40);
+        Fix(Lerp(B, C, 0.5), speedMs: 25, headingDeg: 90);
+
+        Assert.Equal(2, _sink.LastStatus!.CurrentManeuverIndex); // right turn at C
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 450, 525);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
+    [Fact]
+    public async Task Tunnel_PoorAccuracyFixes_AreIgnored()
+    {
+        // No satellites: the phone reports stale or cell-tower positions up to
+        // 300 m beside the road (accuracy 80–1500 m) for 30 s.
+        await StartAsync(Leg(Right, A, B, C));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+        NavigationStatus beforeTunnel = _sink.LastStatus!;
+
+        Coordinate entrance = Lerp(A, B, 0.2);
+        for (int i = 0; i < 30; i++)
+        {
+            Coordinate p = (i % 3) switch
+            {
+                0 => entrance,
+                1 => new Coordinate(entrance.Latitude, entrance.Longitude + 300 * LonPerMeter, null),
+                _ => new Coordinate(entrance.Latitude + 0.002, entrance.Longitude - 150 * LonPerMeter, null)
+            };
+            Fix(p, speedMs: i % 2 * 25, headingDeg: i * 37 % 360, accuracyM: 80 + i * 50);
+        }
+
+        Assert.Same(beforeTunnel, _sink.LastStatus);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+
+        Fix(Lerp(A, B, 0.9), speedMs: 25, headingDeg: 0);
+        Assert.InRange(_sink.LastStatus!.DistanceToNextTurnM, 75, 125);
+        Assert.True(_nav.IsNavigating);
+    }
+
+    [Fact]
+    public async Task Tunnel_ImpreciseFixesAfterExit_AreNotOffRoute()
+    {
+        // GPS needs a few seconds after the tunnel: the first fixes after the
+        // 700 m tunnel are 25–35 m beside the road (locate: route road).
+        await StartAsync(Leg(Right, A, B, C));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 28);
+        List<Coordinate> exit = Ride(25, Lerp(A, B, 0.88), B);
+        for (int i = 0; i < exit.Count; i++)
+        {
+            double offM = i < 5 ? 25 + i * 2.5 : 0;
+            Fix(new Coordinate(exit[i].Latitude, exit[i].Longitude + offM * LonPerMeter, null),
+                speedMs: 25, headingDeg: 0, accuracyM: i < 5 ? 30 : 5);
+        }
+
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+        Assert.True(_nav.IsNavigating);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private Task StartAsync(Leg leg) => StartAsync([leg], []);
@@ -262,12 +356,12 @@ public class NavigationServiceTests
         return ride;
     }
 
-    private void Fix(Coordinate p, double speedMs = 0, double headingDeg = -1)
+    private void Fix(Coordinate p, double speedMs = 0, double headingDeg = -1, double accuracyM = 5)
     {
         _time = _time.AddSeconds(1);
         _gps.PublishSimulated(new GpsReading(
             new Position(p.Latitude, p.Longitude),
-            PositionAccuracy: 5,
+            PositionAccuracy: accuracyM,
             Timestamp: _time,
             Heading: headingDeg,
             HeadingAccuracy: 10,
@@ -276,6 +370,9 @@ public class NavigationServiceTests
             SpeedAccuracy: 1,
             IsStationary: speedMs == 0));
     }
+
+    /// <summary>No fix for <paramref name="seconds"/> (tunnel).</summary>
+    private void GpsGap(int seconds) => _time = _time.AddSeconds(seconds);
 
     /// <summary>Fake Valhalla locate: which OSM way is at a position.</summary>
     private void LocateWay(Func<double, double, long> wayAt) =>

@@ -159,6 +159,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private int _lastSnappedIndex = -1;
     private const double SnapBackToleranceM = 100.0;
     private const double SnapForwardWindowM = 500.0;
+    // After a GPS gap (tunnel) the window also covers the distance the rider
+    // can have travelled meanwhile (~250 km/h).
+    private const double SnapGapMaxSpeedMs = 70.0;
 
     // ── Properties ───────────────────────────────────────────────────────
     public bool IsNavigating => _isNavigating;
@@ -726,7 +729,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             // after a tunnel would pull the position far off the road)
             double smoothLat = reading.Position.Latitude;
             double smoothLon = reading.Position.Longitude;
-            if ((reading.Timestamp - _lastFixAt).TotalSeconds > SmoothingResetGapSec)
+            double gapSec = (reading.Timestamp - _lastFixAt).TotalSeconds;
+            if (gapSec > SmoothingResetGapSec)
                 _lastSmoothedPosition = null;
             _lastFixAt = reading.Timestamp;
             if (_lastSmoothedPosition != null)
@@ -753,7 +757,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             double navLon = smoothLon;
 
             // Snap to route
-            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon);
+            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon, gapSec);
             if (snappedIndex < 0) return;
 
             // Near a turn? (Not "inside a maneuver span": every route point
@@ -982,7 +986,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// so a later pass over the same road (round trip, out-and-back) is not
     /// matched before its time.
     /// </summary>
-    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon)
+    /// <param name="gapSec">Seconds since the previous usable fix.</param>
+    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double gapSec)
     {
         (int Index, double DistanceMeters) result;
         if (_lastSnappedIndex < 0)
@@ -995,8 +1000,12 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         }
         else
         {
+            // After a tunnel the rider is further ahead: measured against the
+            // window before it, every slightly imprecise fix at the exit was
+            // "far from route" → false off-route and reroute.
             int from = IndexAtRouteOffset(_lastSnappedIndex, -SnapBackToleranceM);
-            int to = IndexAtRouteOffset(_lastSnappedIndex, SnapForwardWindowM);
+            int to = IndexAtRouteOffset(_lastSnappedIndex,
+                Math.Max(SnapForwardWindowM, gapSec * SnapGapMaxSpeedMs));
             result = FindNearestRouteIndex(lat, lon, from, to);
             if (result.DistanceMeters > SuspectXteM)
             {
