@@ -5,7 +5,6 @@ using MudBlazor;
 using Serilog;
 using VegaBridgeApp.Models.BLE;
 using VegaBridgeApp.Models.Geocoding;
-using VegaBridgeApp.Services.BLE;
 using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Components.Pages;

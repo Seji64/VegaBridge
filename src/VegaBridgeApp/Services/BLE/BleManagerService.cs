@@ -1,13 +1,9 @@
 using System.Collections.Concurrent;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
-using Microsoft.Maui.ApplicationModel;
-using Microsoft.Maui.Storage;
 using Serilog;
 using Shiny.BluetoothLE;
 using VegaBridgeApp.Models.BLE;
-using VegaBridgeApp.Services.BLE.Plugins;
-using VegaBridgeApp.Services.Debug;
 
 namespace VegaBridgeApp.Services.BLE;
 
@@ -149,12 +145,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 // or "0000180d-..."); plugin.ServiceUuid is a Guid. Compare
                 // case-insensitively on the full 36-char form.
                 string pluginUuid = plugin.ServiceUuid.ToString().ToUpperInvariant();
-                if (services.Any(s => NormalizeUuid(s.Uuid) == pluginUuid))
-                {
-                    Log.Information("BLE: plugin {Plugin} matched via service UUID {Uuid} for {Device}",
-                        plugin.DisplayName, plugin.ServiceUuid, peripheral.Uuid);
-                    return plugin;
-                }
+                if (services.All(s => NormalizeUuid(s.Uuid) != pluginUuid)) continue;
+                Log.Information("BLE: plugin {Plugin} matched via service UUID {Uuid} for {Device}",
+                    plugin.DisplayName, plugin.ServiceUuid, peripheral.Uuid);
+                return plugin;
             }
 
             Log.Warning("BLE: no plugin matched the service list of {Uuid} ({Services} services)",
@@ -199,18 +193,18 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     public async Task<bool> ConnectAsync(Guid deviceUuid)
     {
-        if (!_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out IPeripheral? peripheral))
-        {
-            UpdateError("Device not found. Please scan again.", isCritical: false);
-            return false;
-        }
+        if (_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out IPeripheral? peripheral))
+            return await ConnectAsync(peripheral, TimeSpan.FromSeconds(30), reportFailure: true);
+        UpdateError("Device not found. Please scan again.", isCritical: false);
+        return false;
 
-        return await ConnectAsync(peripheral, TimeSpan.FromSeconds(30), reportFailure: true);
     }
 
+    /// <param name="timeout"></param>
     /// <param name="reportFailure">false for auto-connect: a failed attempt is
     /// logged only – the bike is usually just not switched on yet, which is
     /// not worth an error banner.</param>
+    /// <param name="peripheral"></param>
     private async Task<bool> ConnectAsync(IPeripheral peripheral, TimeSpan timeout, bool reportFailure)
     {
         if (CurrentState == BleConnectionState.Connecting) return false;
@@ -237,12 +231,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             // "Unknown" (not read yet). Fall back to GATT service-UUID
             // matching against each plugin's ServiceUuid.
             BleDeviceInfo deviceInfo = new() { Uuid = deviceUuid, Name = peripheral.Name ?? "Unknown" };
-            _activePlugin = _plugins.FirstOrDefault(p => p.IsCompatible(deviceInfo));
-
-            if (_activePlugin == null)
-            {
-                _activePlugin = await SelectPluginByServiceUuidAsync(peripheral);
-            }
+            _activePlugin = _plugins.FirstOrDefault(p => p.IsCompatible(deviceInfo)) ?? await SelectPluginByServiceUuidAsync(peripheral);
 
             if (_activePlugin == null)
             {
@@ -280,7 +269,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             }
             else
             {
-                Log.Information("BLE auto-connect to {Uuid} did not complete: {Error}", deviceUuid, ex.Message);
+                Log.Information(ex, "BLE auto-connect to {Uuid} did not complete:", deviceUuid);
             }
             return false;
         }
@@ -457,7 +446,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// Throws when the frame is not written (link down, characteristic not
     /// found, or dropped because the W2R buffer stays full).
     /// </summary>
-    private Task WriteNativeAsync(Shiny.BluetoothLE.Peripheral apple, string serviceUuid, string characteristicUuid, byte[] data)
+    private Task WriteNativeAsync(Peripheral apple, string serviceUuid, string characteristicUuid, byte[] data)
     {
         return MainThread.InvokeOnMainThreadAsync(async () =>
         {
@@ -467,10 +456,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             CoreBluetooth.CBUUID serviceId = CoreBluetooth.CBUUID.FromString(serviceUuid);
             CoreBluetooth.CBUUID charId = CoreBluetooth.CBUUID.FromString(characteristicUuid);
-            // Looked up per write: a reconnect invalidates the old CBCharacteristic.
-            CoreBluetooth.CBCharacteristic? Find() => native.Services?
-                .FirstOrDefault(s => s.UUID.Equals(serviceId))?.Characteristics?
-                .FirstOrDefault(c => c.UUID.Equals(charId));
+
             CoreBluetooth.CBCharacteristic? ch = Find();
             if (ch == null)
             {
@@ -531,6 +517,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             }
 
             native.WriteValue(Foundation.NSData.FromArray(data), ch, CoreBluetooth.CBCharacteristicWriteType.WithoutResponse);
+            return;
+
+            // Looked up per write: a reconnect invalidates the old CBCharacteristic.
+            CoreBluetooth.CBCharacteristic? Find() => native.Services?
+                .FirstOrDefault(s => s.UUID.Equals(serviceId))?.Characteristics?
+                .FirstOrDefault(c => c.UUID.Equals(charId));
         });
     }
 
@@ -659,12 +651,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             foreach (IPeripheral connected in bleManager.GetConnectedPeripherals())
             {
                 string key = connected.Uuid.ToUpper();
-                if (!_discoveredPeripherals.ContainsKey(key))
-                {
-                    _discoveredPeripherals[key] = connected;
-                    Log.Information("BLE: OS-connected peripheral found: {Uuid} ({Name})",
-                        connected.Uuid, connected.Name ?? "Unknown");
-                }
+                if (!_discoveredPeripherals.TryAdd(key, connected)) continue;
+                Log.Information("BLE: OS-connected peripheral found: {Uuid} ({Name})",
+                    connected.Uuid, connected.Name ?? "Unknown");
             }
             UpdateDeviceList();
         }
@@ -692,36 +681,34 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         // Docs: re-run per-connection setup whenever the (auto-)reconnected
         // link comes back. This is the ONLY reconnect hook we own.
         IObservable<IPeripheral> connected = peripheral.WhenConnected();
-        var connectedSub = connected.Subscribe(_ => OnLinkRestored(peripheral));
+        IDisposable connectedSub = connected.Subscribe(_ => OnLinkRestored(peripheral));
 
         // UI state tracking only – never a reconnect trigger (docs: a home-grown
         // WhenDisconnected→Connect loop fights Shiny's auto-reconnect).
-        var statusSub = peripheral.WhenStatusChanged()
+        IDisposable statusSub = peripheral.WhenStatusChanged()
             .Subscribe(status =>
             {
                 if (!ReferenceEquals(_activePeripheral, peripheral)) return;
-                if (status == ConnectionState.Disconnected)
+                if (status != ConnectionState.Disconnected) return;
+                // Log-only (timeline marker) – Shiny's AutoConnect owns the
+                // actual reconnection, we never act on this event.
+                Log.Information("BLE-LOGGER: {Line}",
+                    $"BLE peripheral {peripheral.Uuid} status -> Disconnected{(_userInitiatedDisconnect ? " (user-initiated)" : " – Shiny auto-reconnect in progress")}");
+                _state.OnNext(BleConnectionState.Idle);
+                if (!_userInitiatedDisconnect)
                 {
-                    // Log-only (timeline marker) – Shiny's AutoConnect owns the
-                    // actual reconnection, we never act on this event.
-                    Log.Information("BLE-LOGGER: {Line}",
-                        $"BLE peripheral {peripheral.Uuid} status -> Disconnected{(_userInitiatedDisconnect ? " (user-initiated)" : " – Shiny auto-reconnect in progress")}");
-                    _state.OnNext(BleConnectionState.Idle);
-                    if (!_userInitiatedDisconnect)
-                    {
-                        UpdateError("Connection lost – reconnecting (automatic).", isCritical: false);
-                    }
-                    UpdateDeviceList();
+                    UpdateError("Connection lost – reconnecting (automatic).", isCritical: false);
                 }
+                UpdateDeviceList();
             });
 
         // In-flight operations fault with BleException on a dead link; Shiny's
         // auto-reconnect retries once the peripheral reports Connected again.
         // We only log failures – no reconnect logic here.
-        var failSub = peripheral.WhenConnectionFailed()
+        IDisposable failSub = peripheral.WhenConnectionFailed()
             .Subscribe(ex =>
             {
-                Log.Warning("Connection failed for {Uuid}: {Error}", peripheral.Uuid, ex.Message);
+                Log.Warning(ex, "Connection failed for {Uuid}:", peripheral.Uuid);
             });
 
         _connectionSubscription = new System.Reactive.Disposables.CompositeDisposable(connectedSub, statusSub, failSub);
@@ -747,10 +734,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         // Plugin may still be null after a background drop (or the name was
         // only readable now) – re-select like in ConnectAsync().
-        if (_activePlugin == null)
-        {
-            _activePlugin = SelectActivePlugin(peripheral);
-        }
+        _activePlugin ??= SelectActivePlugin(peripheral);
 
         SetupNotifications(peripheral);
         // No keepalive re-arm needed: the navigation coordinator's 15 s PING
@@ -882,7 +866,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// </summary>
     public async Task<bool> TryAutoConnectAsync()
     {
-        string? lastUuid = Preferences.Get(LastDeviceUuidKey, (string?)null);
+        string? lastUuid = Preferences.Get(LastDeviceUuidKey, null);
         if (!AutoConnectEnabled || string.IsNullOrEmpty(lastUuid)
             || _activePeripheral != null || _userInitiatedDisconnect)
             return false;
@@ -940,7 +924,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         {
             string serviceUuid = plugin.ServiceUuid.ToString();
 #if IOS || MACCATALYST
-            if (peripheral is Shiny.BluetoothLE.Peripheral apple)
+            if (peripheral is Peripheral apple)
                 return owner.WriteNativeAsync(apple, serviceUuid, characteristicUuid, data);
 #endif
             return peripheral.WriteCharacteristicAsync(serviceUuid, characteristicUuid, data, withResponse: false);

@@ -998,7 +998,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         try
         {
             (string combinedShape, _, double totalDistanceKm, double totalTimeMinutes) =
-                NavService.PrepareNavigationData(_currentRouteResponse!.Trip!.Legs);
+                NavigationService.PrepareNavigationData(_currentRouteResponse!.Trip!.Legs);
 
             route.Name = routeName;
             route.Avoid = Avoid;
@@ -1083,7 +1083,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         try
         {
             (string mergedShape, List<Maneuver> allManeuvers, double totalKm, double totalMin) =
-                NavService.PrepareNavigationData(_currentRouteResponse.Trip.Legs);
+                NavigationService.PrepareNavigationData(_currentRouteResponse.Trip.Legs);
 
             // Pass the intermediate waypoints to the navigation service so a
             // reroute (off-route or skip-waypoint) keeps driving through the
@@ -1447,7 +1447,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         OpenStreetMap? map = _map;
         if (map == null) return;
 
-        (string combinedShape, _, _, _) = NavService.PrepareNavigationData(response.Trip.Legs);
+        (string combinedShape, _, _, _) = NavigationService.PrepareNavigationData(response.Trip.Legs);
 
         if (string.IsNullOrEmpty(combinedShape))
         {
@@ -1561,7 +1561,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         try
         {
             // Decode the route geometry so the service can build the corridor.
-            (string mergedShape, _, _, _) = NavService.PrepareNavigationData(response.Trip?.Legs ?? []);
+            (string mergedShape, _, _, _) = NavigationService.PrepareNavigationData(response.Trip?.Legs ?? []);
             List<Coordinate> routeCoords = PolylineEncoder.DecodePolyline6(mergedShape);
             if (routeCoords.Count < 2) return;
 

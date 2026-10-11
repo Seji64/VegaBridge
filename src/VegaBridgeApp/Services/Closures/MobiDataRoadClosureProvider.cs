@@ -27,7 +27,7 @@ public class MobiDataRoadClosureProvider : IRoadClosureProvider
 {
     internal const string HttpClientName = "MobiDataBW";
     internal const int RetryCount = 2;
-    internal static readonly TimeSpan CacheDuration = TimeSpan.FromHours(6);
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(6);
 
     /// <inheritdoc />
     public string Key => "mobidata";

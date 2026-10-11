@@ -104,7 +104,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
     // Serializes BLE frame writes so concurrent update chains cannot interleave.
     // Send-Gate: if 1, a BLE write is in progress. New frames are discarded
     // immediately (backpressure) instead of queuing behind a stuck write.
-    private int _isWriting = 0;
+    private int _isWriting;
 
     // Current context
     private NavigationManeuverInfo? _currentManeuver;
@@ -129,7 +129,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             .Where(s => s == BleConnectionState.Connected)
             .Subscribe(state => _ = OnLinkUpAsync()); // fire-and-forget: errors are logged inside
 
-        Log.Information("BleNavigationCoordinator is now active.");
+        Log.Information("BleNavigationCoordinator is now active");
     }
 
     public void Dispose()
@@ -331,7 +331,7 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
             Log.Debug("Send gate busy – discarding stale navigation update");
             return;
         }
-        bool delivered = false;
+        bool delivered;
         try
         {
             delivered = await _bleManager.ExecuteNavigationUpdateAsync(input);

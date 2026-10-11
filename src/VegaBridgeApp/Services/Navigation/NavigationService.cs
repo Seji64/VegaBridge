@@ -425,8 +425,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
         double currentLat, double currentLon, bool skipNextWaypoint)
     {
         Models.Valhalla.Location? skippedVia = null;
-        if (!_isNavigating || _destination == null) return (false, null);
-        if (Interlocked.Exchange(ref _rerouteRunning, 1) == 1) return (false, null);
+        if (!_isNavigating || _destination == null || Interlocked.Exchange(ref _rerouteRunning, 1) == 1) return (false, null);
 
         try
         {
@@ -547,7 +546,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     /// <summary>
     /// Replace the route mid-navigation after a reroute.
     /// </summary>
-    public void Reroute(string mergedShape, List<Maneuver> maneuvers, double totalDistanceKm, double totalTimeMin)
+    private void Reroute(string mergedShape, List<Maneuver> maneuvers, double totalDistanceKm, double totalTimeMin)
     {
         List<int> waypointIndices = WaypointShapeIndices(maneuvers);
         lock (_lock)
@@ -573,7 +572,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     /// Merges all leg shapes into a single polyline6 string, collecting all maneuvers
     /// with adjusted shape indices.
     /// </summary>
-    public (string MergedShape, List<Maneuver> Maneuvers, double TotalKm, double TotalMin)
+    public static (string MergedShape, List<Maneuver> Maneuvers, double TotalKm, double TotalMin)
         PrepareNavigationData(IReadOnlyList<Leg> legs)
     {
         List<Coordinate> allCoords = [];
@@ -1145,8 +1144,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     /// so a later pass over the same road (round trip, out-and-back) is not
     /// matched before its time.
     /// </summary>
+    /// <param name="lon"></param>
     /// <param name="gapM">How far the rider can have got since the previous usable fix.</param>
     /// <param name="headingDeg">Travel direction while moving, else -1.</param>
+    /// <param name="lat"></param>
     private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double gapM, double headingDeg)
     {
         (int Index, double DistanceMeters) result;
@@ -1212,19 +1213,19 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
         if (_cumulativeDistances.Length == 0) return index;
         double target = _cumulativeDistances[index] + offsetM;
         int i = Array.BinarySearch(_cumulativeDistances, target);
-        if (i < 0)
-        {
-            i = ~i; // first index beyond target
-            if (offsetM < 0) i--;
-        }
+        if (i >= 0) return Math.Clamp(i, 0, _cumulativeDistances.Length - 1);
+        i = ~i; // first index beyond target
+        if (offsetM < 0) i--;
         return Math.Clamp(i, 0, _cumulativeDistances.Length - 1);
     }
 
+    /// <param name="lon"></param>
     /// <param name="fromIndex">First route index to consider.</param>
     /// <param name="toIndex">Last route index to consider.</param>
     /// <param name="earliestSlackM">When &gt; 0, return the earliest route
     /// point within best distance + slack instead of the nearest one, so the
     /// earlier of two passes over the same place wins.</param>
+    /// <param name="lat"></param>
     private (int Index, double DistanceMeters) FindNearestRouteIndex(
         double lat, double lon, int fromIndex = 0, int toIndex = int.MaxValue, double earliestSlackM = 0)
     {
@@ -1362,7 +1363,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
 
         try
         {
-            var results = await valhallaClient.LocateAsync([(lat, lon)], speedMs, heading);
+            List<LocateResponse?> results = await valhallaClient.LocateAsync([(lat, lon)], speedMs, heading);
             if (results.Count == 0 || results[0]?.Edges is not { Count: > 0 })
             {
                 // Topology inconclusive — no edges at all. Count like mismatch.
@@ -1448,12 +1449,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
         _topologyOffRouteCounter++;
         Log.Information("Locate: off-route candidate ({Count}/{Threshold}), reason={Reason}",
             _topologyOffRouteCounter, OffRouteConfirmCount, reason);
-        if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
-        {
-            _isOffRoute = true;
-            Log.Warning("Off route (topology)! {Reason}, dist={Dist:F1}m", reason, distanceMeters);
-            _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
-        }
+        if (_topologyOffRouteCounter < OffRouteConfirmCount || _isOffRoute) return;
+        _isOffRoute = true;
+        Log.Warning("Off route (topology)! {Reason}, dist={Dist:F1}m", reason, distanceMeters);
+        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
     }
 
     private void LogTelemetry()
