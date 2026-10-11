@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shiny;
 using Shiny.Locations;
@@ -32,6 +33,7 @@ public class NavigationServiceTests
     private readonly IValhallaClient _valhalla = Substitute.For<IValhallaClient>();
     private readonly NavigationService _nav;
     private readonly TestSink _sink = new();
+    private readonly FakeTimeProvider _clock = new();
     private DateTimeOffset _time = DateTimeOffset.UtcNow;
 
     public NavigationServiceTests()
@@ -46,7 +48,7 @@ public class NavigationServiceTests
         _valhalla.GetRouteAsync(Arg.Any<RouteRequest>(), Arg.Any<CancellationToken>())
             .Returns(Result.Failure("no route in tests"));
 
-        _nav = new NavigationService(_gps, _valhalla);
+        _nav = new NavigationService(_gps, _valhalla, _clock);
         _nav.AddSink(_sink);
     }
 
@@ -264,7 +266,7 @@ public class NavigationServiceTests
         await StartAsync(Leg(Right, A, B, C));
         foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
             Fix(p, speedMs: 25, headingDeg: 0);
-        NavigationStatus beforeTunnel = _sink.LastStatus!;
+        double beforeTunnelM = _sink.LastStatus!.DistanceToNextTurnM;
 
         Coordinate entrance = Lerp(A, B, 0.2);
         for (int i = 0; i < 30; i++)
@@ -278,7 +280,9 @@ public class NavigationServiceTests
             Fix(p, speedMs: i % 2 * 25, headingDeg: i * 37 % 360, accuracyM: 80 + i * 50);
         }
 
-        Assert.Same(beforeTunnel, _sink.LastStatus);
+        // Only the estimate moves on – the bad fixes are not used.
+        Assert.True(_sink.LastStatus!.IsEstimated);
+        Assert.True(_sink.LastStatus.DistanceToNextTurnM < beforeTunnelM);
         Assert.False(_sink.OffRoute);
         Assert.False(RerouteRequested());
 
@@ -310,6 +314,107 @@ public class NavigationServiceTests
         Assert.True(_nav.IsNavigating);
     }
 
+    [Fact]
+    public async Task GpsLost_EstimateCountsDown_AndStops500mAfterTheLastFix()
+    {
+        // No tunnel known: the turn 800 m ahead keeps counting down at the
+        // last speed (90 km/h), but the estimate only goes 500 m.
+        await StartAsync(Leg(Right, A, B, C));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 10);
+        Assert.True(_sink.LastStatus!.IsEstimated);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 500, 600);
+
+        GpsGap(seconds: 30);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 270, 330);
+
+        Fix(Lerp(A, B, 0.9), speedMs: 25, headingDeg: 0);
+        Assert.False(_sink.LastStatus.IsEstimated);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 75, 125);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
+    [Fact]
+    public async Task Tunnel_KnownFromValhalla_EstimateRunsThroughTheWholeTunnel()
+    {
+        // 2.4 km tunnel (shape points 1–2), right turn 300 m after its exit.
+        Coordinate n = new(48.0270, 9.0000, null);  // ~3 km north
+        Coordinate e = new(48.0270, 9.0134, null);  // ~1 km east of it
+        Tunnels((1, 2));
+        await StartAsync(Leg([A, Lerp(A, n, 0.1), Lerp(A, n, 0.9), n, e], (3, Right)));
+        await _valhalla.Received(1).GetTraceAttributesAsync(
+            Arg.Is<TraceAttributesRequest>(r => r.ShapeMatch == "edge_walk" && r.Filters!.Attributes.Contains("edge.tunnel")),
+            Arg.Any<CancellationToken>());
+
+        // GPS fades 60 m before the portal.
+        foreach (Coordinate p in Ride(25, A, Lerp(A, n, 0.08)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 60); // 1.5 km into the tunnel
+        Assert.True(_sink.LastStatus!.IsEstimated);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 1200, 1320);
+
+        // Estimate reaches the turn: it holds there, the instruction stays.
+        GpsGap(seconds: 60);
+        Assert.Equal(0, _sink.LastStatus.DistanceToNextTurnM);
+        Assert.Equal(1, _sink.LastStatus.DisplayManeuverIndex);
+
+        // GPS back after the turn.
+        Fix(Lerp(n, e, 0.2), speedMs: 25, headingDeg: 90);
+        Assert.False(_sink.LastStatus.IsEstimated);
+        Assert.Equal(2, _sink.LastStatus.DisplayManeuverIndex);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 750, 850);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
+    [Fact]
+    public async Task Tunnel_Estimate_NeverFinishesTheRoute()
+    {
+        // Destination right behind the tunnel: arriving needs a real fix.
+        Tunnels((0, 1));
+        await StartAsync(Leg(Right, A, B));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 120);
+
+        Assert.True(_nav.IsNavigating);
+        Assert.True(_sink.LastStatus!.IsEstimated);
+        Assert.False(_sink.Finished.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task GpsLost_WhileStanding_NothingIsEstimated()
+    {
+        await StartAsync(Leg(Right, A, B, C));
+        Fix(A);
+        Fix(A);
+        NavigationStatus standing = _sink.LastStatus!;
+
+        GpsGap(seconds: 30); // underground car park
+
+        Assert.Same(standing, _sink.LastStatus);
+    }
+
+    [Fact]
+    public async Task TunnelIndex_IsRequestedPerLeg()
+    {
+        // edge_walk fails on a U-turn at a waypoint – one request per leg.
+        await StartAsync([Leg(Right, A, B), Leg(Right, B, C, D), Leg(Right, D, A)], vias: [Loc(B), Loc(D)]);
+
+        List<List<Coordinate>> legs = _valhalla.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IValhallaClient.GetTraceAttributesAsync))
+            .Select(c => PolylineEncoder.DecodePolyline6(((TraceAttributesRequest)c.GetArguments()[0]!).EncodedPolyline))
+            .ToList();
+        Assert.Equal([2, 3, 2], legs.Select(l => l.Count));
+        Assert.Equal(B.Latitude, legs[1][0].Latitude, 6);
+        Assert.Equal(D.Longitude, legs[2][0].Longitude, 6);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private Task StartAsync(Leg leg) => StartAsync([leg], []);
@@ -321,11 +426,18 @@ public class NavigationServiceTests
     }
 
     /// <summary>One leg: depart, a <paramref name="turnType"/> turn at every inner point, arrive.</summary>
-    private static Leg Leg(int turnType, params Coordinate[] points)
+    private static Leg Leg(int turnType, params Coordinate[] points) =>
+        Leg(points, [.. Enumerable.Range(1, points.Length - 2).Select(i => (i, turnType))]);
+
+    /// <summary>One leg: depart, the given turns (at point indices), arrive.</summary>
+    private static Leg Leg(Coordinate[] points, params (int At, int Type)[] turns)
     {
-        List<Maneuver> maneuvers = [new() { Type = Depart, BeginShapeIndex = 0, EndShapeIndex = 1 }];
-        for (int i = 1; i < points.Length - 1; i++)
-            maneuvers.Add(new Maneuver { Type = turnType, BeginShapeIndex = i, EndShapeIndex = i + 1 });
+        List<Maneuver> maneuvers = [new() { Type = Depart, BeginShapeIndex = 0, EndShapeIndex = turns.Length > 0 ? turns[0].At : points.Length - 1 }];
+        for (int t = 0; t < turns.Length; t++)
+        {
+            int end = t + 1 < turns.Length ? turns[t + 1].At : points.Length - 1;
+            maneuvers.Add(new Maneuver { Type = turns[t].Type, BeginShapeIndex = turns[t].At, EndShapeIndex = end });
+        }
         maneuvers.Add(new Maneuver { Type = Arrive, BeginShapeIndex = points.Length - 1, EndShapeIndex = points.Length - 1 });
 
         double km = 0;
@@ -358,7 +470,7 @@ public class NavigationServiceTests
 
     private void Fix(Coordinate p, double speedMs = 0, double headingDeg = -1, double accuracyM = 5)
     {
-        _time = _time.AddSeconds(1);
+        Tick();
         _gps.PublishSimulated(new GpsReading(
             new Position(p.Latitude, p.Longitude),
             PositionAccuracy: accuracyM,
@@ -372,7 +484,26 @@ public class NavigationServiceTests
     }
 
     /// <summary>No fix for <paramref name="seconds"/> (tunnel).</summary>
-    private void GpsGap(int seconds) => _time = _time.AddSeconds(seconds);
+    private void GpsGap(int seconds)
+    {
+        for (int i = 0; i < seconds; i++)
+            Tick();
+    }
+
+    /// <summary>One second passes (the dead-reckoning timer runs).</summary>
+    private void Tick()
+    {
+        _time = _time.AddSeconds(1);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>Fake Valhalla trace_attributes: tunnel edges by shape index (every leg).</summary>
+    private void Tunnels(params (int Begin, int End)[] tunnels) =>
+        _valhalla.GetTraceAttributesAsync(Arg.Any<TraceAttributesRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new TraceAttributesResponse
+            {
+                Edges = [.. tunnels.Select(t => new TraceEdge { Tunnel = true, BeginShapeIndex = t.Begin, EndShapeIndex = t.End })]
+            });
 
     /// <summary>Fake Valhalla locate: which OSM way is at a position.</summary>
     private void LocateWay(Func<double, double, long> wayAt) =>

@@ -69,6 +69,36 @@ public class ValhallaClientTests
         Assert.Equal(2.1, result.Response!.Trip!.UnpavedKm, 6);
     }
 
+    [Fact]
+    public async Task TraceAttributes_EdgeWalkOnTheShape_ReturnsTunnelEdges()
+    {
+        using HttpTest http = new();
+        http.RespondWith("""{"units":"kilometers","edges":[{"way_id":20578351,"tunnel":false,"end_shape_index":2,"begin_shape_index":0,"length":0.009,"source_percent_along":0.882},{"way_id":203751280,"tunnel":true,"end_shape_index":281,"begin_shape_index":262,"length":2.425}],"alternate_paths":[]}""");
+
+        TraceAttributesResponse? response = await _client.GetTraceAttributesAsync(new TraceAttributesRequest
+        {
+            EncodedPolyline = "abc",
+            Filters = new TraceAttributesFilter { Attributes = ["edge.tunnel"] }
+        });
+
+        TraceEdge tunnel = Assert.Single(response!.Edges!, e => e.Tunnel);
+        Assert.Equal((262, 281), (tunnel.BeginShapeIndex, tunnel.EndShapeIndex));
+        JsonElement body = JsonDocument.Parse(http.CallLog[0].RequestBody).RootElement;
+        Assert.EndsWith("/trace_attributes", http.CallLog[0].Request.Url.Path);
+        Assert.Equal("edge_walk", body.GetProperty("shape_match").GetString());
+        Assert.Equal("abc", body.GetProperty("encoded_polyline").GetString());
+        Assert.Equal("include", body.GetProperty("filters").GetProperty("action").GetString());
+    }
+
+    [Fact]
+    public async Task TraceAttributes_Rejected_ReturnsNull()
+    {
+        using HttpTest http = new();
+        http.RespondWith("""{"error_code":443,"error":"Exact route match algorithm failed to find path","status_code":400,"status":"Bad Request"}""", 400);
+
+        Assert.Null(await _client.GetTraceAttributesAsync(new TraceAttributesRequest { EncodedPolyline = "abc" }));
+    }
+
     private static RouteRequest Request(Dictionary<string, CostingOptions>? costingOptions) => new()
     {
         Locations = [new Location { Lat = 54.44, Lon = 11.19 }, new Location { Lat = 54.65, Lon = 11.35 }],

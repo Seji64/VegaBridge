@@ -31,4 +31,11 @@ public interface IValhallaClient
     /// <param name="speedMs">Current speed in m/s. Used for dynamic search radius.</param>
     /// <param name="heading">Current heading in degrees (0-360). Helps Valhalla match correct edge.</param>
     Task<List<LocateResponse?>> LocateAsync(List<(double Lat, double Lon)> points, double speedMs = 0, double heading = 0, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Edge attributes (e.g. tunnels) along a route shape.
+    /// </summary>
+    /// <param name="request">One leg's shape and the attributes to return.</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>The edges, or null when Valhalla rejected the request or is unreachable.</returns>
+    Task<TraceAttributesResponse?> GetTraceAttributesAsync(TraceAttributesRequest request, CancellationToken cancellationToken = default);
 }
