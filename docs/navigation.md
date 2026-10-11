@@ -147,6 +147,14 @@ On error 442 with hard exclusions `ValhallaClient` retries with the soft
 preferences only. If the route still uses an avoided type (`has_highway` /
 `has_toll` / `has_ferry` in the trip summary), the map shows a snackbar.
 
+**Unpaved roads** have no chip: `exclude_unpaved` is only implemented by
+Valhalla's auto costing – `motorcyclecost.cc` ignores it (checked 3.9.1 and
+master; same route with and without it). Motorcycle costing already gives
+unpaved surfaces the maximum penalty by default (`use_trails` = 0), so gravel
+only shows up at the start/end or where unavoidable. The map then shows
+"Route enthält X km unbefestigte Abschnitte" – the sum of the maneuvers
+flagged `rough` (matches the unpaved edges from `trace_attributes` exactly).
+
 ---
 
 ## Off-Route Detection: Gated Topology Matching

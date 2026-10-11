@@ -27,6 +27,7 @@
   <data name="AvoidTolls" xml:space="preserve"><value>Maut</value></data>
   <data name="AvoidFerries" xml:space="preserve"><value>Fähren</value></data>
   <data name="AvoidNotPossible" xml:space="preserve"><value>Ließ sich nicht ganz vermeiden: {0}</value></data>
+  <data name="UnpavedSections" xml:space="preserve"><value>Route enthält {0:0.#} km unbefestigte Abschnitte</value></data>
   <data name="SaveRoute" xml:space="preserve"><value>Route speichern</value></data>
   <data name="StartNavigation" xml:space="preserve"><value>Navigation starten</value></data>
   <data name="GPSOff" xml:space="preserve"><value>GPS aus</value></data>

@@ -18,4 +18,11 @@ public class Trip
 
     [JsonPropertyName("status_message")]
     public string? StatusMessage { get; set; }
+
+    /// <summary>Length of the unpaved maneuvers (see <see cref="Maneuver.Rough"/>).</summary>
+    [JsonIgnore]
+    public double UnpavedKm => Legs?
+        .SelectMany(l => l.Maneuvers ?? [])
+        .Where(m => m.Rough)
+        .Sum(m => m.Length) ?? 0;
 }

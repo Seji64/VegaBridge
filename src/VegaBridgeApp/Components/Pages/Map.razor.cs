@@ -793,6 +793,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     }
 
     private const int MaxViaLocations = 48;
+    private const double MinUnpavedNoticeKm = 0.1; // skip a few metres of gravel driveway
     private const double WaypointTapRadiusM = 30;
 
     // ── Route Calculation ──
@@ -900,6 +901,12 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
                     string roads = string.Join(", ", ToSelection(notAvoided).Select(a => L[$"Avoid{a}"].Value));
                     Snackbar.Add(string.Format(L["AvoidNotPossible"], roads), Severity.Warning);
                 }
+
+                // Motorcycle costing already avoids unpaved roads as far as
+                // possible (exclude_unpaved is ignored by it), so only tell.
+                double unpavedKm = result.Response.Trip?.UnpavedKm ?? 0;
+                if (unpavedKm >= MinUnpavedNoticeKm)
+                    Snackbar.Add(string.Format(L["UnpavedSections"], unpavedKm), Severity.Warning);
 
                 await ShowRouteOnMap(result.Response);
                 _ = CheckClosuresForRouteAsync(result.Response);

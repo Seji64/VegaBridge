@@ -58,6 +58,17 @@ public class ValhallaClientTests
         Assert.Single(http.CallLog); // nothing to fall back to
     }
 
+    [Fact]
+    public async Task UnpavedKm_SumsRoughManeuversOfAllLegs()
+    {
+        using HttpTest http = new();
+        http.RespondWith("""{"trip":{"legs":[{"maneuvers":[{"length":2.5},{"length":0.9,"rough":true}]},{"maneuvers":[{"length":1.2,"rough":true},{"length":0}]}]}}""");
+
+        Result result = await _client.GetRouteAsync(Request(costingOptions: null));
+
+        Assert.Equal(2.1, result.Response!.Trip!.UnpavedKm, 6);
+    }
+
     private static RouteRequest Request(Dictionary<string, CostingOptions>? costingOptions) => new()
     {
         Locations = [new Location { Lat = 54.44, Lon = 11.19 }, new Location { Lat = 54.65, Lon = 11.35 }],
