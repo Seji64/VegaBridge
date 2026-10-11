@@ -99,7 +99,7 @@ public class GeocodingService : IGeocodingService
         }
     }
 
-    private static GeoResult? MapToGeoResult(PhotonFeature feature)
+    internal static GeoResult? MapToGeoResult(PhotonFeature feature)
     {
         try
         {
@@ -110,12 +110,12 @@ public class GeocodingService : IGeocodingService
 
             double lon = coords[0];
             double lat = coords[1];
-            string label = BuildLabel(p);
+            (string label, string? place) = BuildLabel(p);
 
             // Empty label → blank dropdown row (and DistinctBy("") would collapse them).
             if (string.IsNullOrWhiteSpace(label)) return null;
 
-            return new GeoResult(label, lat, lon, p.Type ?? p.OsmValue);
+            return new GeoResult(label, lat, lon, p.Type ?? p.OsmValue, place);
         }
         catch (Exception ex)
         {
@@ -124,7 +124,11 @@ public class GeocodingService : IGeocodingService
         }
     }
 
-    private static string BuildLabel(PhotonProperties p)
+    /// <summary>
+    /// Display label ("Name, Street 1, City, State") and its place part
+    /// ("City, State") – everything behind the name / street address.
+    /// </summary>
+    private static (string Label, string? Place) BuildLabel(PhotonProperties p)
     {
         List<string> parts = [];
 
@@ -149,6 +153,9 @@ public class GeocodingService : IGeocodingService
         if (parts.Count == 0 && !string.IsNullOrWhiteSpace(p.Name))
             parts.Add(p.Name);
 
+        // Without name and street the first place part (e.g. the city) leads.
+        int headCount = Math.Max(parts.Count, 1);
+
         // City (if not identical to name/street)
         string? lastPart = parts.LastOrDefault();
         if (!string.IsNullOrWhiteSpace(p.City)
@@ -165,6 +172,7 @@ public class GeocodingService : IGeocodingService
         if (!string.IsNullOrWhiteSpace(p.Country) && parts.Count < 3)
             parts.Add(p.Country);
 
-        return string.Join(", ", parts);
+        string? place = parts.Count > headCount ? string.Join(", ", parts.Skip(headCount)) : null;
+        return (string.Join(", ", parts), place);
     }
 }

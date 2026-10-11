@@ -7,7 +7,8 @@ public record GeoResult(
     string Label,     // Display text, e.g. "Stuttgart, Baden‑Württemberg, Germany"
     double Latitude,
     double Longitude,
-    string? Type = null   // city, street, venue, …
+    string? Type = null,  // city, street, venue, …
+    string? Place = null  // place part of the label, e.g. "Berlin" for "Klosterstraße, Parochialstraße, Berlin"
 )
 {
     private const string Separator = ", ";
@@ -34,13 +35,16 @@ public record GeoResult(
     /// </summary>
     public (string Text, int Caret) GetFillIn()
     {
-        // Streets: leave the caret right behind the street name, so a typed
-        // house number lands where it belongs (Photon resolves both orders):
-        // "Nürtinger Straße |, Wendlingen" → "Nürtinger Straße 18, Wendlingen".
-        if (Type == "street" && SplitIndex >= 0)
-            return (Label.Insert(SplitIndex, " "), SplitIndex + 1);
+        // The caret goes right behind the first line, where a house number
+        // belongs: "Nürtinger Straße |, Wendlingen" → "Nürtinger Straße 18, Wendlingen".
+        // Same for POIs named like a street (the "Klosterstraße" U-Bahn station).
+        // No extra space if the line already ends with a house number.
+        string primary = PrimaryText;
+        string head = primary.Length > 0 && char.IsDigit(primary[^1]) ? primary : primary + " ";
 
-        string text = Label + " ";
-        return (text, text.Length);
+        // Only the place follows: a POI's own street ("Parochialstraße") would
+        // make Photon stick to the POI instead of the typed address.
+        string? place = Place ?? SecondaryText;
+        return place == null ? (head, head.Length) : ($"{head}, {place}", head.Length);
     }
 }
