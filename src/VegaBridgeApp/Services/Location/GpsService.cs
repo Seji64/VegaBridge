@@ -77,22 +77,46 @@ public class GpsService : IDisposable
 
     // ── Last known position ─────────────────────────────────────────────
 
+    /// <summary>How long callers wait for a fix before giving up.</summary>
+    private static readonly TimeSpan FixTimeout = TimeSpan.FromSeconds(10);
+
+    private Task<GpsReading?>? _pendingFix;
+
     /// <summary>
     /// Returns the last cached reading, or tries to get a quick fix.<br/>
-    /// Does NOT start the GPS listener – safe to call anytime.
+    /// Does NOT start the GPS listener – safe to call anytime.<br/>
+    /// Gives up after <see cref="FixTimeout"/>, leaving <see cref="LastReading"/>
+    /// unchanged (callers show their "no GPS" message).
     /// </summary>
     public async Task GetLastReadingOrCurrentAsync()
     {
         try
         {
-            GpsReading? reading = await _gpsManager.GetLastReadingOrCurrentPosition();
+            // Without a fix Shiny waits forever (holding a static lock), so
+            // cancel after FixTimeout – that also stops the listener it
+            // started. Concurrent callers share the one pending call instead
+            // of queueing on that lock.
+            if (_pendingFix is not { IsCompleted: false })
+                _pendingFix = FetchFixAsync();
+
+            GpsReading? reading = await _pendingFix;
             if (reading != null)
                 LastReading = reading;
+        }
+        catch (OperationCanceledException)
+        {
+            Log.Debug("GetLastReadingOrCurrent timed out after {Timeout}", FixTimeout);
         }
         catch (Exception ex)
         {
             Log.Debug(ex, "GetLastReadingOrCurrent failed");
         }
+    }
+
+    private async Task<GpsReading?> FetchFixAsync()
+    {
+        using CancellationTokenSource cts = new(FixTimeout);
+        return await _gpsManager.GetLastReadingOrCurrentPosition(cancellationToken: cts.Token);
     }
 
     // ── Public API ───────────────────────────────────────────────────────
