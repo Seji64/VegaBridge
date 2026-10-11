@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Components;
 
 using MudBlazor;
@@ -277,6 +278,21 @@ public partial class Settings : ComponentBase, IAsyncDisposable
             Snackbar.Add(L["DebugLogEmpty"], Severity.Info);
             return;
         }
+
+        // Which build on which device, and whether the ring buffer already
+        // dropped the start of the session. The informational version carries
+        // the git commit (+sha) the app was built from.
+        DebugLogSink sink = DebugLogSink.Instance;
+        string build = typeof(Settings).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
+        log = $"""
+            VegaBridge {AppInfo.VersionString} ({AppInfo.BuildString}), build {build}
+            Device: {DeviceInfo.Model}, {DeviceInfo.Platform} {DeviceInfo.VersionString}
+            Log: {sink.LineCount} lines kept, {sink.TotalLinesWritten - sink.LineCount} oldest dropped (buffer full)
+            {BleManager.W2rStats}
+            Exported {DateTime.Now:yyyy-MM-dd HH:mm:ss}
+
+            """ + log;
 
         try
         {

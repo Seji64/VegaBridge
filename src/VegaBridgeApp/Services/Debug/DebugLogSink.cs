@@ -53,6 +53,12 @@ public sealed class DebugLogSink(int maxLines = 60_000) : ILogEventSink // ~100 
         try
         {
             line = $"{logEvent.Timestamp:HH:mm:ss.fff} {logEvent.Level}: {logEvent.RenderMessage()}";
+            // The exception is not part of the message – without it a log only
+            // says THAT a write failed, not why. Stack only from Warning up.
+            if (logEvent.Exception is { } ex)
+                line += logEvent.Level >= LogEventLevel.Warning
+                    ? $" | {ex}"
+                    : $" | {ex.GetType().Name}: {ex.Message}";
         }
         catch (Exception)
         {

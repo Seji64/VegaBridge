@@ -477,9 +477,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 // First write on a fresh link: the notify hook discovers only the
                 // read characteristic. Shiny's GATT queue (serialized with its own
                 // discovery) finds the write one; cached for the rest of the link.
+                long started = Environment.TickCount64;
                 using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
                 await apple.GetCharacteristicAsync(serviceUuid, characteristicUuid, timeout.Token);
                 ch = Find() ?? throw new InvalidOperationException($"Characteristic {characteristicUuid} not found – frame dropped");
+                Log.Information("BLE-LOGGER: {Line}", $"Write characteristic discovered in {Environment.TickCount64 - started} ms");
             }
 
             // A NAVI (3 link-layer packets) briefly fills iOS' W2R buffer; it
@@ -573,7 +575,8 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             return false;
         }
 
-        Log.Information("BLE-LOGGER: {Line}", $"NAV ACTION: {action}");
+        // rx = frames received from the bike so far: link-alive evidence per tick.
+        Log.Information("BLE-LOGGER: {Line}", $"NAV ACTION: {action} rx={_rxFrames}");
 
         try
         {
