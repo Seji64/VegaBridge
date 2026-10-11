@@ -172,7 +172,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     // confirms it), never reaches the destination, and stops
     // DeadReckoningMaxM beyond the last fix – or beyond the end of a tunnel
     // the rider is in or about to enter (Valhalla edge.tunnel).
-    private const double DeadReckoningStartSec = 2.0;
+    private const double DeadReckoningStartSec = 3.0; // = SmoothingResetGapSec: one or two dropped fixes are no tunnel
     private const double DeadReckoningMaxM = 500.0;
     private const double TunnelAheadM = 300.0;    // GPS already fades on the approach to the portal
     private const double TunnelMergeGapM = 200.0; // tunnel chains: GPS does not come back in between
@@ -827,6 +827,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             double smoothLat = reading.Position.Latitude;
             double smoothLon = reading.Position.Longitude;
             double gapSec = (reading.Timestamp - _lastFixAt).TotalSeconds;
+            // Standing without fixes (car park) does not move the rider: keep the
+            // window, or an out-and-back route could snap to the way back.
+            double gapM = _lastFix is { Speed: >= WrongWayMinSpeedMs } ? gapSec * SnapGapMaxSpeedMs : 0;
             if (gapSec > SmoothingResetGapSec)
                 _lastSmoothedPosition = null;
             _lastFixAt = reading.Timestamp;
@@ -856,7 +859,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             double navLon = smoothLon;
 
             // Snap to route
-            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon, gapSec);
+            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon, gapM);
             if (snappedIndex < 0) return;
 
             // Near a turn? (Not "inside a maneuver span": every route point
@@ -1078,7 +1081,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
                     limitM = Math.Max(limitM, endM + DeadReckoningMaxM);
             }
 
-            int index = IndexAtRouteOffset(_lastSnappedIndex, Math.Min(fix.Speed * sinceFixSec, limitM - fromM));
+            double estimatedM = fromM + Math.Min(fix.Speed * sinceFixSec, limitM - fromM);
+            int index = IndexAtRouteOffset(_lastSnappedIndex, estimatedM - fromM);
+            if (_cumulativeDistances[index] > estimatedM) index--; // round down: the next fix must not pull the distance back up
             // Not past the displayed turn, not at the destination.
             int turnIndex = _maneuvers[GetDisplayManeuverIndex()].BeginShapeIndex;
             index = Math.Min(index, Math.Min(turnIndex, _maneuvers[^1].EndShapeIndex - 1));
@@ -1137,8 +1142,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     /// so a later pass over the same road (round trip, out-and-back) is not
     /// matched before its time.
     /// </summary>
-    /// <param name="gapSec">Seconds since the previous usable fix.</param>
-    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double gapSec)
+    /// <param name="gapM">How far the rider can have got since the previous usable fix.</param>
+    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double gapM)
     {
         (int Index, double DistanceMeters) result;
         if (_lastSnappedIndex < 0)
@@ -1156,7 +1161,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             // "far from route" → false off-route and reroute.
             int from = IndexAtRouteOffset(_lastSnappedIndex, -SnapBackToleranceM);
             int to = IndexAtRouteOffset(_lastSnappedIndex,
-                Math.Max(SnapForwardWindowM, gapSec * SnapGapMaxSpeedMs));
+                Math.Max(SnapForwardWindowM, gapM));
             result = FindNearestRouteIndex(lat, lon, from, to);
             if (result.DistanceMeters > SuspectXteM)
             {

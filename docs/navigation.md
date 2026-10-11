@@ -80,7 +80,7 @@ GpsService.ReadingReceived → OnGpsReading()
   ├─ Snap to route (SnapToRoute: window around the progress,
   │   100m back / 500m ahead – a later pass over the same road,
   │   e.g. a round trip's end at its start, is never matched early;
-  │   after a GPS gap the window also covers gap × 70 m/s)
+  │   after a GPS gap while moving the window also covers gap × 70 m/s)
   │
   ├─ Off-Route Detection (Gated Topology)
   │   ├─ FAST PATH: XTE ≤ 20m (40m within 30m of a turn) → ON_ROUTE
@@ -104,7 +104,7 @@ GpsService.ReadingReceived → OnGpsReading()
 ### 2a. No GPS: Dead Reckoning (tunnel)
 
 A 1 Hz timer (`TimeProvider`) runs while navigating. Without a usable fix
-(accuracy ≤ 40m) for 2 s, the position is estimated along the route from the
+(accuracy ≤ 40m) for 3 s, the position is estimated along the route from the
 last fix's speed and reported like a fix, so
 the distance to the next turn keeps counting down on the bike:
 
@@ -236,7 +236,7 @@ Throttles and cooldowns run on the GPS fix timestamps (≈ wall clock at 1 Hz).
 | Parallel road (≥ 20m, same heading) | Locate returns different way_id → reroute after ~6s (120 km/h) |
 | Parallel road < 20m | Not detected – not separable by GPS |
 | GPS drift on the route road (city) | Locate confirms way_id → ON_ROUTE |
-| Tunnel / bad GPS (accuracy > 40m) | Tick ignored; after 2 s the position is estimated along the route (dead reckoning) |
+| Tunnel / bad GPS (accuracy > 40m) | Tick ignored; after 3 s the position is estimated along the route (dead reckoning) |
 | Long tunnel (no fix, > 500m) | Snap window grows with the gap → caught up at the exit, imprecise exit fixes are not "far from route" |
 | Round trip / overlapping route | Progress window: later pass is not matched early |
 
@@ -359,8 +359,8 @@ Valhalla maneuvers describe the action at their BEGIN index (the turn happens AT
 | `LocateCooldownSec` | 4s | No /locate after a way_id match |
 | `RerouteMinIntervalSec` | 30s | Min interval between automatic reroutes |
 | `SnapBackToleranceM` / `SnapForwardWindowM` | 100m / 500m | Snap window around the progress |
-| `SnapGapMaxSpeedMs` | 70 m/s | After a GPS gap the forward window is at least gap × this |
-| `DeadReckoningStartSec` | 2s | No usable fix this long → estimate along the route |
+| `SnapGapMaxSpeedMs` | 70 m/s | After a GPS gap while moving (≥ 10 km/h) the forward window is at least gap × this |
+| `DeadReckoningStartSec` | 3s | No usable fix this long → estimate along the route (rounded down to a route point) |
 | `DeadReckoningMaxM` | 500m | Estimate stops this far beyond the last fix / the tunnel end |
 | `TunnelAheadM` / `TunnelMergeGapM` | 300m / 200m | Tunnel counts when it starts this close ahead / tunnels this close are one |
 | `WrongWayHeadingThresholdDeg` | 135° | Heading divergence for wrong-way detection |

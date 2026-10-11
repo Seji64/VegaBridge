@@ -381,6 +381,26 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task GpsGap_WhileStanding_DoesNotSnapToTheWayBack()
+    {
+        // Out and back on a dual carriageway (way back 6 m east). A minute
+        // without fixes while standing must not jump onto the way back.
+        Coordinate x = Lerp(A, B, 0.5);
+        Coordinate xBack = new(x.Latitude, x.Longitude + 6 * LonPerMeter, null);
+        Coordinate aBack = new(A.Latitude, A.Longitude + 6 * LonPerMeter, null);
+        await StartAsync([Leg(Right, A, x), Leg(Right, xBack, aBack)], vias: [Loc(x)]);
+        Coordinate stop = Lerp(A, x, 0.2);
+        foreach (Coordinate p in Ride(10, A, stop))
+            Fix(p, speedMs: 10, headingDeg: 0);
+        Fix(stop);
+
+        GpsGap(seconds: 60);
+        Fix(new Coordinate(stop.Latitude, stop.Longitude + 4 * LonPerMeter, null)); // nearer to the way back
+
+        Assert.InRange(_sink.LastStatus!.RemainingDistanceKm, 0.8, 1.0);
+    }
+
+    [Fact]
     public async Task TunnelIndex_IsRequestedPerLeg()
     {
         // edge_walk fails on a U-turn at a waypoint – one request per leg.
