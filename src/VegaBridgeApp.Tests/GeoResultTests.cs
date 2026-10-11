@@ -58,20 +58,6 @@ public class GeoResultTests
     }
 
     [Fact]
-    public void FillIn_House_PutsCaretBehindHouseNumber()
-    {
-        GeoResult house = Map(new PhotonProperties
-        {
-            Street = "Nürtinger Straße", Housenumber = "18", City = "Wolfschlugen", State = "Baden-Württemberg", Type = "house"
-        });
-
-        (string text, int caret) = house.GetFillIn();
-
-        Assert.Equal("Nürtinger Straße 18, Wolfschlugen, Baden-Württemberg", text);
-        Assert.Equal("Nürtinger Straße 18".Length, caret);
-    }
-
-    [Fact]
     public void FillIn_City_PutsCaretBehindCity()
     {
         GeoResult city = Map(new PhotonProperties

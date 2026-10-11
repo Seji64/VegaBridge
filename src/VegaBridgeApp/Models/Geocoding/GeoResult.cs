@@ -38,9 +38,7 @@ public record GeoResult(
         // The caret goes right behind the first line, where a house number
         // belongs: "Nürtinger Straße |, Wendlingen" → "Nürtinger Straße 18, Wendlingen".
         // Same for POIs named like a street (the "Klosterstraße" U-Bahn station).
-        // No extra space if the line already ends with a house number.
-        string primary = PrimaryText;
-        string head = primary.Length > 0 && char.IsDigit(primary[^1]) ? primary : primary + " ";
+        string head = PrimaryText + " ";
 
         // Only the place follows: a POI's own street ("Parochialstraße") would
         // make Photon stick to the POI instead of the typed address.
