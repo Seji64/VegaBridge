@@ -1738,12 +1738,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         return backward;
     }
 
-    private static string FormatCoordinate(double? lat, double? lon)
-    {
-        if (lat == null || lon == null) return "–";
-        return $"{lat.Value:F5}, {lon.Value:F5}";
-    }
-
     private async Task GetMyCurrentPosition()
     {
         OpenStreetMap? map = _map;

@@ -48,19 +48,6 @@
                           Class="pa-4"
                           Style="position: absolute; top: 0; left: 0; right: 0; z-index: 150; pointer-events: auto; max-width: 500px; margin: 0 auto;">
 
-                    @if (Gps.IsTracking)
-                    {
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
-                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="mr-2">
-                                <MudText Typo="Typo.caption">GPS @FormatCoordinate(Gps.LastReading?.Position.Latitude, Gps.LastReading?.Position.Longitude)</MudText>
-                            </MudChip>
-                            <MudChip T="string" Size="Size.Small" Color="Color.Info">
-                                <MudText Typo="Typo.caption">@string.Format(L["Kmh"], Gps.CurrentSpeedKmh)</MudText>
-                            </MudChip>
-                            <MudText Typo="Typo.caption" Class="text-medium-emphasis ml-auto">@string.Format(L["Accuracy"], Gps.CurrentAccuracy)</MudText>
-                        </MudStack>
-                    }
-
                     <div style="overflow-y: auto; max-height: 180px;" class="pr-2">
 
                         <AddressAutocomplete Label="@L["Start"]"
