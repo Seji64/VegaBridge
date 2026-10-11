@@ -57,6 +57,30 @@ public static class GeoMath
         return (ToDeg(Math.Atan2(y, x)) + 360.0) % 360.0;
     }
 
+    /// <summary>Smallest angle between two bearings, in degrees 0-180.</summary>
+    public static double BearingDifferenceDeg(double a, double b)
+    {
+        double diff = Math.Abs(a - b) % 360.0;
+        return diff > 180.0 ? 360.0 - diff : diff;
+    }
+
+    /// <summary>
+    /// The point <paramref name="distanceM"/> meters from the start along the
+    /// bearing (great circle).
+    /// </summary>
+    public static (double Lat, double Lon) Offset(double lat, double lon, double bearingDeg, double distanceM)
+    {
+        double delta = distanceM / EarthRadiusM;
+        double theta = ToRad(bearingDeg);
+        double phi1 = ToRad(lat);
+        double lambda1 = ToRad(lon);
+        double phi2 = Math.Asin(Math.Sin(phi1) * Math.Cos(delta) +
+                                Math.Cos(phi1) * Math.Sin(delta) * Math.Cos(theta));
+        double lambda2 = lambda1 + Math.Atan2(Math.Sin(theta) * Math.Sin(delta) * Math.Cos(phi1),
+                                              Math.Cos(delta) - Math.Sin(phi1) * Math.Sin(phi2));
+        return (ToDeg(phi2), (ToDeg(lambda2) + 540.0) % 360.0 - 180.0);
+    }
+
     /// <summary>
     /// Inserts intermediate points on long polyline segments so no segment
     /// exceeds <paramref name="maxSegmentM"/> meters. Reduces chord error

@@ -9,7 +9,10 @@ public class NavigationStatus
     public int CurrentManeuverIndex { get; init; }
     public int DisplayManeuverIndex { get; init; }
     public int TotalManeuvers { get; init; }
+    /// <summary>Intermediate waypoints not reached yet (the destination excluded).</summary>
+    public int RemainingWaypoints { get; init; }
     public double Heading { get; init; }
     public double Accuracy { get; init; }
     public bool IsStationary { get; init; }
+    public bool IsEstimated { get; init; } // no GPS: position estimated along the route
 }

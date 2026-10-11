@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shiny;
 using Shiny.Locations;
@@ -32,6 +33,7 @@ public class NavigationServiceTests
     private readonly IValhallaClient _valhalla = Substitute.For<IValhallaClient>();
     private readonly NavigationService _nav;
     private readonly TestSink _sink = new();
+    private readonly FakeTimeProvider _clock = new();
     private DateTimeOffset _time = DateTimeOffset.UtcNow;
 
     public NavigationServiceTests()
@@ -46,7 +48,7 @@ public class NavigationServiceTests
         _valhalla.GetRouteAsync(Arg.Any<RouteRequest>(), Arg.Any<CancellationToken>())
             .Returns(Result.Failure("no route in tests"));
 
-        _nav = new NavigationService(_gps, _valhalla);
+        _nav = new NavigationService(_gps, _valhalla, _clock);
         _nav.AddSink(_sink);
     }
 
@@ -120,6 +122,26 @@ public class NavigationServiceTests
         Assert.Equal(D.Latitude, request.Locations[1].Lat, 6);
         Assert.Equal(D.Longitude, request.Locations[1].Lon, 6);
         Assert.Equal("break", request.Locations[1].Type);
+    }
+
+    [Fact]
+    public async Task Status_CountsTheWaypointsAhead()
+    {
+        // Waypoints B and D as stops (one leg each, like Map.StartNavigation).
+        await StartAsync(
+            [Leg(Right, A, B), Leg(Right, B, C, D), Leg(Right, D, A)],
+            vias: [Loc(B), Loc(D)]);
+
+        Fix(Lerp(A, B, 0.1));
+        Assert.Equal(2, _sink.LastStatus!.RemainingWaypoints);
+
+        foreach (Coordinate p in Ride(Lerp(A, B, 0.1), B, Lerp(B, C, 0.5)))
+            Fix(p);
+        Assert.Equal(1, _sink.LastStatus!.RemainingWaypoints);
+
+        foreach (Coordinate p in Ride(Lerp(B, C, 0.5), C, D, Lerp(D, A, 0.5)))
+            Fix(p);
+        Assert.Equal(0, _sink.LastStatus!.RemainingWaypoints);
     }
 
     [Fact]
@@ -216,22 +238,276 @@ public class NavigationServiceTests
         Assert.False(RerouteRequested());
     }
 
+    [Fact]
+    public async Task Tunnel_NoGps_EstimatesThenCatchesUpAtTheExit()
+    {
+        // 700 m tunnel (longer than the snap window, unknown to Valhalla) at
+        // 90 km/h: the turn keeps counting down, but only for 500 m. GPS is
+        // back 100 m before the right turn at B.
+        await StartAsync(Leg(Right, A, B, C));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 10);
+        Assert.True(_sink.LastStatus!.IsEstimated);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 500, 600);
+        GpsGap(seconds: 18);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 270, 330);
+
+        Fix(Lerp(A, B, 0.9), speedMs: 25, headingDeg: 0);
+
+        Assert.False(_sink.LastStatus.IsEstimated);
+        Assert.Equal(1, _sink.LastStatus.CurrentManeuverIndex);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 75, 125);
+        Assert.InRange(_sink.LastStatus.RemainingDistanceKm, 1.05, 1.15);
+
+        foreach (Coordinate p in Ride(25, Lerp(A, B, 0.9), B, Lerp(B, C, 0.3)))
+            Fix(p, speedMs: 25, headingDeg: p.Latitude < B.Latitude ? 0 : 90);
+        Assert.True(_nav.IsNavigating);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
+    [Fact]
+    public async Task Tunnel_TurnInsideTheTunnel_ContinuesWithTheNextManeuver()
+    {
+        // Junction inside a 1 km tunnel: the turn at B is passed without GPS.
+        await StartAsync(Leg(Right, A, B, C, D));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.5)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 40);
+        Fix(Lerp(B, C, 0.5), speedMs: 25, headingDeg: 90);
+
+        Assert.Equal(2, _sink.LastStatus!.CurrentManeuverIndex); // right turn at C
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 450, 525);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
+    [Fact]
+    public async Task Tunnel_PoorAccuracyFixes_AreIgnored()
+    {
+        // No satellites: the phone reports stale or cell-tower positions up to
+        // 300 m beside the road (accuracy 80–1500 m) for 30 s.
+        await StartAsync(Leg(Right, A, B, C));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+        double beforeTunnelM = _sink.LastStatus!.DistanceToNextTurnM;
+
+        Coordinate entrance = Lerp(A, B, 0.2);
+        for (int i = 0; i < 30; i++)
+        {
+            Coordinate p = (i % 3) switch
+            {
+                0 => entrance,
+                1 => new Coordinate(entrance.Latitude, entrance.Longitude + 300 * LonPerMeter, null),
+                _ => new Coordinate(entrance.Latitude + 0.002, entrance.Longitude - 150 * LonPerMeter, null)
+            };
+            Fix(p, speedMs: i % 2 * 25, headingDeg: i * 37 % 360, accuracyM: 80 + i * 50);
+        }
+
+        // Only the estimate moves on – the bad fixes are not used.
+        Assert.True(_sink.LastStatus!.DistanceToNextTurnM < beforeTunnelM);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+
+        Fix(Lerp(A, B, 0.9), speedMs: 25, headingDeg: 0);
+        Assert.InRange(_sink.LastStatus!.DistanceToNextTurnM, 75, 125);
+        Assert.True(_nav.IsNavigating);
+    }
+
+    [Fact]
+    public async Task Tunnel_ImpreciseFixesAfterExit_AreNotOffRoute()
+    {
+        // GPS needs a few seconds after the tunnel: the first fixes after the
+        // 700 m tunnel are 25–35 m beside the road (locate: route road).
+        await StartAsync(Leg(Right, A, B, C));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 28);
+        List<Coordinate> exit = Ride(25, Lerp(A, B, 0.88), B);
+        for (int i = 0; i < exit.Count; i++)
+        {
+            double offM = i < 5 ? 25 + i * 2.5 : 0;
+            Fix(new Coordinate(exit[i].Latitude, exit[i].Longitude + offM * LonPerMeter, null),
+                speedMs: 25, headingDeg: 0, accuracyM: i < 5 ? 30 : 5);
+        }
+
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+        Assert.True(_nav.IsNavigating);
+    }
+
+    [Fact]
+    public async Task Tunnel_KnownFromValhalla_EstimateRunsThroughTheWholeTunnel()
+    {
+        // 2.4 km tunnel (shape points 1–2), right turn 300 m after its exit.
+        Coordinate n = new(48.0270, 9.0000, null);  // ~3 km north
+        Coordinate e = new(48.0270, 9.0134, null);  // ~1 km east of it
+        Tunnels((1, 2));
+        await StartAsync(Leg([A, Lerp(A, n, 0.1), Lerp(A, n, 0.9), n, e], (3, Right)));
+        await _valhalla.Received(1).GetTraceAttributesAsync(
+            Arg.Is<TraceAttributesRequest>(r => r.ShapeMatch == "edge_walk" && r.Filters!.Attributes.Contains("edge.tunnel")),
+            Arg.Any<CancellationToken>());
+
+        // GPS fades 60 m before the portal.
+        foreach (Coordinate p in Ride(25, A, Lerp(A, n, 0.08)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 60); // 1.5 km into the tunnel
+        Assert.InRange(_sink.LastStatus!.DistanceToNextTurnM, 1200, 1320);
+
+        // Estimate reaches the turn: it holds there, the instruction stays.
+        GpsGap(seconds: 60);
+        Assert.Equal(0, _sink.LastStatus.DistanceToNextTurnM);
+        Assert.Equal(1, _sink.LastStatus.DisplayManeuverIndex);
+
+        // GPS back after the turn.
+        Fix(Lerp(n, e, 0.2), speedMs: 25, headingDeg: 90);
+        Assert.Equal(2, _sink.LastStatus.DisplayManeuverIndex);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 750, 850);
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
+    [Fact]
+    public async Task Tunnel_Estimate_NeverFinishesTheRoute()
+    {
+        // Destination right behind the tunnel: arriving needs a real fix.
+        Tunnels((0, 1));
+        await StartAsync(Leg(Right, A, B));
+        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
+            Fix(p, speedMs: 25, headingDeg: 0);
+
+        GpsGap(seconds: 120);
+
+        Assert.True(_nav.IsNavigating);
+        Assert.False(_sink.Finished.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task GpsLost_WhileStanding_NothingIsEstimated()
+    {
+        await StartAsync(Leg(Right, A, B, C));
+        Fix(A);
+        Fix(A);
+        NavigationStatus standing = _sink.LastStatus!;
+
+        GpsGap(seconds: 30); // underground car park
+
+        Assert.Same(standing, _sink.LastStatus);
+    }
+
+    [Fact]
+    public async Task GpsGap_WhileStanding_DoesNotSnapToTheWayBack()
+    {
+        // Out and back on a dual carriageway (way back 6 m east). A minute
+        // without fixes while standing must not jump onto the way back.
+        Coordinate x = Lerp(A, B, 0.5);
+        Coordinate xBack = new(x.Latitude, x.Longitude + 6 * LonPerMeter, null);
+        Coordinate aBack = new(A.Latitude, A.Longitude + 6 * LonPerMeter, null);
+        await StartAsync([Leg(Right, A, x), Leg(Right, xBack, aBack)], vias: [Loc(x)]);
+        Coordinate stop = Lerp(A, x, 0.2);
+        foreach (Coordinate p in Ride(10, A, stop))
+            Fix(p, speedMs: 10, headingDeg: 0);
+        Fix(stop);
+
+        GpsGap(seconds: 60);
+        Fix(new Coordinate(stop.Latitude, stop.Longitude + 4 * LonPerMeter, null)); // nearer to the way back
+
+        Assert.InRange(_sink.LastStatus!.RemainingDistanceKm, 0.8, 1.0);
+    }
+
+    [Fact]
+    public async Task TunnelIndex_IsRequestedPerLeg()
+    {
+        // edge_walk fails on a U-turn at a waypoint – one request per leg.
+        await StartAsync([Leg(Right, A, B), Leg(Right, B, C, D), Leg(Right, D, A)], vias: [Loc(B), Loc(D)]);
+
+        List<List<Coordinate>> legs = _valhalla.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IValhallaClient.GetTraceAttributesAsync))
+            .Select(c => PolylineEncoder.DecodePolyline6(((TraceAttributesRequest)c.GetArguments()[0]!).EncodedPolyline))
+            .ToList();
+        Assert.Equal([2, 3, 2], legs.Select(l => l.Count));
+        Assert.Equal(B.Latitude, legs[1][0].Latitude, 6);
+        Assert.Equal(D.Longitude, legs[2][0].Longitude, 6);
+    }
+
+    [Fact]
+    public async Task UTurnAtWaypoint_IsNotOffRoute()
+    {
+        // Out to a waypoint and back the same road (viewpoint at a dead end):
+        // after the U-turn the way back is the route, not a wrong way.
+        Coordinate x = Lerp(A, B, 0.5);
+        await StartAsync([Leg(Right, A, x), Leg(Right, x, A)], vias: [Loc(x)]);
+
+        List<Coordinate> ride = Ride(10, A, x, Lerp(x, A, 0.5));
+        for (int i = 0; i < ride.Count; i++)
+            Fix(ride[i], speedMs: 10, headingDeg: ride[i].Latitude >= (i > 0 ? ride[i - 1].Latitude : 0) ? 0 : 180);
+
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+        Assert.InRange(_sink.LastStatus!.RemainingDistanceKm, 0.2, 0.3);
+    }
+
+    [Fact]
+    public async Task UTurnLongBeforeWaypoint_IsStillOffRoute()
+    {
+        // Turned back 200 m before the waypoint: reroute (back to it), not a
+        // silent skip onto the way back.
+        Coordinate x = Lerp(A, B, 0.5);
+        await StartAsync([Leg(Right, A, x), Leg(Right, x, A)], vias: [Loc(x)]);
+        Coordinate turn = Lerp(A, B, 0.3);
+        foreach (Coordinate p in Ride(10, A, turn))
+            Fix(p, speedMs: 10, headingDeg: 0);
+        foreach (Coordinate p in Ride(10, turn, A).Take(6))
+            Fix(p, speedMs: 10, headingDeg: 180);
+
+        Assert.True(_sink.OffRoute);
+    }
+
+    [Fact]
+    public async Task RampCrossingTheRouteLater_IsNotSnappedAhead()
+    {
+        // Motorway interchange (A12 → A13 Brenner): the exit ramp loops back
+        // and crosses the road the rider is still on, 360 m later along the
+        // route. A fix nearer to the ramp must not jump the progress onto it.
+        await StartAsync(Leg(Right, At(0, 0), At(300, 0), At(300, -60), At(180, -60), At(180, 120)));
+        foreach (Coordinate p in Ride(10, At(0, 0), At(170, 0)))
+            Fix(p, speedMs: 10, headingDeg: 90);
+        Fix(At(183, 6), speedMs: 10, headingDeg: 90); // GPS noise towards the ramp
+        foreach (Coordinate p in Ride(10, At(190, 0), At(290, 0)))
+            Fix(p, speedMs: 10, headingDeg: 90);
+
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private Task StartAsync(Leg leg) => StartAsync([leg], []);
 
     private async Task StartAsync(List<Leg> legs, List<Location> vias, RoadAvoidance avoid = RoadAvoidance.None)
     {
-        (string shape, List<Maneuver> maneuvers, double km, double min) = _nav.PrepareNavigationData(legs);
+        (string shape, List<Maneuver> maneuvers, double km, double min) = NavigationService.PrepareNavigationData(legs);
         await _nav.StartNavigation(shape, maneuvers, km, min, Loc(A), vias, avoid);
     }
 
     /// <summary>One leg: depart, a <paramref name="turnType"/> turn at every inner point, arrive.</summary>
-    private static Leg Leg(int turnType, params Coordinate[] points)
+    private static Leg Leg(int turnType, params Coordinate[] points) =>
+        Leg(points, [.. Enumerable.Range(1, points.Length - 2).Select(i => (i, turnType))]);
+
+    /// <summary>One leg: depart, the given turns (at point indices), arrive.</summary>
+    private static Leg Leg(Coordinate[] points, params (int At, int Type)[] turns)
     {
-        List<Maneuver> maneuvers = [new() { Type = Depart, BeginShapeIndex = 0, EndShapeIndex = 1 }];
-        for (int i = 1; i < points.Length - 1; i++)
-            maneuvers.Add(new Maneuver { Type = turnType, BeginShapeIndex = i, EndShapeIndex = i + 1 });
+        List<Maneuver> maneuvers = [new() { Type = Depart, BeginShapeIndex = 0, EndShapeIndex = turns.Length > 0 ? turns[0].At : points.Length - 1 }];
+        for (int t = 0; t < turns.Length; t++)
+        {
+            int end = t + 1 < turns.Length ? turns[t + 1].At : points.Length - 1;
+            maneuvers.Add(new Maneuver { Type = turns[t].Type, BeginShapeIndex = turns[t].At, EndShapeIndex = end });
+        }
         maneuvers.Add(new Maneuver { Type = Arrive, BeginShapeIndex = points.Length - 1, EndShapeIndex = points.Length - 1 });
 
         double km = 0;
@@ -262,12 +538,12 @@ public class NavigationServiceTests
         return ride;
     }
 
-    private void Fix(Coordinate p, double speedMs = 0, double headingDeg = -1)
+    private void Fix(Coordinate p, double speedMs = 0, double headingDeg = -1, double accuracyM = 5)
     {
-        _time = _time.AddSeconds(1);
+        Tick();
         _gps.PublishSimulated(new GpsReading(
             new Position(p.Latitude, p.Longitude),
-            PositionAccuracy: 5,
+            PositionAccuracy: accuracyM,
             Timestamp: _time,
             Heading: headingDeg,
             HeadingAccuracy: 10,
@@ -276,6 +552,28 @@ public class NavigationServiceTests
             SpeedAccuracy: 1,
             IsStationary: speedMs == 0));
     }
+
+    /// <summary>No fix for <paramref name="seconds"/> (tunnel).</summary>
+    private void GpsGap(int seconds)
+    {
+        for (int i = 0; i < seconds; i++)
+            Tick();
+    }
+
+    /// <summary>One second passes (the dead-reckoning timer runs).</summary>
+    private void Tick()
+    {
+        _time = _time.AddSeconds(1);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>Fake Valhalla trace_attributes: tunnel edges by shape index (every leg).</summary>
+    private void Tunnels(params (int Begin, int End)[] tunnels) =>
+        _valhalla.GetTraceAttributesAsync(Arg.Any<TraceAttributesRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new TraceAttributesResponse
+            {
+                Edges = [.. tunnels.Select(t => new TraceEdge { Tunnel = true, BeginShapeIndex = t.Begin, EndShapeIndex = t.End })]
+            });
 
     /// <summary>Fake Valhalla locate: which OSM way is at a position.</summary>
     private void LocateWay(Func<double, double, long> wayAt) =>
@@ -291,6 +589,10 @@ public class NavigationServiceTests
     private IEnumerable<RouteRequest> RouteRequests() => _valhalla.ReceivedCalls()
         .Where(c => c.GetMethodInfo().Name == nameof(IValhallaClient.GetRouteAsync))
         .Select(c => (RouteRequest)c.GetArguments()[0]!);
+
+    /// <summary>Meters east / north of A.</summary>
+    private static Coordinate At(double eastM, double northM) =>
+        new(A.Latitude + northM / 111_195.0, A.Longitude + eastM * LonPerMeter, null);
 
     private static Coordinate Lerp(Coordinate a, Coordinate b, double t) =>
         new(a.Latitude + t * (b.Latitude - a.Latitude), a.Longitude + t * (b.Longitude - a.Longitude), null);

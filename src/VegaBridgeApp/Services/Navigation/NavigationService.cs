@@ -20,7 +20,7 @@ namespace VegaBridgeApp.Services.Navigation;
 /// Works with the screen OFF – the UI is only needed for optional glanceable
 /// updates. The core logic runs from GPS callbacks regardless of display state.
 /// </summary>
-public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
+public class NavigationService(GpsService gps, IValhallaClient valhallaClient, TimeProvider time)
 {
     private readonly Lock _lock = new();
     private readonly List<INavigationSink> _sinks = [];
@@ -159,6 +159,30 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private int _lastSnappedIndex = -1;
     private const double SnapBackToleranceM = 100.0;
     private const double SnapForwardWindowM = 500.0;
+    // After a GPS gap (tunnel) the window also covers the distance the rider
+    // can have travelled meanwhile (~250 km/h).
+    private const double SnapGapMaxSpeedMs = 70.0;
+
+    // ── Dead reckoning (no GPS, e.g. tunnel) ─────────────────────────────
+    // Without a usable fix for DeadReckoningStartSec the position is
+    // estimated along the route from the last speed, once per second, so the
+    // distance to the next turn keeps counting down. Display only: the snap
+    // progress (_lastSnappedIndex) stays at the last real fix. The estimate
+    // never passes the displayed turn (its instruction stays until GPS
+    // confirms it), never reaches the destination, and stops
+    // DeadReckoningMaxM beyond the last fix – or beyond the end of a tunnel
+    // the rider is in or about to enter (Valhalla edge.tunnel).
+    private const double DeadReckoningStartSec = 3.0; // = SmoothingResetGapSec: one or two dropped fixes are no tunnel
+    private const double DeadReckoningMaxM = 500.0;
+    private const double TunnelAheadM = 300.0;    // GPS already fades on the approach to the portal
+    private const double TunnelMergeGapM = 200.0; // tunnel chains: GPS does not come back in between
+    private ITimer? _deadReckoningTimer;
+    private GpsReading? _lastFix;               // last usable fix
+    private DateTimeOffset _lastFixReceivedAt;  // on the TimeProvider clock
+
+    // Tunnels as [start, end] meters along the route; empty while unknown.
+    private List<(double StartM, double EndM)> _tunnels = [];
+    private const double OtherPassWindowM = 100.0; // U-turn ≤ ~50 m before it, or the rider turned back early (reroute)
 
     // ── Properties ───────────────────────────────────────────────────────
     public bool IsNavigating => _isNavigating;
@@ -229,6 +253,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         return m.Type == 4 && index < _maneuvers.Count - 1; // intermediate waypoint arrival
     }
 
+    /// <summary>Arrive, arrive right, arrive left – every waypoint ends a leg with one.</summary>
+    private static bool IsArrival(Maneuver m) => m.Type is 4 or 5 or 6;
+
+    /// <summary>Waypoints still ahead of the route index (the final arrival is the destination).</summary>
+    private int CountWaypointsAhead(int snappedIndex) =>
+        _maneuvers.SkipLast(1).Count(m => IsArrival(m) && m.BeginShapeIndex > snappedIndex);
+
     /// <summary>
     /// Start navigating along a Valhalla route.
     /// </summary>
@@ -249,6 +280,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         IReadOnlyList<Models.Valhalla.Location>? viaLocations = null,
         RoadAvoidance avoid = RoadAvoidance.None)
     {
+        List<int> waypointIndices = WaypointShapeIndices(maneuvers); // before densification remaps them
         bool wasNavigating;
         lock (_lock)
         {
@@ -289,6 +321,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _gpsTickCount = 0;
             _gpsBuffer.Clear();
             _lastRerouteAt = DateTimeOffset.MinValue;
+            _tunnels = [];
         }
 
         if (wasNavigating)
@@ -322,12 +355,20 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         // Unsubscribe first to prevent duplicate subscriptions on restarts.
         gps.ReadingReceived -= OnGpsReading;
         gps.ReadingReceived += OnGpsReading;
+        lock (_lock)
+        {
+            _deadReckoningTimer?.Dispose();
+            _deadReckoningTimer = _isNavigating
+                ? time.CreateTimer(_ => OnDeadReckoningTick(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1))
+                : null;
+        }
 
         Log.Information(
             "Navigation started: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers, {Points} route points",
             totalDistanceKm, totalTimeMin, maneuvers.Count, _routeCoords.Count);
         // Build way_id index for topology-aware off-route detection
         _ = BuildRouteWayIdIndex();
+        _ = BuildTunnelIndexAsync(mergedShape, waypointIndices);
         ResetTelemetry();
         FireCurrentManeuver();
     }
@@ -353,6 +394,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _topologyOffRouteCounter = 0;
             _routeWayIds = null;
             _currentHeadingDeg = -1;
+            _deadReckoningTimer?.Dispose();
         }
 
         if (wasNavigating)
@@ -420,10 +462,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             // its exact route index – passed once progress is beyond it.
             // (Nearest-point matching fails when the route passes a waypoint
             // twice, e.g. on a round trip.)
-            List<int> viaIndices = _maneuvers.SkipLast(1)
-                .Where(m => m.Type is 4 or 5 or 6) // arrive, arrive right, arrive left
-                .Select(m => m.BeginShapeIndex)
-                .ToList();
+            List<int> viaIndices = WaypointShapeIndices(_maneuvers);
             List<Models.Valhalla.Location> remaining = viaIndices.Count == _viaLocations.Count
                 ? _viaLocations.Where((_, i) => viaIndices[i] > snappedIndex).ToList()
                 : _viaLocations.Where(v => FindNearestRouteIndex(v.Lat, v.Lon).Index >= snappedIndex - 1).ToList();
@@ -508,8 +547,9 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// <summary>
     /// Replace the route mid-navigation after a reroute.
     /// </summary>
-    public void Reroute(string mergedShape, List<Maneuver> maneuvers, double totalDistanceKm, double totalTimeMin)
+    private void Reroute(string mergedShape, List<Maneuver> maneuvers, double totalDistanceKm, double totalTimeMin)
     {
+        List<int> waypointIndices = WaypointShapeIndices(maneuvers);
         lock (_lock)
         {
             InitializeRouteData(mergedShape, maneuvers, totalDistanceKm, totalTimeMin);
@@ -518,10 +558,12 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             _routeWayIds = null;
             _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
+            _tunnels = [];
         }
 
         FireCurrentManeuver();
         _ = BuildRouteWayIdIndex();
+        _ = BuildTunnelIndexAsync(mergedShape, waypointIndices);
         Log.Information(
             "Route rerouted: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers",
             totalDistanceKm, totalTimeMin, maneuvers.Count);
@@ -531,7 +573,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// Merges all leg shapes into a single polyline6 string, collecting all maneuvers
     /// with adjusted shape indices.
     /// </summary>
-    public (string MergedShape, List<Maneuver> Maneuvers, double TotalKm, double TotalMin)
+    public static (string MergedShape, List<Maneuver> Maneuvers, double TotalKm, double TotalMin)
         PrepareNavigationData(IReadOnlyList<Leg> legs)
     {
         List<Coordinate> allCoords = [];
@@ -705,6 +747,72 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         }
     }
 
+    /// <summary>
+    /// Tunnels along the route from Valhalla (trace_attributes, one call per
+    /// leg – edge_walk fails on a U-turn at a waypoint). They let the dead
+    /// reckoning run through a whole tunnel.
+    /// </summary>
+    /// <param name="mergedShape">Encoded route shape (not densified).</param>
+    /// <param name="waypointIndices">Shape indices where a leg ends at a waypoint.</param>
+    private async Task BuildTunnelIndexAsync(string mergedShape, List<int> waypointIndices)
+    {
+        List<Coordinate> coords = _routeCoords;
+        List<(double StartM, double EndM)> tunnels = [];
+        try
+        {
+            List<Coordinate> raw = PolylineEncoder.DecodePolyline6(mergedShape);
+            if (raw.Count < 2) return;
+            double[] rawM = new double[raw.Count];
+            for (int i = 1; i < raw.Count; i++)
+                rawM[i] = rawM[i - 1] + GeoMath.DistanceMeters(
+                    raw[i - 1].Latitude, raw[i - 1].Longitude, raw[i].Latitude, raw[i].Longitude);
+
+            int legStart = 0;
+            foreach (int legEnd in waypointIndices.Where(i => i > 0 && i < raw.Count - 1).Append(raw.Count - 1))
+            {
+                List<Coordinate> leg = raw.GetRange(legStart, legEnd - legStart + 1);
+                TraceAttributesResponse? response = await valhallaClient.GetTraceAttributesAsync(new TraceAttributesRequest
+                {
+                    EncodedPolyline = PolylineEncoder.EncodePolyline6(leg),
+                    Filters = new TraceAttributesFilter { Attributes = ["edge.tunnel", "edge.begin_shape_index", "edge.end_shape_index"] }
+                });
+                foreach (TraceEdge edge in response?.Edges ?? [])
+                {
+                    if (!edge.Tunnel || edge.BeginShapeIndex < 0 || edge.EndShapeIndex >= leg.Count) continue;
+                    double startM = rawM[legStart + edge.BeginShapeIndex];
+                    double endM = rawM[legStart + edge.EndShapeIndex];
+                    if (tunnels.Count > 0 && startM - tunnels[^1].EndM <= TunnelMergeGapM)
+                        tunnels[^1] = (tunnels[^1].StartM, Math.Max(tunnels[^1].EndM, endM));
+                    else
+                        tunnels.Add((startM, endM));
+                }
+                legStart = legEnd;
+            }
+            Log.Information("Route tunnels: {Count}, {Km:F1} km", tunnels.Count, tunnels.Sum(t => t.EndM - t.StartM) / 1000);
+        }
+        catch (Exception ex)
+        {
+            // No tunnels: the dead reckoning stops DeadReckoningMaxM after the last fix.
+            Log.Warning(ex, "Failed to build tunnel index");
+        }
+
+        lock (_lock)
+        {
+            if (ReferenceEquals(coords, _routeCoords))
+                _tunnels = tunnels;
+        }
+    }
+
+    /// <summary>
+    /// Shape indices of the waypoints: each ends a leg with an arrive
+    /// maneuver (arrive, arrive right, arrive left), the last one is the destination.
+    /// </summary>
+    private static List<int> WaypointShapeIndices(IEnumerable<Maneuver> maneuvers) => maneuvers
+        .SkipLast(1)
+        .Where(IsArrival)
+        .Select(m => m.BeginShapeIndex)
+        .ToList();
+
     // ── GPS event handler (core loop) ────────────────────────────────────
     private void OnGpsReading(GpsReading reading)
     {
@@ -726,9 +834,15 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             // after a tunnel would pull the position far off the road)
             double smoothLat = reading.Position.Latitude;
             double smoothLon = reading.Position.Longitude;
-            if ((reading.Timestamp - _lastFixAt).TotalSeconds > SmoothingResetGapSec)
+            double gapSec = (reading.Timestamp - _lastFixAt).TotalSeconds;
+            // Standing without fixes (car park) does not move the rider: keep the
+            // window, or an out-and-back route could snap to the way back.
+            double gapM = _lastFix is { Speed: >= WrongWayMinSpeedMs } ? gapSec * SnapGapMaxSpeedMs : 0;
+            if (gapSec > SmoothingResetGapSec)
                 _lastSmoothedPosition = null;
             _lastFixAt = reading.Timestamp;
+            _lastFix = reading;
+            _lastFixReceivedAt = time.GetUtcNow();
             if (_lastSmoothedPosition != null)
             {
                 smoothLat = GpsSmoothingAlpha * reading.Position.Latitude + (1.0 - GpsSmoothingAlpha) * _lastSmoothedPosition.Value.Latitude;
@@ -753,7 +867,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             double navLon = smoothLon;
 
             // Snap to route
-            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon);
+            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon, gapM,
+                reading.Speed >= WrongWayMinSpeedMs ? _currentHeadingDeg : -1);
             if (snappedIndex < 0) return;
 
             // Near a turn? (Not "inside a maneuver span": every route point
@@ -776,14 +891,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             bool isWrongWay = false;
             if (_currentHeadingDeg >= 0 && reading.Speed >= WrongWayMinSpeedMs && snappedIndex < _routeCoords.Count - 1)
             {
-                // Local route direction at the snap (~40 m) – a bearing to a
-                // point 100 m ahead points backwards in hairpins.
-                Coordinate here = _routeCoords[snappedIndex];
-                Coordinate nextPoint = _routeCoords[Math.Min(snappedIndex + 2, _routeCoords.Count - 1)];
-                double routeBearing = GeoMath.BearingDeg(here.Latitude, here.Longitude, nextPoint.Latitude, nextPoint.Longitude);
-                double headingDiff = Math.Abs(_currentHeadingDeg - routeBearing);
-                if (headingDiff > 180) headingDiff = 360 - headingDiff;
-                if (headingDiff > WrongWayHeadingThresholdDeg)
+                if (HeadingDiffDeg(snappedIndex, _currentHeadingDeg) > WrongWayHeadingThresholdDeg)
                 {
                     _wrongWayCounter++;
                     if (_wrongWayCounter >= WrongWayHysteresisCount)
@@ -834,102 +942,157 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 }
             }
 
-            // Upcoming action: first maneuver whose begin is at/ahead of the
-            // snap. Valhalla maneuvers describe the action at their BEGIN
-            // (the turn happens at begin_shape_index, e.g. "Turn left onto
-            // Rotebühlstraße" at shape 3, spanning the whole road segment
-            // after it). Picking the span-containing maneuver would keep a
-            // finished turn's instruction on screen for the entire following
-            // segment - the stuck-instruction bug. Show the NEXT action.
-            int newManeuverIndex = -1;
-            if (_maneuvers.Count > 0)
+            ReportProgress(snappedIndex, navLat, navLon, reading, estimated: false);
+        }
+    }
+
+    /// <summary>
+    /// Upcoming maneuver, distances and status for a position on the route –
+    /// a GPS fix, or an estimate while there is none. Call under _lock.
+    /// </summary>
+    /// <param name="snappedIndex">Route index of the position.</param>
+    /// <param name="lat">Latitude for the log.</param>
+    /// <param name="lon">Longitude for the log.</param>
+    /// <param name="reading">The fix (for an estimate: the last one).</param>
+    /// <param name="estimated">No GPS: position estimated along the route.</param>
+    private void ReportProgress(int snappedIndex, double lat, double lon, GpsReading reading, bool estimated)
+    {
+        // Upcoming action: first maneuver whose begin is at/ahead of the
+        // snap. Valhalla maneuvers describe the action at their BEGIN
+        // (the turn happens at begin_shape_index, e.g. "Turn left onto
+        // Rotebühlstraße" at shape 3, spanning the whole road segment
+        // after it). Picking the span-containing maneuver would keep a
+        // finished turn's instruction on screen for the entire following
+        // segment - the stuck-instruction bug. Show the NEXT action.
+        int newManeuverIndex = -1;
+        if (_maneuvers.Count > 0)
+        {
+            if (snappedIndex >= _maneuvers[^1].EndShapeIndex)
             {
-                if (snappedIndex >= _maneuvers[^1].EndShapeIndex)
+                newManeuverIndex = -1; // destination reached
+            }
+            else
+            {
+                newManeuverIndex = _maneuvers.Count - 1;
+                for (int i = 0; i < _maneuvers.Count; i++)
                 {
-                    newManeuverIndex = -1; // destination reached
-                }
-                else
-                {
-                    newManeuverIndex = _maneuvers.Count - 1;
-                    for (int i = 0; i < _maneuvers.Count; i++)
+                    if (_maneuvers[i].BeginShapeIndex >= snappedIndex)
                     {
-                        if (_maneuvers[i].BeginShapeIndex >= snappedIndex)
-                        {
-                            newManeuverIndex = i;
-                            break;
-                        }
+                        newManeuverIndex = i;
+                        break;
                     }
                 }
             }
+        }
 
-            // Arrival: the snapped index is past the last maneuver's end
-            // (Valhalla "Arrive" has begin == end == last shape index, which
-            // never satisfies the routeIndex < end condition). Treat -1 as
-            // destination reached instead of corrupting the maneuver index.
-            if (newManeuverIndex < 0 && _maneuvers.Count > 0)
+        // Arrival: the snapped index is past the last maneuver's end
+        // (Valhalla "Arrive" has begin == end == last shape index, which
+        // never satisfies the routeIndex < end condition). Treat -1 as
+        // destination reached instead of corrupting the maneuver index.
+        if (newManeuverIndex < 0 && _maneuvers.Count > 0)
+        {
+            Log.Information("Destination reached!");
+            LogTelemetry();
+            gps.ReadingReceived -= OnGpsReading;
+            _isNavigating = false;
+            _deadReckoningTimer?.Dispose();
+            _ = Task.Run(async () =>
             {
-                Log.Information("Destination reached!");
-                LogTelemetry();
-                gps.ReadingReceived -= OnGpsReading;
-                _isNavigating = false;
-                _ = Task.Run(async () =>
-                {
-                    await gps.StopTrackingAsync();
-                    _ = NotifySinksAsync(s => s.OnFinishAsync());
-                });
+                await gps.StopTrackingAsync();
+                _ = NotifySinksAsync(s => s.OnFinishAsync());
+            });
+            return;
+        }
+
+        int displayIndex = GetDisplayManeuverIndex();
+
+        bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
+        // Never regress: GPS jitter near a corner (snap bounces between
+        // two maneuvers) must not move the instruction backwards.
+        if (newManeuverIndex < _currentManeuverIndex)
+            maneuverChanged = false;
+
+        if (maneuverChanged)
+        {
+            _currentManeuverIndex = newManeuverIndex;
+            displayIndex = GetDisplayManeuverIndex();
+
+            FireCurrentManeuver(displayIndex);
+        }
+
+        // Distance to the DISPLAYED action (skip-straight can point past
+        // _currentManeuverIndex, e.g. the depart maneuver at start).
+        _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex, displayIndex);
+        (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
+        _remainingDistanceKm = remainingKm;
+        _remainingTimeMin = remainingMin;
+
+        // Diagnostic trace on EVERY reading: with sparse GPS fixes (e.g.
+        // simulator, few points) a %10 throttle never fires, so the log
+        // would show nothing. One line per reading is fine (1 Hz).
+        Log.Information(
+            "NAV tick {Tick}: pos=({Lat:F6},{Lon:F6}) snap={Snap} man={Man}/{Total} distTurn={Dist:F0}m rem={Rem:F1}km offRoute={OffRoute} estimated={Estimated}",
+            _gpsTickCount, lat, lon, snappedIndex,
+            _currentManeuverIndex, _maneuvers.Count,
+            _distanceToNextTurnM, _remainingDistanceKm, _isOffRoute, estimated);
+
+        double speedKmh = reading.Speed * 3.6;
+
+        NavigationStatus status = new()
+        {
+            SpeedKmh = speedKmh,
+            DistanceToNextTurnM = _distanceToNextTurnM,
+            RemainingDistanceKm = _remainingDistanceKm,
+            RemainingTimeMin = _remainingTimeMin,
+            CurrentManeuverIndex = _currentManeuverIndex,
+            DisplayManeuverIndex = displayIndex,
+            TotalManeuvers = _maneuvers.Count,
+            // Computed travel direction (GPS course or buffer-derived),
+            // not the raw GPS course which is often 0/unset.
+            Heading = _currentHeadingDeg >= 0 ? _currentHeadingDeg : reading.Heading,
+            Accuracy = reading.PositionAccuracy,
+            RemainingWaypoints = CountWaypointsAhead(snappedIndex),
+            IsStationary = reading.IsStationary,
+            IsEstimated = estimated
+        };
+        _ = NotifySinksAsync(s => s.OnStatusAsync(status));
+    }
+
+    // ── Dead reckoning ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Every second: without a usable fix for <see cref="DeadReckoningStartSec"/>,
+    /// report the position estimated along the route from the last fix's speed.
+    /// </summary>
+    private void OnDeadReckoningTick()
+    {
+        lock (_lock)
+        {
+            if (!_isNavigating || _isOffRoute || _lastFix is not { } fix || _lastSnappedIndex < 0 || _maneuvers.Count == 0)
                 return;
+
+            double sinceFixSec = (time.GetUtcNow() - _lastFixReceivedAt).TotalSeconds;
+            // GPS still there, or standing (nothing to estimate)
+            if (sinceFixSec < DeadReckoningStartSec || !(fix.Speed >= WrongWayMinSpeedMs))
+                return;
+
+            double fromM = _cumulativeDistances[_lastSnappedIndex];
+            double limitM = fromM + DeadReckoningMaxM;
+            foreach ((double startM, double endM) in _tunnels)
+            {
+                if (startM <= fromM + TunnelAheadM && endM >= fromM)
+                    limitM = Math.Max(limitM, endM + DeadReckoningMaxM);
             }
 
-            int displayIndex = GetDisplayManeuverIndex();
+            double estimatedM = fromM + Math.Min(fix.Speed * sinceFixSec, limitM - fromM);
+            int index = IndexAtRouteOffset(_lastSnappedIndex, estimatedM - fromM);
+            if (_cumulativeDistances[index] > estimatedM) index--; // round down: the next fix must not pull the distance back up
+            // Not past the displayed turn, not at the destination.
+            int turnIndex = _maneuvers[GetDisplayManeuverIndex()].BeginShapeIndex;
+            index = Math.Min(index, Math.Min(turnIndex, _maneuvers[^1].EndShapeIndex - 1));
 
-            bool maneuverChanged = newManeuverIndex != _currentManeuverIndex;
-            // Never regress: GPS jitter near a corner (snap bounces between
-            // two maneuvers) must not move the instruction backwards.
-            if (newManeuverIndex < _currentManeuverIndex)
-                maneuverChanged = false;
-
-            if (maneuverChanged)
-            {
-                _currentManeuverIndex = newManeuverIndex;
-                displayIndex = GetDisplayManeuverIndex();
-
-                FireCurrentManeuver(displayIndex);
-            }
-
-            // Distance to the DISPLAYED action (skip-straight can point past
-            // _currentManeuverIndex, e.g. the depart maneuver at start).
-            _distanceToNextTurnM = CalculateDistanceToNextTurn(snappedIndex, displayIndex);
-            (double remainingKm, double remainingMin) = CalculateRemaining(snappedIndex);
-            _remainingDistanceKm = remainingKm;
-            _remainingTimeMin = remainingMin;
-
-            // Diagnostic trace on EVERY reading: with sparse GPS fixes (e.g.
-            // simulator, few points) a %10 throttle never fires, so the log
-            // would show nothing. One line per reading is fine (1 Hz).
-            Log.Information(
-                "NAV tick {Tick}: pos=({Lat:F6},{Lon:F6}) snap={Snap} man={Man}/{Total} distTurn={Dist:F0}m rem={Rem:F1}km offRoute={OffRoute}",
-                _gpsTickCount, navLat, navLon, snappedIndex,
-                _currentManeuverIndex, _maneuvers.Count,
-                _distanceToNextTurnM, _remainingDistanceKm, _isOffRoute);
-
-            double speedKmh = reading.Speed * 3.6;
-
-            NavigationStatus status = new()
-            {
-                SpeedKmh = speedKmh,
-                DistanceToNextTurnM = _distanceToNextTurnM,
-                RemainingDistanceKm = _remainingDistanceKm,
-                RemainingTimeMin = _remainingTimeMin,
-                CurrentManeuverIndex = _currentManeuverIndex,
-                DisplayManeuverIndex = displayIndex,
-                TotalManeuvers = _maneuvers.Count,
-                // Computed travel direction (GPS course or buffer-derived),
-                // not the raw GPS course which is often 0/unset.
-                Heading = _currentHeadingDeg >= 0 ? _currentHeadingDeg : reading.Heading,
-                Accuracy = reading.PositionAccuracy,
-                IsStationary = reading.IsStationary
-            };
-            _ = NotifySinksAsync(s => s.OnStatusAsync(status));
+            Coordinate p = _routeCoords[index];
+            ReportProgress(index, p.Latitude, p.Longitude, fix, estimated: true);
         }
     }
 
@@ -982,7 +1145,11 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// so a later pass over the same road (round trip, out-and-back) is not
     /// matched before its time.
     /// </summary>
-    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon)
+    /// <param name="lat">Latitude of the fix.</param>
+    /// <param name="lon">Longitude of the fix.</param>
+    /// <param name="gapM">How far the rider can have got since the previous usable fix.</param>
+    /// <param name="headingDeg">Travel direction while moving, else -1.</param>
+    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double gapM, double headingDeg)
     {
         (int Index, double DistanceMeters) result;
         if (_lastSnappedIndex < 0)
@@ -995,9 +1162,41 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         }
         else
         {
+            // After a tunnel the rider is further ahead: measured against the
+            // window before it, every slightly imprecise fix at the exit was
+            // "far from route" → false off-route and reroute.
             int from = IndexAtRouteOffset(_lastSnappedIndex, -SnapBackToleranceM);
-            int to = IndexAtRouteOffset(_lastSnappedIndex, SnapForwardWindowM);
+            int to = IndexAtRouteOffset(_lastSnappedIndex,
+                Math.Max(SnapForwardWindowM, gapM));
             result = FindNearestRouteIndex(lat, lon, from, to);
+            // A later pass close by (interchange ramp looping back over the
+            // road, hairpin) can be nearer than the rider's own: further ahead
+            // than the rider can have got, keep to the pass at the progress
+            // when it is about as near.
+            if (_cumulativeDistances[result.Index] - _cumulativeDistances[_lastSnappedIndex] > Math.Max(OtherPassWindowM, gapM))
+            {
+                (int Index, double DistanceMeters) here = FindNearestRouteIndex(lat, lon, from,
+                    IndexAtRouteOffset(_lastSnappedIndex, OtherPassWindowM));
+                if (here.DistanceMeters <= result.DistanceMeters + SuspectXteM)
+                    result = here;
+            }
+            // Two passes over the same road (U-turn at a waypoint, hairpin):
+            // the nearest may be the pass against the rider's direction – the
+            // earlier one wins a tie. Take the pass the rider is going along.
+            if (headingDeg >= 0 && result.Index < _routeCoords.Count - 1
+                && HeadingDiffDeg(result.Index, headingDeg) > WrongWayHeadingThresholdDeg)
+            {
+                (int Index, double DistanceMeters) along = (-1, result.DistanceMeters + SuspectXteM);
+                int last = Math.Min(IndexAtRouteOffset(_lastSnappedIndex, OtherPassWindowM), _routeCoords.Count - 2);
+                for (int i = IndexAtRouteOffset(_lastSnappedIndex, -OtherPassWindowM); i <= last; i++)
+                {
+                    double d = DistanceToRoutePoint(i, lat, lon);
+                    if (d <= along.DistanceMeters && HeadingDiffDeg(i, headingDeg) < 90)
+                        along = (i, d);
+                }
+                if (along.Index >= 0)
+                    result = along;
+            }
             if (result.DistanceMeters > SuspectXteM)
             {
                 // Not on the window (GPS gap, rejoined the route further
@@ -1026,14 +1225,14 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         if (_cumulativeDistances.Length == 0) return index;
         double target = _cumulativeDistances[index] + offsetM;
         int i = Array.BinarySearch(_cumulativeDistances, target);
-        if (i < 0)
-        {
-            i = ~i; // first index beyond target
-            if (offsetM < 0) i--;
-        }
+        if (i >= 0) return Math.Clamp(i, 0, _cumulativeDistances.Length - 1);
+        i = ~i; // first index beyond target
+        if (offsetM < 0) i--;
         return Math.Clamp(i, 0, _cumulativeDistances.Length - 1);
     }
 
+    /// <param name="lat">Latitude of the position.</param>
+    /// <param name="lon">Longitude of the position.</param>
     /// <param name="fromIndex">First route index to consider.</param>
     /// <param name="toIndex">Last route index to consider.</param>
     /// <param name="earliestSlackM">When &gt; 0, return the earliest route
@@ -1078,6 +1277,17 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             }
         }
         return (bestIndex, distanceMeters);
+    }
+
+    /// <summary>
+    /// Heading vs the local route direction at <paramref name="index"/> (~40 m –
+    /// a bearing to a point 100 m ahead points backwards in hairpins).
+    /// </summary>
+    private double HeadingDiffDeg(int index, double headingDeg)
+    {
+        Coordinate here = _routeCoords[index];
+        Coordinate next = _routeCoords[Math.Min(index + 2, _routeCoords.Count - 1)];
+        return GeoMath.BearingDifferenceDeg(headingDeg, GeoMath.BearingDeg(here.Latitude, here.Longitude, next.Latitude, next.Longitude));
     }
 
     private double DistanceToRoutePoint(int index, double lat, double lon) =>
@@ -1165,7 +1375,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
 
         try
         {
-            var results = await valhallaClient.LocateAsync([(lat, lon)], speedMs, heading);
+            List<LocateResponse?> results = await valhallaClient.LocateAsync([(lat, lon)], speedMs, heading);
             if (results.Count == 0 || results[0]?.Edges is not { Count: > 0 })
             {
                 // Topology inconclusive — no edges at all. Count like mismatch.
@@ -1251,12 +1461,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         _topologyOffRouteCounter++;
         Log.Information("Locate: off-route candidate ({Count}/{Threshold}), reason={Reason}",
             _topologyOffRouteCounter, OffRouteConfirmCount, reason);
-        if (_topologyOffRouteCounter >= OffRouteConfirmCount && !_isOffRoute)
-        {
-            _isOffRoute = true;
-            Log.Warning("Off route (topology)! {Reason}, dist={Dist:F1}m", reason, distanceMeters);
-            _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
-        }
+        if (_topologyOffRouteCounter < OffRouteConfirmCount || _isOffRoute) return;
+        _isOffRoute = true;
+        Log.Warning("Off route (topology)! {Reason}, dist={Dist:F1}m", reason, distanceMeters);
+        _ = NotifySinksAsync(s => s.OnOffRouteAsync(lat, lon, distanceMeters));
     }
 
     private void LogTelemetry()

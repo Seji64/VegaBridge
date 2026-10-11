@@ -90,6 +90,24 @@ public class ValhallaClient : IValhallaClient
             return [];
         }
     }
+
+    /// <inheritdoc />
+    public async Task<TraceAttributesResponse?> GetTraceAttributesAsync(TraceAttributesRequest request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            return await _flurlClient
+                .Request("trace_attributes")
+                .PostJsonAsync(request, cancellationToken: cancellationToken)
+                .ReceiveJson<TraceAttributesResponse>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warning(ex, "trace_attributes failed");
+            return null;
+        }
+    }
     private async Task<Result> PostAsync<TRequest>(string endpoint, TRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -15,8 +15,8 @@ The system works with the screen OFF — the UI is only needed for optional glan
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          UI Layer (Map.razor)                        │
-│  Blazor Hybrid · Displays route, maneuvers, speed, remaining dist   │
+│                 UI Layer (Map.razor · NavigationHud)                 │
+│  Blazor Hybrid · Route, next maneuver, ETA, heading-up follow map   │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │ implements INavigationSink
 ┌───────────────────────────────┴─────────────────────────────────────┐
@@ -60,6 +60,8 @@ User taps "Start Navigation" on Map
   → Polyline densification (max 20m segments)
   → Way-ID index built via ONE Valhalla /locate call
     (every ~1 km + middle of every maneuver)
+  → Tunnel index via Valhalla /trace_attributes (edge.tunnel, edge_walk,
+    one call per leg)
   → GPS tracking started
   → INavigationSink.OnStartAsync() fired to all sinks
 ```
@@ -77,7 +79,8 @@ GpsService.ReadingReceived → OnGpsReading()
   │
   ├─ Snap to route (SnapToRoute: window around the progress,
   │   100m back / 500m ahead – a later pass over the same road,
-  │   e.g. a round trip's end at its start, is never matched early)
+  │   e.g. a round trip's end at its start, is never matched early;
+  │   after a GPS gap while moving the window also covers gap × 70 m/s)
   │
   ├─ Off-Route Detection (Gated Topology)
   │   ├─ FAST PATH: XTE ≤ 20m (40m within 30m of a turn) → ON_ROUTE
@@ -97,6 +100,28 @@ GpsService.ReadingReceived → OnGpsReading()
   │
   └─ INavigationSink.OnStatusAsync() → BLE + UI
 ```
+
+### 2a. No GPS: Dead Reckoning (tunnel)
+
+A 1 Hz timer (`TimeProvider`) runs while navigating. Without a usable fix
+(accuracy ≤ 40m) for 3 s, the position is estimated along the route from the
+last fix's speed and reported like a fix, so
+the distance to the next turn keeps counting down on the bike:
+
+- Display only: the snap progress stays at the last real fix; the first fix
+  after the gap is matched normally (window grown by the gap).
+- Never past the displayed turn – its instruction stays (at 0 m) until GPS
+  confirms it – and never at the destination (arriving needs a real fix).
+- Stops 500m beyond the last fix, or 500m beyond the end of a tunnel the rider
+  is in or about to enter (starts ≤ 300m ahead; tunnels < 200m apart merged).
+- Not while standing (< 10 km/h) or off route.
+
+Tunnels come from Valhalla's `/trace_attributes` with `shape_match: edge_walk`
+on the route shape: it returns the shape points unchanged, so the tunnel
+edges' `begin_shape_index` / `end_shape_index` index the route shape. The
+route response itself has no tunnel flag. `edge_walk` fails on a U-turn at a
+waypoint, so it is called per leg. Without tunnel data (error, offline) only
+the 500m limit applies.
 
 ### 3. BLE Transmission
 
@@ -207,12 +232,15 @@ Throttles and cooldowns run on the GPS fix timestamps (≈ wall clock at 1 Hz).
 | Hairpin curve (XTE 35m) | Fast path SUSPECT → locate confirms way_id → ON_ROUTE |
 | GPS glitch (2 ticks off) | Hysteresis doesn't reach threshold → resets |
 | Wrong way / U-turn | Heading divergence > 135° → off-route even at XTE 0m |
+| U-turn at a waypoint (out and back) | Snap takes the pass the rider is heading along (within 100m of the progress) → no off-route; turning back earlier still reroutes |
 | Wrong turn in the city | Wrong way at the corner / XTE > 50m → reroute after ~5s (36 km/h) |
 | Parallel road (≥ 20m, same heading) | Locate returns different way_id → reroute after ~6s (120 km/h) |
 | Parallel road < 20m | Not detected – not separable by GPS |
 | GPS drift on the route road (city) | Locate confirms way_id → ON_ROUTE |
-| Tunnel / bad GPS (accuracy > 40m) | Tick ignored entirely, state frozen |
+| Tunnel / bad GPS (accuracy > 40m) | Tick ignored; after 3 s the position is estimated along the route (dead reckoning) |
+| Long tunnel (no fix, > 500m) | Snap window grows with the gap → caught up at the exit, imprecise exit fixes are not "far from route" |
 | Round trip / overlapping route | Progress window: later pass is not matched early |
+| Ramp looping back over the road (interchange), hairpin | A nearer point further ahead than the rider can have got (> max(100m, gap × 70 m/s)) loses to the pass at the progress when that is within +20m |
 
 ### Cost Optimization
 
@@ -333,6 +361,10 @@ Valhalla maneuvers describe the action at their BEGIN index (the turn happens AT
 | `LocateCooldownSec` | 4s | No /locate after a way_id match |
 | `RerouteMinIntervalSec` | 30s | Min interval between automatic reroutes |
 | `SnapBackToleranceM` / `SnapForwardWindowM` | 100m / 500m | Snap window around the progress |
+| `SnapGapMaxSpeedMs` | 70 m/s | After a GPS gap while moving (≥ 10 km/h) the forward window is at least gap × this |
+| `DeadReckoningStartSec` | 3s | No usable fix this long → estimate along the route (rounded down to a route point) |
+| `DeadReckoningMaxM` | 500m | Estimate stops this far beyond the last fix / the tunnel end |
+| `TunnelAheadM` / `TunnelMergeGapM` | 300m / 200m | Tunnel counts when it starts this close ahead / tunnels this close are one |
 | `WrongWayHeadingThresholdDeg` | 135° | Heading divergence for wrong-way detection |
 | `WrongWayMinSpeedMs` | 2.78 m/s | Min speed for wrong-way check (10 km/h) |
 | `GpsSmoothingAlpha` | 0.7 | EMA weight for newest reading |

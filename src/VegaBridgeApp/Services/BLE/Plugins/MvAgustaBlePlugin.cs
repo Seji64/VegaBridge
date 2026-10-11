@@ -214,7 +214,8 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     // to BleManagerService, which logs them per frame type.
     private static Task SendAsync(IBleConnectedDevice device, string command, params string[] fields)
     {
-        char cr = '\r', rs = '\u001E';
+        const char cr = '\r';
+        const char rs = '\u001E';
         byte[] frame = Encoding.UTF8.GetBytes($"{cr}{command}{string.Concat(fields.Select(f => $"{rs}{f}"))}{cr}");
         Log.Information("BLE-LOGGER: {Line}", $"SEND {command} frame: {BitConverter.ToString(frame)}");
         return device.WriteAsync(WriteCharacteristicUuid, frame);
@@ -274,7 +275,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     /// Sends SM1: arrival time as minutes since local midnight + remaining
     /// minutes, e.g. SM1|902|7 = arrive 15:02, 7 min left (MV Ride v1.4.3).
     /// </summary>
-    private Task SendArrivalTimeAsync(IBleConnectedDevice device, double remainingTimeMin)
+    private static Task SendArrivalTimeAsync(IBleConnectedDevice device, double remainingTimeMin)
     {
         double remaining = Math.Max(0, remainingTimeMin);
         int remainingMin = (int)remaining;

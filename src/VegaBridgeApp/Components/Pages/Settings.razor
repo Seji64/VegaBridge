@@ -49,7 +49,7 @@
                         <!-- Offline ride test: the next navigation started on the map is
                              driven by simulated GPS through the live-ride code path. -->
                         <MudButton
-                            Variant="Variant.Text"
+                            Variant="Variant.Outlined"
                             Color="Color.Secondary"
                             Size="Size.Small"
                             Disabled="Sim.IsRunning"
@@ -160,19 +160,14 @@
                 <MudText Typo="Typo.subtitle2" Class="mb-3">@L["NavSection"]</MudText>
 
                 <MudText Typo="Typo.subtitle2" Class="mb-2">@L["HomeSection"]</MudText>
-                <MudAutocomplete T="GeoResult"
-                                 Label="@L["HomeSearchLabel"]"
-                                 Variant="Variant.Outlined"
-                                 Adornment="Adornment.Start"
-                                 AdornmentIcon="@Icons.Material.Filled.Home"
-                                 AdornmentColor="Color.Secondary"
-                                 Value="_homeLocation"
-                                 ValueChanged="@OnHomeSelected"
-                                 SearchFunc="@HomeSearchAsync"
-                                 DebounceInterval="300"
-                                 MinCharacters="2"
-                                 Clearable="true"
-                                 Class="mb-2" />
+                <AddressAutocomplete Label="@L["HomeSearchLabel"]"
+                                     AdornmentIcon="@Icons.Material.Filled.Home"
+                                     Margin="Margin.None"
+                                     MinCharacters="2"
+                                     Class="mb-2"
+                                     Value="_homeLocation"
+                                     ValueChanged="@OnHomeSelected"
+                                     SearchFunc="@HomeSearchAsync"/>
                 @if (_homeLocation != null)
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="mt-1">
