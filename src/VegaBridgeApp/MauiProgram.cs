@@ -189,7 +189,7 @@ public static class MauiProgram
                 // 5xx) – a successful response must never be retried.
                 ShouldHandle = static args => ValueTask.FromResult(
                     args.Outcome.Result?.StatusCode != System.Net.HttpStatusCode.GatewayTimeout
-                    && HttpClientResiliencePredicates.IsTransient(args.Outcome, args.Context.CancellationToken))
+                    && HttpClientResiliencePredicates.IsTransient(args.Outcome))
             });
         });
 
