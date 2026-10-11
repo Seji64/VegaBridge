@@ -236,6 +236,39 @@ public class NavigationServiceTests
         Assert.False(RerouteRequested());
     }
 
+    [Fact]
+    public async Task UTurnAtWaypoint_IsNotOffRoute()
+    {
+        // Out to a waypoint and back the same road (viewpoint at a dead end):
+        // after the U-turn the way back is the route, not a wrong way.
+        Coordinate x = Lerp(A, B, 0.5);
+        await StartAsync([Leg(Right, A, x), Leg(Right, x, A)], vias: [Loc(x)]);
+
+        List<Coordinate> ride = Ride(10, A, x, Lerp(x, A, 0.5));
+        for (int i = 0; i < ride.Count; i++)
+            Fix(ride[i], speedMs: 10, headingDeg: ride[i].Latitude >= (i > 0 ? ride[i - 1].Latitude : 0) ? 0 : 180);
+
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+        Assert.InRange(_sink.LastStatus!.RemainingDistanceKm, 0.2, 0.3);
+    }
+
+    [Fact]
+    public async Task UTurnLongBeforeWaypoint_IsStillOffRoute()
+    {
+        // Turned back 200 m before the waypoint: reroute (back to it), not a
+        // silent skip onto the way back.
+        Coordinate x = Lerp(A, B, 0.5);
+        await StartAsync([Leg(Right, A, x), Leg(Right, x, A)], vias: [Loc(x)]);
+        Coordinate turn = Lerp(A, B, 0.3);
+        foreach (Coordinate p in Ride(10, A, turn))
+            Fix(p, speedMs: 10, headingDeg: 0);
+        foreach (Coordinate p in Ride(10, turn, A).Take(6))
+            Fix(p, speedMs: 10, headingDeg: 180);
+
+        Assert.True(_sink.OffRoute);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private Task StartAsync(Leg leg) => StartAsync([leg], []);

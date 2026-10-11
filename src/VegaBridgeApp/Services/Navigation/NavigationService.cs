@@ -159,6 +159,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     private int _lastSnappedIndex = -1;
     private const double SnapBackToleranceM = 100.0;
     private const double SnapForwardWindowM = 500.0;
+    private const double OtherPassWindowM = 100.0; // U-turn ≤ ~50 m before it, or the rider turned back early (reroute)
 
     // ── Properties ───────────────────────────────────────────────────────
     public bool IsNavigating => _isNavigating;
@@ -760,7 +761,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             double navLon = smoothLon;
 
             // Snap to route
-            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon);
+            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon,
+                reading.Speed >= WrongWayMinSpeedMs ? _currentHeadingDeg : -1);
             if (snappedIndex < 0) return;
 
             // Near a turn? (Not "inside a maneuver span": every route point
@@ -783,13 +785,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             bool isWrongWay = false;
             if (_currentHeadingDeg >= 0 && reading.Speed >= WrongWayMinSpeedMs && snappedIndex < _routeCoords.Count - 1)
             {
-                // Local route direction at the snap (~40 m) – a bearing to a
-                // point 100 m ahead points backwards in hairpins.
-                Coordinate here = _routeCoords[snappedIndex];
-                Coordinate nextPoint = _routeCoords[Math.Min(snappedIndex + 2, _routeCoords.Count - 1)];
-                double routeBearing = GeoMath.BearingDeg(here.Latitude, here.Longitude, nextPoint.Latitude, nextPoint.Longitude);
-                double headingDiff = GeoMath.BearingDifferenceDeg(_currentHeadingDeg, routeBearing);
-                if (headingDiff > WrongWayHeadingThresholdDeg)
+                if (HeadingDiffDeg(snappedIndex, _currentHeadingDeg) > WrongWayHeadingThresholdDeg)
                 {
                     _wrongWayCounter++;
                     if (_wrongWayCounter >= WrongWayHysteresisCount)
@@ -989,7 +985,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
     /// so a later pass over the same road (round trip, out-and-back) is not
     /// matched before its time.
     /// </summary>
-    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon)
+    /// <param name="headingDeg">Travel direction while moving, else -1.</param>
+    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double headingDeg)
     {
         (int Index, double DistanceMeters) result;
         if (_lastSnappedIndex < 0)
@@ -1005,6 +1002,23 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             int from = IndexAtRouteOffset(_lastSnappedIndex, -SnapBackToleranceM);
             int to = IndexAtRouteOffset(_lastSnappedIndex, SnapForwardWindowM);
             result = FindNearestRouteIndex(lat, lon, from, to);
+            // Two passes over the same road (U-turn at a waypoint, hairpin):
+            // the nearest may be the pass against the rider's direction – the
+            // earlier one wins a tie. Take the pass the rider is going along.
+            if (headingDeg >= 0 && result.Index < _routeCoords.Count - 1
+                && HeadingDiffDeg(result.Index, headingDeg) > WrongWayHeadingThresholdDeg)
+            {
+                (int Index, double DistanceMeters) along = (-1, result.DistanceMeters + SuspectXteM);
+                int last = Math.Min(IndexAtRouteOffset(_lastSnappedIndex, OtherPassWindowM), _routeCoords.Count - 2);
+                for (int i = IndexAtRouteOffset(_lastSnappedIndex, -OtherPassWindowM); i <= last; i++)
+                {
+                    double d = DistanceToRoutePoint(i, lat, lon);
+                    if (d <= along.DistanceMeters && HeadingDiffDeg(i, headingDeg) < 90)
+                        along = (i, d);
+                }
+                if (along.Index >= 0)
+                    result = along;
+            }
             if (result.DistanceMeters > SuspectXteM)
             {
                 // Not on the window (GPS gap, rejoined the route further
@@ -1085,6 +1099,17 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             }
         }
         return (bestIndex, distanceMeters);
+    }
+
+    /// <summary>
+    /// Heading vs the local route direction at <paramref name="index"/> (~40 m –
+    /// a bearing to a point 100 m ahead points backwards in hairpins).
+    /// </summary>
+    private double HeadingDiffDeg(int index, double headingDeg)
+    {
+        Coordinate here = _routeCoords[index];
+        Coordinate next = _routeCoords[Math.Min(index + 2, _routeCoords.Count - 1)];
+        return GeoMath.BearingDifferenceDeg(headingDeg, GeoMath.BearingDeg(here.Latitude, here.Longitude, next.Latitude, next.Longitude));
     }
 
     private double DistanceToRoutePoint(int index, double lat, double lon) =>
