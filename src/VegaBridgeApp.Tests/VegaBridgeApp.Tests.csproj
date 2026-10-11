@@ -15,6 +15,7 @@
         <Compile Include="../VegaBridgeApp/Services/Location/GpsDelegate.cs" Link="App/%(Filename)%(Extension)" />
         <Compile Include="../VegaBridgeApp/Services/Valhalla/*.cs" Link="App/%(Filename)%(Extension)" />
         <Compile Include="../VegaBridgeApp/Services/Routes/PolylineEncoder.cs" Link="App/%(Filename)%(Extension)" />
+        <Compile Include="../VegaBridgeApp/Services/Geocoding/*.cs" Link="App/%(Filename)%(Extension)" />
         <Compile Include="../VegaBridgeApp/Models/**/*.cs" Link="App/Models/%(RecursiveDir)%(Filename)%(Extension)" />
         <Compile Include="../VegaBridgeApp/Utils/*.cs" Link="App/%(Filename)%(Extension)" />
     </ItemGroup>

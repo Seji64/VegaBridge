@@ -155,45 +155,29 @@
 
                     <div style="overflow-y: auto; max-height: 180px;" class="pr-2">
 
-                        <MudAutocomplete @ref="_startAuto" T="GeoResult"
-                                         Label="@L["Start"]"
-                                         Variant="Variant.Outlined"
-                                         Margin="Margin.Dense"
-                                         Adornment="Adornment.Start"
-                                         AdornmentIcon="@Icons.Material.Filled.Home"
-                                         AdornmentColor="Color.Secondary"
-                                         Class="mb-3"
-                                         @bind-Value="_startLocation"
-                                         SearchFunc="@SearchAsync"
-                                         OpenOnFocus="true"
-                                         Strict="true"
-                                         DebounceInterval="300"
-                                         ShowProgressIndicator="true"
-                                         ProgressIndicatorColor="@Color.Info"
-                                         Clearable="true">
-                            <BeforeItemsTemplate>
-                                <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_startAuto, pin))"/>
-                                <MudDivider/>
-                            </BeforeItemsTemplate>
-                            <NoItemsTemplate>
-                                <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_startAuto, pin))"/>
-                            </NoItemsTemplate>
-                            <ItemTemplate>
-                                <MudText Typo="Typo.body2">@context?.Label</MudText>
-                            </ItemTemplate>
-                        </MudAutocomplete>
+                        <AddressAutocomplete Label="@L["Start"]"
+                                             AdornmentIcon="@Icons.Material.Filled.Home"
+                                             Class="mb-3"
+                                             @bind-Value="_startLocation"
+                                             SearchFunc="@SearchAsync"
+                                             Pins="@GetPinnedStartLocations()"/>
 
 
                         @foreach ((WaypointViewModel waypoint, int index) in _waypoints.Select((wp, i) => (wp, i)))
                         {
                             <MudStack Row="true">
 
-                                <WaypointAutocomplete @key="waypoint.Id"
-                                                      Location="waypoint.Location"
-                                                      LocationChanged="@(val => OnWaypointChanged(waypoint, val))"
-                                                      SearchFunc="@SearchAsync"
-                                                      Pins="@GetPinnedStartLocations()"
-                                                      OnAdornmentClick="@(() => RemoveWaypointAsync(index))"/>
+                                <AddressAutocomplete @key="waypoint.Id"
+                                                     Label="@L["Waypoint"]"
+                                                     AdornmentIcon="@Icons.Material.Filled.WrongLocation"
+                                                     AdornmentColor="Color.Error"
+                                                     OnAdornmentClick="@(() => RemoveWaypointAsync(index))"
+                                                     Class="mb-3"
+                                                     MinCharacters="3"
+                                                     Value="waypoint.Location"
+                                                     ValueChanged="@(val => OnWaypointChanged(waypoint, val))"
+                                                     SearchFunc="@SearchAsync"
+                                                     Pins="@GetPinnedStartLocations()"/>
 
                                 <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
                                                Size="Size.Small"
@@ -215,33 +199,12 @@
                             </MudStack>
                         </MudPaper>
 
-                        <MudAutocomplete @ref="_destAuto" T="GeoResult"
-                                         Label="@L["Destination"]"
-                                         Variant="Variant.Outlined"
-                                         Margin="Margin.Dense"
-                                         Adornment="Adornment.Start"
-                                         AdornmentIcon="@Icons.Material.Filled.Place"
-                                         AdornmentColor="Color.Secondary"
-                                         Class="mb-3"
-                                         @bind-Value="_destinationLocation"
-                                         SearchFunc="@SearchAsync"
-                                         OpenOnFocus="true"
-                                         Strict="true"
-                                         DebounceInterval="300"
-                                         ShowProgressIndicator="true"
-                                         ProgressIndicatorColor="@Color.Info"
-                                         Clearable="true">
-                            <BeforeItemsTemplate>
-                                <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_destAuto, pin))"/>
-                                <MudDivider/>
-                            </BeforeItemsTemplate>
-                            <NoItemsTemplate>
-                                <PinnedLocations Pins="@GetPinnedStartLocations()" OnPinnedSelected="@(pin => SelectPinAsync(_destAuto, pin))"/>
-                            </NoItemsTemplate>
-                            <ItemTemplate>
-                                <MudText Typo="Typo.body2">@context?.Label</MudText>
-                            </ItemTemplate>
-                        </MudAutocomplete>
+                        <AddressAutocomplete Label="@L["Destination"]"
+                                             AdornmentIcon="@Icons.Material.Filled.Place"
+                                             Class="mb-3"
+                                             @bind-Value="_destinationLocation"
+                                             SearchFunc="@SearchAsync"
+                                             Pins="@GetPinnedStartLocations()"/>
 
                     </div>
                     
