@@ -189,7 +189,7 @@
                       Style="position: absolute; bottom: 150px; right: 16px; z-index: 200; pointer-events: auto;">
                 @if (NavService.IsNavigating)
                 {
-                    @if (HasWaypointToSkip)
+                    @if (_navStatus?.RemainingWaypoints > 0)
                     {
                         <MudFab Color="Color.Secondary"
                                 StartIcon="@Icons.Material.Filled.SkipNext"

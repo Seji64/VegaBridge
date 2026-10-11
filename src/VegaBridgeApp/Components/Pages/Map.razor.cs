@@ -1097,9 +1097,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             if (_navStartVia != null)
                 viaLocations.Insert(0, CreateLocation(_navStartVia, "break"));
 
-            _navManeuver = null;
-            _navStatus = null;
-            _navTotalKm = null;
             await NavService.StartNavigation(
                 mergedShape, allManeuvers, totalKm, totalMin,
                 CreateLocation(_destinationLocation), viaLocations, Avoid);
@@ -1419,14 +1416,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             _isLoading = false;
         }
     }
-
-    /// <summary>
-    /// Skipping needs a waypoint ahead. Until the first status arrives the
-    /// planned waypoints tell.
-    /// </summary>
-    private bool HasWaypointToSkip => _navStatus != null
-        ? _navStatus.RemainingWaypoints > 0
-        : _navStartVia != null || _waypoints.Any(w => w.Location != null && !_skippedWaypointIds.Contains(w.Id));
 
     private async Task ShowRouteOnMapFromPolyline(string polyline6)
     {
