@@ -31,10 +31,9 @@
   <data name="UnpavedSections" xml:space="preserve"><value>Route enthält {0:0.#} km unbefestigte Abschnitte</value></data>
   <data name="SaveRoute" xml:space="preserve"><value>Route speichern</value></data>
   <data name="StartNavigation" xml:space="preserve"><value>Navigation starten</value></data>
-  <data name="GPSOff" xml:space="preserve"><value>GPS aus</value></data>
+  <data name="RouteDurationApprox" xml:space="preserve"><value>ca. {0}</value></data>
 
   <!-- Messages -->
-  <data name="RouteCalculating" xml:space="preserve"><value>Route wird berechnet…</value></data>
   <data name="RouteSaved" xml:space="preserve"><value>Route erfolgreich gespeichert</value></data>
   <data name="RouteSaveError" xml:space="preserve"><value>Fehler beim Speichern der Route: {0}</value></data>
   <data name="RouteDeleted" xml:space="preserve"><value>Route gelöscht</value></data>
@@ -45,37 +44,32 @@
   <data name="GPXExportFailed" xml:space="preserve"><value>Export fehlgeschlagen: {0}</value></data>
   <data name="GPXExportCancelled" xml:space="preserve"><value>Export abgebrochen</value></data>
   <data name="GPXExported" xml:space="preserve"><value>GPX als {0} exportiert</value></data>
-  <data name="GPSStarted" xml:space="preserve"><value>GPS-Tracking gestartet</value></data>
-  <data name="GPSStopped" xml:space="preserve"><value>GPS-Tracking gestoppt</value></data>
-  <data name="GPSError" xml:space="preserve"><value>GPS-Fehler: {0}</value></data>
   <data name="NavigationStarted" xml:space="preserve"><value>Navigation gestartet! 🏍️</value></data>
   <data name="NavigationError" xml:space="preserve"><value>Fehler beim Starten der Navigation: {0}</value></data>
   <data name="NoRoute" xml:space="preserve"><value>Keine Route zum Navigieren</value></data>
   <data name="RouteLoadFailed" xml:space="preserve"><value>Gespeicherte Route konnte nicht geladen werden</value></data>
   <data name="RouteLoaded" xml:space="preserve"><value>Route '{0}' geladen</value></data>
   <data name="DestinationReached" xml:space="preserve"><value>Ziel erreicht! 🏁</value></data>
-  <data name="NoActiveNavigation" xml:space="preserve"><value>Keine aktive Navigation – bitte zuerst Route berechnen</value></data>
   <data name="ImportError" xml:space="preserve"><value>Import-Fehler: {0}</value></data>
-  <data name="CopySuccess" xml:space="preserve"><value>BLE-Log kopiert! 📋</value></data>
-  <data name="CopyFailed" xml:space="preserve"><value>Kopieren fehlgeschlagen: {0}</value></data>
   <data name="RouteNoGeometry" xml:space="preserve"><value>Route enthält keine Geometriedaten</value></data>
 
   <!-- Navigation HUD -->
-  <data name="NavManeuver" xml:space="preserve"><value>Manöver {0}/{1}</value></data>
-  <data name="NavKph" xml:space="preserve"><value>km/h</value></data>
   <data name="NavMin" xml:space="preserve"><value>{0} Min</value></data>
   <data name="NavLessThanMinute" xml:space="preserve"><value>&lt; 1 Min</value></data>
   <data name="NavHoursMinutes" xml:space="preserve"><value>{0} Std {1} Min</value></data>
   <data name="NavStop" xml:space="preserve"><value>Navigation beenden</value></data>
-  <data name="NavMeters" xml:space="preserve"><value>{0} m</value></data>
-  <data name="NavKm" xml:space="preserve"><value>{0} km</value></data>
-  <data name="NavBLELog" xml:space="preserve"><value>BLE-Kommandos (simuliert)</value></data>
+  <data name="NavEta" xml:space="preserve"><value>Ankunft</value></data>
+  <data name="NavRemainingTime" xml:space="preserve"><value>Restzeit</value></data>
+  <data name="NavRemainingDistance" xml:space="preserve"><value>Reststrecke</value></data>
+  <data name="NavGpsWeak" xml:space="preserve"><value>GPS ungenau (±{0:F0} m)</value></data>
+  <data name="NavStopConfirm" xml:space="preserve"><value>Navigation wirklich beenden?</value></data>
+  <data name="NavStopYes" xml:space="preserve"><value>Beenden</value></data>
 
   <!-- My Routes -->
   <data name="MyRoutesTitle" xml:space="preserve"><value>Meine Routen</value></data>
   <data name="NoRoutes" xml:space="preserve"><value>Noch keine Routen gespeichert. Erstelle eine neue Route oder importiere eine GPX-Datei.</value></data>
   <data name="DistanceKm" xml:space="preserve"><value>Distanz: {0:F2} km</value></data>
-  <data name="TimeMin" xml:space="preserve"><value>Zeit: {0:F0} Min</value></data>
+  <data name="RouteDuration" xml:space="preserve"><value>Zeit: {0}</value></data>
   <data name="Created" xml:space="preserve"><value>Erstellt: {0}</value></data>
   <data name="StartRoute" xml:space="preserve"><value>Starten</value></data>
   <data name="ExportGPX" xml:space="preserve"><value>GPX exportieren</value></data>
@@ -91,13 +85,10 @@
   <data name="StartModeFromStart" xml:space="preserve"><value>Von vorne</value></data>
   <data name="OK" xml:space="preserve"><value>OK</value></data>
   <data name="Delete" xml:space="preserve"><value>Löschen</value></data>
-  <data name="Close" xml:space="preserve"><value>Schließen</value></data>
   <data name="Name" xml:space="preserve"><value>Name</value></data>
   <data name="Save" xml:space="preserve"><value>Speichern</value></data>
   <data name="Import" xml:space="preserve"><value>Importieren</value></data>
   <data name="Export" xml:space="preserve"><value>Exportieren</value></data>
-  <data name="Send" xml:space="preserve"><value>Senden</value></data>
-  <data name="Copy" xml:space="preserve"><value>Kopieren</value></data>
 
   <!-- GPX Dialogs -->
   <data name="GpxImportTitle" xml:space="preserve"><value>GPX importieren</value></data>
@@ -110,10 +101,8 @@
   <data name="GpxExportRouteDesc" xml:space="preserve"><value>Geplante Route – Waypoints als Routenpunkte</value></data>
   <data name="GpxTrackLabel" xml:space="preserve"><value>Track ({0} Punkte)</value></data>
   <data name="GpxRouteLabel" xml:space="preserve"><value>Route ({0} Punkte)</value></data>
-  <data name="Accuracy" xml:space="preserve"><value>±{0:F0} m</value></data>
   <data name="Meter" xml:space="preserve"><value>{0:F0} m</value></data>
   <data name="Km" xml:space="preserve"><value>{0:F1} km</value></data>
-  <data name="Kmh" xml:space="preserve"><value>{0:F0} km/h</value></data>
   <!-- Navigation HUD extended -->
   <data name="CurrentPos" xml:space="preserve"><value>Aktuelle Position</value></data>
   <data name="TurnLeft" xml:space="preserve"><value>Links abbiegen</value></data>
@@ -133,19 +122,13 @@
   <data name="WaypointSkip" xml:space="preserve"><value>Wegpunkt überspringen – berechne neue Route…</value></data>
   <data name="WaypointSkipNoGPS" xml:space="preserve"><value>Keine GPS-Position zum Rerouting</value></data>
   <data name="WaypointSkipInProgress" xml:space="preserve"><value>Rerouting läuft bereits…</value></data>
-  <data name="NoWaypointToSkip" xml:space="preserve"><value>Kein Wegpunkt zum Überspringen (letzter Abschnitt)</value></data>
   <data name="RouteRecalculated" xml:space="preserve"><value>Route neu berechnet!</value></data>
-  <data name="RerouteFailed" xml:space="preserve"><value>Rerouting fehlgeschlagen: {0}</value></data>
   <data name="RerouteNoRoute" xml:space="preserve"><value>Rerouting: Keine Route gefunden</value></data>
   <data name="RerouteError" xml:space="preserve"><value>Rerouting-Fehler: {0}</value></data>
   <data name="OffRouteDetected" xml:space="preserve"><value>Off Route! {0:F0}m neben der Route – berechne neu…</value></data>
   <data name="NavigationStopped" xml:space="preserve"><value>Navigation beendet</value></data>
 
   <!-- Route calculation -->
-  <data name="NoStartSelected" xml:space="preserve"><value>Kein Startpunkt ausgewählt</value></data>
-  <data name="GPSStartFailed" xml:space="preserve"><value>GPS-Start fehlgeschlagen: {0}</value></data>
-  <data name="GPSNoFixTimeout" xml:space="preserve"><value>Kein GPS-Fix innerhalb von 10s – bitte im Freien versuchen</value></data>
-  <data name="GPSNoSignal" xml:space="preserve"><value>Kein GPS-Signal – Startpunkt kann nicht bestimmt werden</value></data>
   <data name="WaypointsReduced" xml:space="preserve"><value>Wegpunkte reduziert von {0} auf {1} (max. {2} via Valhalla-Limit)</value></data>
 
   <!-- Settings -->
@@ -156,46 +139,19 @@
   <!-- FAB titles -->
   <data name="SkipWaypoint" xml:space="preserve"><value>Wegpunkt überspringen</value></data>
   <data name="StopNavigationFab" xml:space="preserve"><value>Navigation stoppen</value></data>
-  <data name="GPSFabTrack" xml:space="preserve"><value>GPS aktiv – auf Position zentrieren</value></data>
-  <data name="GPSFabIdle" xml:space="preserve"><value>GPS aus – Tracking starten</value></data>
   <data name="SaveDialogTitle" xml:space="preserve"><value>Route speichern</value></data>
   <data name="SaveDialogPrompt" xml:space="preserve"><value>Name für die Route:</value></data>
-  <data name="Bluetooth" xml:space="preserve"><value>Bluetooth</value></data>
   <data name="DiscoveredDevices" xml:space="preserve"><value>Erkannte Geräte</value></data>
-  <data name="StartScan" xml:space="preserve"><value>Scan starten</value></data>
-  <data name="StopScan" xml:space="preserve"><value>Scan stoppen</value></data>
   <data name="Connect" xml:space="preserve"><value>Verbinden</value></data>
   <data name="Disconnect" xml:space="preserve"><value>Trennen</value></data>
   <data name="Connected" xml:space="preserve"><value>Verbunden</value></data>
   <data name="Connecting" xml:space="preserve"><value>Verbinde…</value></data>
-  <data name="Found" xml:space="preserve"><value>Gefunden</value></data>
-  <data name="SystemPaired" xml:space="preserve"><value>Gekoppelt</value></data>
-  <data name="PairingInfoTitle" xml:space="preserve"><value>So verbindest du dein Motorrad</value></data>
-  <data name="PairingInfoBody" xml:space="preserve"><value>Öffne Einstellungen → Bluetooth und kopple dein Motorrad dort zuerst. Komm dann hierher zurück — es erscheint automatisch.</value></data>
-  <data name="BLEConnected" xml:space="preserve"><value>Verbunden</value></data>
-  <data name="BLEConnecting" xml:space="preserve"><value>Verbinden…</value></data>
-  <data name="BLEDisconnecting" xml:space="preserve"><value>Trennen…</value></data>
   <data name="BLEDisconnected" xml:space="preserve"><value>Getrennt</value></data>
   <data name="BLEError" xml:space="preserve"><value>Verbindungsfehler</value></data>
   <data name="BLEConnectingTo" xml:space="preserve"><value>Verbinde mit {0}…</value></data>
   <data name="BLEConnectedTo" xml:space="preserve"><value>Verbunden mit {0}</value></data>
   <data name="BLEConnectFailed" xml:space="preserve"><value>Verbinden fehlgeschlagen</value></data>
-  <data name="BLETest" xml:space="preserve"><value>Test-Frame senden</value></data>
-  <data name="BLETestSent" xml:space="preserve"><value>Test-Frame gesendet</value></data>
-  <data name="BLENoPlugin" xml:space="preserve"><value>Kein Plugin aktiv — Test nicht möglich</value></data>
-  <data name="NoDevicesFound" xml:space="preserve"><value>Keine Geräte gefunden. Bitte sicherstellen, dass das Motorrad eingeschaltet ist.</value></data>
   <data name="ConnectionDetails" xml:space="preserve"><value>Verbindungsdetails</value></data>
-  <data name="Manufacturer" xml:space="preserve"><value>Hersteller</value></data>
-  <data name="PluginId" xml:space="preserve"><value>Plugin-ID</value></data>
-  <data name="ServiceUuid" xml:space="preserve"><value>Service-UUID</value></data>
-  <data name="PluginConfiguration" xml:space="preserve"><value>Plugin-Konfiguration</value></data>
-  <data name="SelectPlugin" xml:space="preserve"><value>Plugin auswählen</value></data>
-  <data name="AutoDetect" xml:space="preserve"><value>Auto-Erkennung (Standard)</value></data>
-  <data name="PluginOverride" xml:space="preserve"><value>Manuelle Überschreibung der Gerät-zu-Plugin-Zuordnung.</value></data>
-  <data name="RegisteredPlugins" xml:space="preserve"><value>Registrierte Hardware-Plugins:</value></data>
-  <data name="IncomingFrames" xml:space="preserve"><value>Eingehende Frames</value></data>
-  <data name="BLEScanning" xml:space="preserve"><value>Suche nach Geräten…</value></data>
-  <data name="GpsManagedByNavigation" xml:space="preserve"><value>GPS wird von aktiver Navigation gesteuert</value></data>
   <data name="NoGpsFix" xml:space="preserve"><value>Kein GPS-Fix verfügbar</value></data>
 
   <!-- Not Found -->
@@ -215,7 +171,6 @@
   <data name="DebugExportError" xml:space="preserve"><value>Exportfehler: {0}</value></data>
 
   <!-- Connection Test -->
-  <data name="ClosureCheckUnavailable" xml:space="preserve"><value>Sperrungs-Check nicht verfügbar</value></data>
   <data name="ClosureCheckRunning" xml:space="preserve"><value>Prüfe Straßensperrungen…</value></data>
   <data name="ClosuresFound" xml:space="preserve"><value>{0} Straßensperrung(en) auf der Route</value></data>
 

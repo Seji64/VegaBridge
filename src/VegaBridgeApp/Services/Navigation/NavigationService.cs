@@ -229,6 +229,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
         return m.Type == 4 && index < _maneuvers.Count - 1; // intermediate waypoint arrival
     }
 
+    /// <summary>Arrive, arrive right, arrive left – every waypoint ends a leg with one.</summary>
+    private static bool IsArrival(Maneuver m) => m.Type is 4 or 5 or 6;
+
+    /// <summary>Waypoints still ahead of the route index (the final arrival is the destination).</summary>
+    private int CountWaypointsAhead(int snappedIndex) =>
+        _maneuvers.SkipLast(1).Count(m => IsArrival(m) && m.BeginShapeIndex > snappedIndex);
+
     /// <summary>
     /// Start navigating along a Valhalla route.
     /// </summary>
@@ -421,7 +428,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
             // (Nearest-point matching fails when the route passes a waypoint
             // twice, e.g. on a round trip.)
             List<int> viaIndices = _maneuvers.SkipLast(1)
-                .Where(m => m.Type is 4 or 5 or 6) // arrive, arrive right, arrive left
+                .Where(IsArrival)
                 .Select(m => m.BeginShapeIndex)
                 .ToList();
             List<Models.Valhalla.Location> remaining = viaIndices.Count == _viaLocations.Count
@@ -781,8 +788,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 Coordinate here = _routeCoords[snappedIndex];
                 Coordinate nextPoint = _routeCoords[Math.Min(snappedIndex + 2, _routeCoords.Count - 1)];
                 double routeBearing = GeoMath.BearingDeg(here.Latitude, here.Longitude, nextPoint.Latitude, nextPoint.Longitude);
-                double headingDiff = Math.Abs(_currentHeadingDeg - routeBearing);
-                if (headingDiff > 180) headingDiff = 360 - headingDiff;
+                double headingDiff = GeoMath.BearingDifferenceDeg(_currentHeadingDeg, routeBearing);
                 if (headingDiff > WrongWayHeadingThresholdDeg)
                 {
                     _wrongWayCounter++;
@@ -923,6 +929,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient)
                 CurrentManeuverIndex = _currentManeuverIndex,
                 DisplayManeuverIndex = displayIndex,
                 TotalManeuvers = _maneuvers.Count,
+                RemainingWaypoints = CountWaypointsAhead(snappedIndex),
                 // Computed travel direction (GPS course or buffer-derived),
                 // not the raw GPS course which is often 0/unset.
                 Heading = _currentHeadingDeg >= 0 ? _currentHeadingDeg : reading.Heading,

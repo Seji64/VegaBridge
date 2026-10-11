@@ -33,103 +33,11 @@
             
             @if (NavService.IsNavigating)
             {
-                <!-- Navigation Top Bar -->
-                <MudPaper Elevation="0"
-                          Square="true"
-                          Class="pa-4">
-                    <MudStack Row="true" Justify="Justify.FlexStart" AlignItems="AlignItems.Center">
-                        @if (_navManeuver != null)
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="mr-2">
-                                @string.Format(L["NavManeuver"], _navManeuver.Index + 1, _navManeuver.Total)
-                            </MudChip>
-                        }
-                        <MudChip T="string" Size="Size.Small" Color="Color.Info">
-                            @string.Format(L["Accuracy"], Gps.CurrentAccuracy)
-                        </MudChip>
-                    </MudStack>
-                    <MudDivider Class="mb-8 mt-4"/>
-                    
-                    @if (_navManeuver != null)
-                    {
-                        <MudStack Spacing="0">
-                            
-                            <!-- Progress bar -->
-                            <MudProgressLinear Value="@((int)_navProgress)" Color="Color.Primary" Size="Size.Medium"/>
-                            <MudStack Row="true" Justify="Justify.SpaceBetween" Style="margin-top: -2px;">
-                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                    @string.Format(L["Km"], _navStatus?.RemainingDistanceKm)
-                                </MudText>
-                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                    @FormatTime(_navStatus?.RemainingTimeMin)
-                                </MudText>
-                            </MudStack>
-                            
-                            <!-- Icon + Label row -->
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.Center" Spacing="1">
-                                <MudIcon Size="Size.Small" Icon="@GetTurnIcon(_navManeuver.ValhallaType)" Color="Color.Inherit"/>
-                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@GetTurnLabel(_navManeuver.ValhallaType)</MudChip>
-                                @if (_navManeuver.RoundaboutExitCount is > 0)
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">
-                                        @if (_navManeuver.RoundaboutExit.HasValue)
-                                        {
-                                            @($"{_navManeuver.RoundaboutExit}/{_navManeuver.RoundaboutExitCount}")
-                                        }
-                                        else
-                                        {
-                                            @($"{_navManeuver.RoundaboutExitCount}")
-                                        }
-                                    </MudChip>
-                                }
-                            </MudStack>
-
-
-                            <!-- Instruction -->
-                            <MudText Typo="Typo.subtitle1" Align="Align.Center" Class="mud-text-primary">
-                                @_navManeuver.Instruction
-                            </MudText>
-
-                            <!-- Distance -->
-                            @if (_navStatus != null)
-                            {
-                                <MudText Typo="Typo.h5" Align="Align.Center" Color="Color.Info">
-                                    @string.Format(L["Meter"], _navStatus.DistanceToNextTurnM)
-                                </MudText>
-                            }
-                        </MudStack>
-                    }
-                </MudPaper>
-                
-
-                <!-- Road closure check indicator -->
-                @if (_closureCheckRunning)
-                {
-                    <MudPaper
-                        Elevation="3"
-                        Style="position: absolute; top: 16px; left: 16px; z-index: 200; pointer-events: auto; border-radius: 12px; padding: 8px 14px;">
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                            <MudProgressCircular Color="Color.Warning" Size="Size.Small" Indeterminate="true" />
-                            <MudText Typo="Typo.body2">@L["ClosureCheckRunning"]</MudText>
-                        </MudStack>
-                    </MudPaper>
-                }
-                
-                <!-- Skip Waypoint button -->
-                <MudFab
-                    Color="Color.Primary"
-                    StartIcon="@Icons.Material.Filled.SkipNext"
-                    Size="Size.Small"
-                    Style="position: absolute; bottom: 300px; right: 16px; z-index: 200; pointer-events: auto;"
-                    OnClick="@SkipWaypoint"/>
-
-                <!-- Stop Navigation button -->
-                <MudFab
-                    Color="Color.Primary"
-                    StartIcon="@Icons.Material.Filled.Stop"
-                    Size="Size.Small"
-                    Style="position: absolute; bottom: 250px; right: 16px; z-index: 200; pointer-events: auto;"
-                    OnClick="@ExitNavigation"/>
+                <NavigationHud Maneuver="@_navManeuver"
+                               Status="@_navStatus"
+                               TotalDistanceKm="@(_navTotalKm ?? NavService.TotalDistanceKm)"
+                               ClosureCheckRunning="@_closureCheckRunning"
+                               GpsAccuracyM="@Gps.CurrentAccuracy"/>
             }
 
             @if (!NavService.IsNavigating)
@@ -139,19 +47,6 @@
                           Square="true"
                           Class="pa-4"
                           Style="position: absolute; top: 0; left: 0; right: 0; z-index: 150; pointer-events: auto; max-width: 500px; margin: 0 auto;">
-
-                    @if (Gps.IsTracking)
-                    {
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
-                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="mr-2">
-                                <MudText Typo="Typo.caption">GPS @FormatCoordinate(Gps.LastReading?.Position.Latitude, Gps.LastReading?.Position.Longitude)</MudText>
-                            </MudChip>
-                            <MudChip T="string" Size="Size.Small" Color="Color.Info">
-                                <MudText Typo="Typo.caption">@string.Format(L["Kmh"], Gps.CurrentSpeedKmh)</MudText>
-                            </MudChip>
-                            <MudText Typo="Typo.caption" Class="text-medium-emphasis ml-auto">@string.Format(L["Accuracy"], Gps.CurrentAccuracy)</MudText>
-                        </MudStack>
-                    }
 
                     <div style="overflow-y: auto; max-height: 180px;" class="pr-2">
 
@@ -239,6 +134,23 @@
                         @L["CalculateRoute"]
                     </MudLoadingButton>
 
+                    <!-- Route summary: length and approximate riding time -->
+                    @if (_currentRouteResponse?.Trip?.Summary is { } summary)
+                    {
+                        <MudPaper Outlined="true" Class="mt-2 pa-2">
+                            <MudStack Row="true" Justify="Justify.SpaceAround" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudIcon Icon="@Icons.Material.Filled.Straighten" Color="Color.Primary" Size="Size.Small"/>
+                                    <MudText Typo="Typo.h6">@string.Format(L["Km"], summary.Length)</MudText>
+                                </MudStack>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudIcon Icon="@Icons.Material.Filled.Schedule" Color="Color.Primary" Size="Size.Small"/>
+                                    <MudText Typo="Typo.h6">@string.Format(L["RouteDurationApprox"], L.FormatDuration(summary.Time / 60.0))</MudText>
+                                </MudStack>
+                            </MudStack>
+                        </MudPaper>
+                    }
+
                     @if (_currentRouteResponse != null)
                     {
                         <MudButton FullWidth="true"
@@ -271,12 +183,33 @@
                 </MudPaper>
             }
             
-            <!-- My Location FAB (always visible) -->
-            <MudFab Color="@(Gps.IsTracking ? Color.Primary : Color.Surface)"
-                    StartIcon="@(Gps.IsTracking ? Icons.Material.Filled.MyLocation : Icons.Material.Outlined.MyLocation)"
-                    Size="Size.Small"
-                    Style="position: absolute; bottom: 150px; right: 16px; z-index: 200; pointer-events: auto;"
-                    OnClick="@GetMyCurrentPosition"/>
+            <!-- Map buttons (bottom right): navigation actions above the
+                 always visible my-location button. -->
+            <MudStack AlignItems="AlignItems.Center" Spacing="4"
+                      Style="position: absolute; bottom: 150px; right: 16px; z-index: 200; pointer-events: auto;">
+                @if (NavService.IsNavigating)
+                {
+                    @if (_navStatus?.RemainingWaypoints > 0)
+                    {
+                        <MudFab Color="Color.Secondary"
+                                StartIcon="@Icons.Material.Filled.SkipNext"
+                                Size="Size.Medium"
+                                title="@L["SkipWaypoint"]"
+                                OnClick="@SkipWaypoint"/>
+                    }
+
+                    <MudFab Color="Color.Error"
+                            StartIcon="@Icons.Material.Filled.Close"
+                            Size="Size.Medium"
+                            title="@L["StopNavigationFab"]"
+                            OnClick="@ConfirmExitNavigation"/>
+                }
+
+                <MudFab Color="@(Gps.IsTracking ? Color.Primary : Color.Surface)"
+                        StartIcon="@(Gps.IsTracking ? Icons.Material.Filled.MyLocation : Icons.Material.Outlined.MyLocation)"
+                        Size="@(NavService.IsNavigating ? Size.Medium : Size.Small)"
+                        OnClick="@GetMyCurrentPosition"/>
+            </MudStack>
         </div>
     </div>
 </MudContainer>

@@ -15,8 +15,8 @@ The system works with the screen OFF — the UI is only needed for optional glan
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          UI Layer (Map.razor)                        │
-│  Blazor Hybrid · Displays route, maneuvers, speed, remaining dist   │
+│                 UI Layer (Map.razor · NavigationHud)                 │
+│  Blazor Hybrid · Route, next maneuver, ETA, heading-up follow map   │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │ implements INavigationSink
 ┌───────────────────────────────┴─────────────────────────────────────┐

@@ -123,6 +123,26 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Status_CountsTheWaypointsAhead()
+    {
+        // Waypoints B and D as stops (one leg each, like Map.StartNavigation).
+        await StartAsync(
+            [Leg(Right, A, B), Leg(Right, B, C, D), Leg(Right, D, A)],
+            vias: [Loc(B), Loc(D)]);
+
+        Fix(Lerp(A, B, 0.1));
+        Assert.Equal(2, _sink.LastStatus!.RemainingWaypoints);
+
+        foreach (Coordinate p in Ride(Lerp(A, B, 0.1), B, Lerp(B, C, 0.5)))
+            Fix(p);
+        Assert.Equal(1, _sink.LastStatus!.RemainingWaypoints);
+
+        foreach (Coordinate p in Ride(Lerp(B, C, 0.5), C, D, Lerp(D, A, 0.5)))
+            Fix(p);
+        Assert.Equal(0, _sink.LastStatus!.RemainingWaypoints);
+    }
+
+    [Fact]
     public async Task Reroute_AvoidsTheSameRoadTypes()
     {
         await StartAsync([Leg(Right, A, B, C, D, A)], [], RoadAvoidance.Highways | RoadAvoidance.Ferries);
