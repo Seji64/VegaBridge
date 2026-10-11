@@ -125,6 +125,26 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Status_CountsTheWaypointsAhead()
+    {
+        // Waypoints B and D as stops (one leg each, like Map.StartNavigation).
+        await StartAsync(
+            [Leg(Right, A, B), Leg(Right, B, C, D), Leg(Right, D, A)],
+            vias: [Loc(B), Loc(D)]);
+
+        Fix(Lerp(A, B, 0.1));
+        Assert.Equal(2, _sink.LastStatus!.RemainingWaypoints);
+
+        foreach (Coordinate p in Ride(Lerp(A, B, 0.1), B, Lerp(B, C, 0.5)))
+            Fix(p);
+        Assert.Equal(1, _sink.LastStatus!.RemainingWaypoints);
+
+        foreach (Coordinate p in Ride(Lerp(B, C, 0.5), C, D, Lerp(D, A, 0.5)))
+            Fix(p);
+        Assert.Equal(0, _sink.LastStatus!.RemainingWaypoints);
+    }
+
+    [Fact]
     public async Task Reroute_AvoidsTheSameRoadTypes()
     {
         await StartAsync([Leg(Right, A, B, C, D, A)], [], RoadAvoidance.Highways | RoadAvoidance.Ferries);
@@ -413,6 +433,39 @@ public class NavigationServiceTests
         Assert.Equal([2, 3, 2], legs.Select(l => l.Count));
         Assert.Equal(B.Latitude, legs[1][0].Latitude, 6);
         Assert.Equal(D.Longitude, legs[2][0].Longitude, 6);
+    }
+
+    [Fact]
+    public async Task UTurnAtWaypoint_IsNotOffRoute()
+    {
+        // Out to a waypoint and back the same road (viewpoint at a dead end):
+        // after the U-turn the way back is the route, not a wrong way.
+        Coordinate x = Lerp(A, B, 0.5);
+        await StartAsync([Leg(Right, A, x), Leg(Right, x, A)], vias: [Loc(x)]);
+
+        List<Coordinate> ride = Ride(10, A, x, Lerp(x, A, 0.5));
+        for (int i = 0; i < ride.Count; i++)
+            Fix(ride[i], speedMs: 10, headingDeg: ride[i].Latitude >= (i > 0 ? ride[i - 1].Latitude : 0) ? 0 : 180);
+
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+        Assert.InRange(_sink.LastStatus!.RemainingDistanceKm, 0.2, 0.3);
+    }
+
+    [Fact]
+    public async Task UTurnLongBeforeWaypoint_IsStillOffRoute()
+    {
+        // Turned back 200 m before the waypoint: reroute (back to it), not a
+        // silent skip onto the way back.
+        Coordinate x = Lerp(A, B, 0.5);
+        await StartAsync([Leg(Right, A, x), Leg(Right, x, A)], vias: [Loc(x)]);
+        Coordinate turn = Lerp(A, B, 0.3);
+        foreach (Coordinate p in Ride(10, A, turn))
+            Fix(p, speedMs: 10, headingDeg: 0);
+        foreach (Coordinate p in Ride(10, turn, A).Take(6))
+            Fix(p, speedMs: 10, headingDeg: 180);
+
+        Assert.True(_sink.OffRoute);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────

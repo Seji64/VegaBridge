@@ -182,6 +182,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
 
     // Tunnels as [start, end] meters along the route; empty while unknown.
     private List<(double StartM, double EndM)> _tunnels = [];
+    private const double OtherPassWindowM = 100.0; // U-turn ≤ ~50 m before it, or the rider turned back early (reroute)
 
     // ── Properties ───────────────────────────────────────────────────────
     public bool IsNavigating => _isNavigating;
@@ -251,6 +252,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
         if (IsStraightManeuver(m)) return true;
         return m.Type == 4 && index < _maneuvers.Count - 1; // intermediate waypoint arrival
     }
+
+    /// <summary>Arrive, arrive right, arrive left – every waypoint ends a leg with one.</summary>
+    private static bool IsArrival(Maneuver m) => m.Type is 4 or 5 or 6;
+
+    /// <summary>Waypoints still ahead of the route index (the final arrival is the destination).</summary>
+    private int CountWaypointsAhead(int snappedIndex) =>
+        _maneuvers.SkipLast(1).Count(m => IsArrival(m) && m.BeginShapeIndex > snappedIndex);
 
     /// <summary>
     /// Start navigating along a Valhalla route.
@@ -801,7 +809,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     /// </summary>
     private static List<int> WaypointShapeIndices(IEnumerable<Maneuver> maneuvers) => maneuvers
         .SkipLast(1)
-        .Where(m => m.Type is 4 or 5 or 6)
+        .Where(IsArrival)
         .Select(m => m.BeginShapeIndex)
         .ToList();
 
@@ -859,7 +867,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             double navLon = smoothLon;
 
             // Snap to route
-            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon, gapM);
+            (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon, gapM,
+                reading.Speed >= WrongWayMinSpeedMs ? _currentHeadingDeg : -1);
             if (snappedIndex < 0) return;
 
             // Near a turn? (Not "inside a maneuver span": every route point
@@ -882,14 +891,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             bool isWrongWay = false;
             if (_currentHeadingDeg >= 0 && reading.Speed >= WrongWayMinSpeedMs && snappedIndex < _routeCoords.Count - 1)
             {
-                // Local route direction at the snap (~40 m) – a bearing to a
-                // point 100 m ahead points backwards in hairpins.
-                Coordinate here = _routeCoords[snappedIndex];
-                Coordinate nextPoint = _routeCoords[Math.Min(snappedIndex + 2, _routeCoords.Count - 1)];
-                double routeBearing = GeoMath.BearingDeg(here.Latitude, here.Longitude, nextPoint.Latitude, nextPoint.Longitude);
-                double headingDiff = Math.Abs(_currentHeadingDeg - routeBearing);
-                if (headingDiff > 180) headingDiff = 360 - headingDiff;
-                if (headingDiff > WrongWayHeadingThresholdDeg)
+                if (HeadingDiffDeg(snappedIndex, _currentHeadingDeg) > WrongWayHeadingThresholdDeg)
                 {
                     _wrongWayCounter++;
                     if (_wrongWayCounter >= WrongWayHysteresisCount)
@@ -1049,6 +1051,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             // not the raw GPS course which is often 0/unset.
             Heading = _currentHeadingDeg >= 0 ? _currentHeadingDeg : reading.Heading,
             Accuracy = reading.PositionAccuracy,
+            RemainingWaypoints = CountWaypointsAhead(snappedIndex),
             IsStationary = reading.IsStationary,
             IsEstimated = estimated
         };
@@ -1143,7 +1146,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     /// matched before its time.
     /// </summary>
     /// <param name="gapM">How far the rider can have got since the previous usable fix.</param>
-    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double gapM)
+    /// <param name="headingDeg">Travel direction while moving, else -1.</param>
+    private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double gapM, double headingDeg)
     {
         (int Index, double DistanceMeters) result;
         if (_lastSnappedIndex < 0)
@@ -1163,6 +1167,23 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             int to = IndexAtRouteOffset(_lastSnappedIndex,
                 Math.Max(SnapForwardWindowM, gapM));
             result = FindNearestRouteIndex(lat, lon, from, to);
+            // Two passes over the same road (U-turn at a waypoint, hairpin):
+            // the nearest may be the pass against the rider's direction – the
+            // earlier one wins a tie. Take the pass the rider is going along.
+            if (headingDeg >= 0 && result.Index < _routeCoords.Count - 1
+                && HeadingDiffDeg(result.Index, headingDeg) > WrongWayHeadingThresholdDeg)
+            {
+                (int Index, double DistanceMeters) along = (-1, result.DistanceMeters + SuspectXteM);
+                int last = Math.Min(IndexAtRouteOffset(_lastSnappedIndex, OtherPassWindowM), _routeCoords.Count - 2);
+                for (int i = IndexAtRouteOffset(_lastSnappedIndex, -OtherPassWindowM); i <= last; i++)
+                {
+                    double d = DistanceToRoutePoint(i, lat, lon);
+                    if (d <= along.DistanceMeters && HeadingDiffDeg(i, headingDeg) < 90)
+                        along = (i, d);
+                }
+                if (along.Index >= 0)
+                    result = along;
+            }
             if (result.DistanceMeters > SuspectXteM)
             {
                 // Not on the window (GPS gap, rejoined the route further
@@ -1243,6 +1264,17 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             }
         }
         return (bestIndex, distanceMeters);
+    }
+
+    /// <summary>
+    /// Heading vs the local route direction at <paramref name="index"/> (~40 m –
+    /// a bearing to a point 100 m ahead points backwards in hairpins).
+    /// </summary>
+    private double HeadingDiffDeg(int index, double headingDeg)
+    {
+        Coordinate here = _routeCoords[index];
+        Coordinate next = _routeCoords[Math.Min(index + 2, _routeCoords.Count - 1)];
+        return GeoMath.BearingDifferenceDeg(headingDeg, GeoMath.BearingDeg(here.Latitude, here.Longitude, next.Latitude, next.Longitude));
     }
 
     private double DistanceToRoutePoint(int index, double lat, double lon) =>

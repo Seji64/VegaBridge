@@ -15,8 +15,8 @@ The system works with the screen OFF — the UI is only needed for optional glan
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          UI Layer (Map.razor)                        │
-│  Blazor Hybrid · Displays route, maneuvers, speed, remaining dist   │
+│                 UI Layer (Map.razor · NavigationHud)                 │
+│  Blazor Hybrid · Route, next maneuver, ETA, heading-up follow map   │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │ implements INavigationSink
 ┌───────────────────────────────┴─────────────────────────────────────┐
@@ -232,6 +232,7 @@ Throttles and cooldowns run on the GPS fix timestamps (≈ wall clock at 1 Hz).
 | Hairpin curve (XTE 35m) | Fast path SUSPECT → locate confirms way_id → ON_ROUTE |
 | GPS glitch (2 ticks off) | Hysteresis doesn't reach threshold → resets |
 | Wrong way / U-turn | Heading divergence > 135° → off-route even at XTE 0m |
+| U-turn at a waypoint (out and back) | Snap takes the pass the rider is heading along (within 100m of the progress) → no off-route; turning back earlier still reroutes |
 | Wrong turn in the city | Wrong way at the corner / XTE > 50m → reroute after ~5s (36 km/h) |
 | Parallel road (≥ 20m, same heading) | Locate returns different way_id → reroute after ~6s (120 km/h) |
 | Parallel road < 20m | Not detected – not separable by GPS |
