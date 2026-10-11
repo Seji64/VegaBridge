@@ -240,6 +240,7 @@ Throttles and cooldowns run on the GPS fix timestamps (≈ wall clock at 1 Hz).
 | Tunnel / bad GPS (accuracy > 40m) | Tick ignored; after 3 s the position is estimated along the route (dead reckoning) |
 | Long tunnel (no fix, > 500m) | Snap window grows with the gap → caught up at the exit, imprecise exit fixes are not "far from route" |
 | Round trip / overlapping route | Progress window: later pass is not matched early |
+| Ramp looping back over the road (interchange), hairpin | A nearer point further ahead than the rider can have got (> max(100m, gap × 70 m/s)) loses to the pass at the progress when that is within +20m |
 
 ### Cost Optimization
 

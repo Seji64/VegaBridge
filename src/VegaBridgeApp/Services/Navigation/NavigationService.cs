@@ -1167,6 +1167,17 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             int to = IndexAtRouteOffset(_lastSnappedIndex,
                 Math.Max(SnapForwardWindowM, gapM));
             result = FindNearestRouteIndex(lat, lon, from, to);
+            // A later pass close by (interchange ramp looping back over the
+            // road, hairpin) can be nearer than the rider's own: further ahead
+            // than the rider can have got, keep to the pass at the progress
+            // when it is about as near.
+            if (_cumulativeDistances[result.Index] - _cumulativeDistances[_lastSnappedIndex] > Math.Max(OtherPassWindowM, gapM))
+            {
+                (int Index, double DistanceMeters) here = FindNearestRouteIndex(lat, lon, from,
+                    IndexAtRouteOffset(_lastSnappedIndex, OtherPassWindowM));
+                if (here.DistanceMeters <= result.DistanceMeters + SuspectXteM)
+                    result = here;
+            }
             // Two passes over the same road (U-turn at a waypoint, hairpin):
             // the nearest may be the pass against the rider's direction – the
             // earlier one wins a tie. Take the pass the rider is going along.
