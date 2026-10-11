@@ -193,18 +193,20 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     public async Task<bool> ConnectAsync(Guid deviceUuid)
     {
-        if (_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out IPeripheral? peripheral))
-            return await ConnectAsync(peripheral, TimeSpan.FromSeconds(30), reportFailure: true);
-        UpdateError("Device not found. Please scan again.", isCritical: false);
-        return false;
+        if (!_discoveredPeripherals.TryGetValue(deviceUuid.ToString().ToUpper(), out IPeripheral? peripheral))
+        {
+            UpdateError("Device not found. Please scan again.", isCritical: false);
+            return false;
+        }
 
+        return await ConnectAsync(peripheral, TimeSpan.FromSeconds(30), reportFailure: true);
     }
 
-    /// <param name="timeout"></param>
+    /// <param name="peripheral">The peripheral to connect to.</param>
+    /// <param name="timeout">How long to wait for the link before giving up.</param>
     /// <param name="reportFailure">false for auto-connect: a failed attempt is
     /// logged only – the bike is usually just not switched on yet, which is
     /// not worth an error banner.</param>
-    /// <param name="peripheral"></param>
     private async Task<bool> ConnectAsync(IPeripheral peripheral, TimeSpan timeout, bool reportFailure)
     {
         if (CurrentState == BleConnectionState.Connecting) return false;
@@ -456,7 +458,10 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
             CoreBluetooth.CBUUID serviceId = CoreBluetooth.CBUUID.FromString(serviceUuid);
             CoreBluetooth.CBUUID charId = CoreBluetooth.CBUUID.FromString(characteristicUuid);
-
+            // Looked up per write: a reconnect invalidates the old CBCharacteristic.
+            CoreBluetooth.CBCharacteristic? Find() => native.Services?
+                .FirstOrDefault(s => s.UUID.Equals(serviceId))?.Characteristics?
+                .FirstOrDefault(c => c.UUID.Equals(charId));
             CoreBluetooth.CBCharacteristic? ch = Find();
             if (ch == null)
             {
@@ -517,12 +522,6 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             }
 
             native.WriteValue(Foundation.NSData.FromArray(data), ch, CoreBluetooth.CBCharacteristicWriteType.WithoutResponse);
-            return;
-
-            // Looked up per write: a reconnect invalidates the old CBCharacteristic.
-            CoreBluetooth.CBCharacteristic? Find() => native.Services?
-                .FirstOrDefault(s => s.UUID.Equals(serviceId))?.Characteristics?
-                .FirstOrDefault(c => c.UUID.Equals(charId));
         });
     }
 

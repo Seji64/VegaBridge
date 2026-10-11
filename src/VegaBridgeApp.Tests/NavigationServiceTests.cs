@@ -474,7 +474,7 @@ public class NavigationServiceTests
 
     private async Task StartAsync(List<Leg> legs, List<Location> vias, RoadAvoidance avoid = RoadAvoidance.None)
     {
-        (string shape, List<Maneuver> maneuvers, double km, double min) = _nav.PrepareNavigationData(legs);
+        (string shape, List<Maneuver> maneuvers, double km, double min) = NavigationService.PrepareNavigationData(legs);
         await _nav.StartNavigation(shape, maneuvers, km, min, Loc(A), vias, avoid);
     }
 

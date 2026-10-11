@@ -425,7 +425,8 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
         double currentLat, double currentLon, bool skipNextWaypoint)
     {
         Models.Valhalla.Location? skippedVia = null;
-        if (!_isNavigating || _destination == null || Interlocked.Exchange(ref _rerouteRunning, 1) == 1) return (false, null);
+        if (!_isNavigating || _destination == null) return (false, null);
+        if (Interlocked.Exchange(ref _rerouteRunning, 1) == 1) return (false, null);
 
         try
         {
@@ -1144,10 +1145,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     /// so a later pass over the same road (round trip, out-and-back) is not
     /// matched before its time.
     /// </summary>
-    /// <param name="lon"></param>
+    /// <param name="lat">Latitude of the fix.</param>
+    /// <param name="lon">Longitude of the fix.</param>
     /// <param name="gapM">How far the rider can have got since the previous usable fix.</param>
     /// <param name="headingDeg">Travel direction while moving, else -1.</param>
-    /// <param name="lat"></param>
     private (int Index, double DistanceMeters) SnapToRoute(double lat, double lon, double gapM, double headingDeg)
     {
         (int Index, double DistanceMeters) result;
@@ -1219,13 +1220,13 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
         return Math.Clamp(i, 0, _cumulativeDistances.Length - 1);
     }
 
-    /// <param name="lon"></param>
+    /// <param name="lat">Latitude of the position.</param>
+    /// <param name="lon">Longitude of the position.</param>
     /// <param name="fromIndex">First route index to consider.</param>
     /// <param name="toIndex">Last route index to consider.</param>
     /// <param name="earliestSlackM">When &gt; 0, return the earliest route
     /// point within best distance + slack instead of the nearest one, so the
     /// earlier of two passes over the same place wins.</param>
-    /// <param name="lat"></param>
     private (int Index, double DistanceMeters) FindNearestRouteIndex(
         double lat, double lon, int fromIndex = 0, int toIndex = int.MaxValue, double earliestSlackM = 0)
     {
