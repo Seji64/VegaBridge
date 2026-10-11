@@ -35,6 +35,7 @@
   <!-- Messages -->
   <data name="RouteCalculating" xml:space="preserve"><value>Calculating route…</value></data>
   <data name="RouteSaved" xml:space="preserve"><value>Route saved successfully</value></data>
+  <data name="RouteSaveError" xml:space="preserve"><value>Failed to save route: {0}</value></data>
   <data name="RouteDeleted" xml:space="preserve"><value>Route deleted</value></data>
   <data name="RouteRenamed" xml:space="preserve"><value>Route renamed</value></data>
   <data name="GPXImported" xml:space="preserve"><value>GPX imported successfully</value></data>
@@ -165,6 +166,7 @@
   <data name="Connect" xml:space="preserve"><value>Connect</value></data>
   <data name="Disconnect" xml:space="preserve"><value>Disconnect</value></data>
   <data name="Connected" xml:space="preserve"><value>Connected</value></data>
+  <data name="Connecting" xml:space="preserve"><value>Connecting…</value></data>
   <data name="Found" xml:space="preserve"><value>Found</value></data>
   <data name="SystemPaired" xml:space="preserve"><value>System-Paired</value></data>
   <data name="PairingInfoTitle" xml:space="preserve"><value>How to connect your motorcycle</value></data>
@@ -214,6 +216,7 @@
   <!-- Connection Test -->
   <data name="ClosureCheckUnavailable" xml:space="preserve"><value>Road closure check unavailable</value></data>
   <data name="ClosureCheckRunning" xml:space="preserve"><value>Checking road closures…</value></data>
+  <data name="ClosuresFound" xml:space="preserve"><value>{0} road closure(s) on the route</value></data>
 
   <!-- Road Closure Providers -->
   <data name="ClosureProvidersTitle" xml:space="preserve"><value>Road closure sources</value></data>

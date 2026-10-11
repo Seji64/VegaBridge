@@ -35,6 +35,7 @@
   <!-- Messages -->
   <data name="RouteCalculating" xml:space="preserve"><value>Route wird berechnet…</value></data>
   <data name="RouteSaved" xml:space="preserve"><value>Route erfolgreich gespeichert</value></data>
+  <data name="RouteSaveError" xml:space="preserve"><value>Fehler beim Speichern der Route: {0}</value></data>
   <data name="RouteDeleted" xml:space="preserve"><value>Route gelöscht</value></data>
   <data name="RouteRenamed" xml:space="preserve"><value>Route umbenannt</value></data>
   <data name="GPXImported" xml:space="preserve"><value>GPX erfolgreich importiert</value></data>
@@ -165,6 +166,7 @@
   <data name="Connect" xml:space="preserve"><value>Verbinden</value></data>
   <data name="Disconnect" xml:space="preserve"><value>Trennen</value></data>
   <data name="Connected" xml:space="preserve"><value>Verbunden</value></data>
+  <data name="Connecting" xml:space="preserve"><value>Verbinde…</value></data>
   <data name="Found" xml:space="preserve"><value>Gefunden</value></data>
   <data name="SystemPaired" xml:space="preserve"><value>Gekoppelt</value></data>
   <data name="PairingInfoTitle" xml:space="preserve"><value>So verbindest du dein Motorrad</value></data>
@@ -214,6 +216,7 @@
   <!-- Connection Test -->
   <data name="ClosureCheckUnavailable" xml:space="preserve"><value>Sperrungs-Check nicht verfügbar</value></data>
   <data name="ClosureCheckRunning" xml:space="preserve"><value>Prüfe Straßensperrungen…</value></data>
+  <data name="ClosuresFound" xml:space="preserve"><value>{0} Straßensperrung(en) auf der Route</value></data>
 
   <!-- Road Closure Providers -->
   <data name="ClosureProvidersTitle" xml:space="preserve"><value>Sperrungs-Quellen</value></data>

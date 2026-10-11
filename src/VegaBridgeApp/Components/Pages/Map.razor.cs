@@ -1016,7 +1016,7 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
             await Gps.GetLastReadingOrCurrentAsync();
             if (Gps.LastReading == null)
             {
-                Snackbar.Add(L["NoGPS"], Severity.Error);
+                Snackbar.Add(L["NoGpsFix"], Severity.Error);
                 return;
             }
         }
