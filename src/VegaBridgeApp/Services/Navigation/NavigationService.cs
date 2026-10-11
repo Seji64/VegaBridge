@@ -179,8 +179,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     private ITimer? _deadReckoningTimer;
     private GpsReading? _lastFix;               // last usable fix
     private DateTimeOffset _lastFixReceivedAt;  // on the TimeProvider clock
-    private bool _isEstimating;
-    private double _estimatedM;
 
     // Tunnels as [start, end] meters along the route; empty while unknown.
     private List<(double StartM, double EndM)> _tunnels = [];
@@ -315,8 +313,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             _gpsTickCount = 0;
             _gpsBuffer.Clear();
             _lastRerouteAt = DateTimeOffset.MinValue;
-            _lastFix = null;
-            _isEstimating = false;
             _tunnels = [];
         }
 
@@ -390,8 +386,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             _topologyOffRouteCounter = 0;
             _routeWayIds = null;
             _currentHeadingDeg = -1;
-            _tunnels = [];
-            StopDeadReckoning();
+            _deadReckoningTimer?.Dispose();
         }
 
         if (wasNavigating)
@@ -555,7 +550,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             _routeWayIds = null;
             _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
-            _isEstimating = false;
             _tunnels = [];
         }
 
@@ -865,13 +859,6 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             (int snappedIndex, double distanceMeters) = SnapToRoute(navLat, navLon, gapSec);
             if (snappedIndex < 0) return;
 
-            if (_isEstimating)
-            {
-                _isEstimating = false;
-                Log.Information("GPS back after {Gap:F0} s – estimate was {Diff:F0} m ahead of the fix",
-                    gapSec, _estimatedM - _cumulativeDistances[snappedIndex]);
-            }
-
             // Near a turn? (Not "inside a maneuver span": every route point
             // lies in one, so the turn threshold applied everywhere.)
             bool nearTurn = false;
@@ -1003,7 +990,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             LogTelemetry();
             gps.ReadingReceived -= OnGpsReading;
             _isNavigating = false;
-            StopDeadReckoning();
+            _deadReckoningTimer?.Dispose();
             _ = Task.Run(async () =>
             {
                 await gps.StopTrackingAsync();
@@ -1059,8 +1046,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             // not the raw GPS course which is often 0/unset.
             Heading = _currentHeadingDeg >= 0 ? _currentHeadingDeg : reading.Heading,
             Accuracy = reading.PositionAccuracy,
-            IsStationary = reading.IsStationary,
-            IsEstimated = estimated
+            IsStationary = reading.IsStationary
         };
         _ = NotifySinksAsync(s => s.OnStatusAsync(status));
     }
@@ -1075,8 +1061,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     {
         lock (_lock)
         {
-            if (!_isNavigating || _isOffRoute || _lastFix is not { } fix || _lastSnappedIndex < 0
-                || _maneuvers.Count == 0 || _cumulativeDistances.Length < 2)
+            if (!_isNavigating || _isOffRoute || _lastFix is not { } fix || _lastSnappedIndex < 0 || _maneuvers.Count == 0)
                 return;
 
             double sinceFixSec = (time.GetUtcNow() - _lastFixReceivedAt).TotalSeconds;
@@ -1096,27 +1081,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             // Not past the displayed turn, not at the destination.
             int turnIndex = _maneuvers[GetDisplayManeuverIndex()].BeginShapeIndex;
             index = Math.Min(index, Math.Min(turnIndex, _maneuvers[^1].EndShapeIndex - 1));
-            _estimatedM = _cumulativeDistances[index];
-
-            if (!_isEstimating)
-            {
-                _isEstimating = true;
-                Log.Information("No GPS for {Sec:F0} s – estimating along the route at {Speed:F0} km/h for up to {Limit:F0} m (tunnel: {Tunnel})",
-                    sinceFixSec, fix.Speed * 3.6, limitM - fromM, limitM > fromM + DeadReckoningMaxM);
-            }
 
             Coordinate p = _routeCoords[index];
             ReportProgress(index, p.Latitude, p.Longitude, fix, estimated: true);
         }
-    }
-
-    /// <summary>Call under _lock.</summary>
-    private void StopDeadReckoning()
-    {
-        _deadReckoningTimer?.Dispose();
-        _deadReckoningTimer = null;
-        _lastFix = null;
-        _isEstimating = false;
     }
 
     private void UpdateCumulativeDistances()

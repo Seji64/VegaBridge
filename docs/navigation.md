@@ -105,7 +105,7 @@ GpsService.ReadingReceived → OnGpsReading()
 
 A 1 Hz timer (`TimeProvider`) runs while navigating. Without a usable fix
 (accuracy ≤ 40m) for 2 s, the position is estimated along the route from the
-last fix's speed and reported like a fix (`NavigationStatus.IsEstimated`), so
+last fix's speed and reported like a fix, so
 the distance to the next turn keeps counting down on the bike:
 
 - Display only: the snap progress stays at the last real fix; the first fix

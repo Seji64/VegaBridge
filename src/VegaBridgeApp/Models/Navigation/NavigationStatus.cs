@@ -12,10 +12,4 @@ public class NavigationStatus
     public double Heading { get; init; }
     public double Accuracy { get; init; }
     public bool IsStationary { get; init; }
-
-    /// <summary>
-    /// No GPS (tunnel): position estimated along the route from the last
-    /// speed. Speed and accuracy are those of the last fix.
-    /// </summary>
-    public bool IsEstimated { get; init; }
 }

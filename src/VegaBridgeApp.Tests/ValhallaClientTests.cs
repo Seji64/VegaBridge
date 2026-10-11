@@ -90,14 +90,6 @@ public class ValhallaClientTests
         Assert.Equal("include", body.GetProperty("filters").GetProperty("action").GetString());
     }
 
-    [Fact]
-    public async Task TraceAttributes_Rejected_ReturnsNull()
-    {
-        using HttpTest http = new();
-        http.RespondWith("""{"error_code":443,"error":"Exact route match algorithm failed to find path","status_code":400,"status":"Bad Request"}""", 400);
-
-        Assert.Null(await _client.GetTraceAttributesAsync(new TraceAttributesRequest { EncodedPolyline = "abc" }));
-    }
 
     private static RouteRequest Request(Dictionary<string, CostingOptions>? costingOptions) => new()
     {

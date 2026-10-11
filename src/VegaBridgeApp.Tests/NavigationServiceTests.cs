@@ -219,15 +219,20 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task Tunnel_NoGps_CatchesUpAtTheExit()
+    public async Task Tunnel_NoGps_EstimatesThenCatchesUpAtTheExit()
     {
-        // 700 m tunnel (longer than the snap window) at 90 km/h: no fix for
-        // 28 s, GPS is back 100 m before the right turn at B.
+        // 700 m tunnel (longer than the snap window, unknown to Valhalla) at
+        // 90 km/h: the turn keeps counting down, but only for 500 m. GPS is
+        // back 100 m before the right turn at B.
         await StartAsync(Leg(Right, A, B, C));
         foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
             Fix(p, speedMs: 25, headingDeg: 0);
 
-        GpsGap(seconds: 28);
+        GpsGap(seconds: 10);
+        Assert.InRange(_sink.LastStatus!.DistanceToNextTurnM, 500, 600);
+        GpsGap(seconds: 18);
+        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 270, 330);
+
         Fix(Lerp(A, B, 0.9), speedMs: 25, headingDeg: 0);
 
         Assert.Equal(1, _sink.LastStatus!.CurrentManeuverIndex);
@@ -281,8 +286,7 @@ public class NavigationServiceTests
         }
 
         // Only the estimate moves on – the bad fixes are not used.
-        Assert.True(_sink.LastStatus!.IsEstimated);
-        Assert.True(_sink.LastStatus.DistanceToNextTurnM < beforeTunnelM);
+        Assert.True(_sink.LastStatus!.DistanceToNextTurnM < beforeTunnelM);
         Assert.False(_sink.OffRoute);
         Assert.False(RerouteRequested());
 
@@ -315,29 +319,6 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task GpsLost_EstimateCountsDown_AndStops500mAfterTheLastFix()
-    {
-        // No tunnel known: the turn 800 m ahead keeps counting down at the
-        // last speed (90 km/h), but the estimate only goes 500 m.
-        await StartAsync(Leg(Right, A, B, C));
-        foreach (Coordinate p in Ride(25, A, Lerp(A, B, 0.2)))
-            Fix(p, speedMs: 25, headingDeg: 0);
-
-        GpsGap(seconds: 10);
-        Assert.True(_sink.LastStatus!.IsEstimated);
-        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 500, 600);
-
-        GpsGap(seconds: 30);
-        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 270, 330);
-
-        Fix(Lerp(A, B, 0.9), speedMs: 25, headingDeg: 0);
-        Assert.False(_sink.LastStatus.IsEstimated);
-        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 75, 125);
-        Assert.False(_sink.OffRoute);
-        Assert.False(RerouteRequested());
-    }
-
-    [Fact]
     public async Task Tunnel_KnownFromValhalla_EstimateRunsThroughTheWholeTunnel()
     {
         // 2.4 km tunnel (shape points 1–2), right turn 300 m after its exit.
@@ -354,8 +335,7 @@ public class NavigationServiceTests
             Fix(p, speedMs: 25, headingDeg: 0);
 
         GpsGap(seconds: 60); // 1.5 km into the tunnel
-        Assert.True(_sink.LastStatus!.IsEstimated);
-        Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 1200, 1320);
+        Assert.InRange(_sink.LastStatus!.DistanceToNextTurnM, 1200, 1320);
 
         // Estimate reaches the turn: it holds there, the instruction stays.
         GpsGap(seconds: 60);
@@ -364,7 +344,6 @@ public class NavigationServiceTests
 
         // GPS back after the turn.
         Fix(Lerp(n, e, 0.2), speedMs: 25, headingDeg: 90);
-        Assert.False(_sink.LastStatus.IsEstimated);
         Assert.Equal(2, _sink.LastStatus.DisplayManeuverIndex);
         Assert.InRange(_sink.LastStatus.DistanceToNextTurnM, 750, 850);
         Assert.False(_sink.OffRoute);
@@ -383,7 +362,6 @@ public class NavigationServiceTests
         GpsGap(seconds: 120);
 
         Assert.True(_nav.IsNavigating);
-        Assert.True(_sink.LastStatus!.IsEstimated);
         Assert.False(_sink.Finished.Task.IsCompleted);
     }
 
