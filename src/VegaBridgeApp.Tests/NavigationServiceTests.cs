@@ -468,6 +468,23 @@ public class NavigationServiceTests
         Assert.True(_sink.OffRoute);
     }
 
+    [Fact]
+    public async Task RampCrossingTheRouteLater_IsNotSnappedAhead()
+    {
+        // Motorway interchange (A12 → A13 Brenner): the exit ramp loops back
+        // and crosses the road the rider is still on, 360 m later along the
+        // route. A fix nearer to the ramp must not jump the progress onto it.
+        await StartAsync(Leg(Right, At(0, 0), At(300, 0), At(300, -60), At(180, -60), At(180, 120)));
+        foreach (Coordinate p in Ride(10, At(0, 0), At(170, 0)))
+            Fix(p, speedMs: 10, headingDeg: 90);
+        Fix(At(183, 6), speedMs: 10, headingDeg: 90); // GPS noise towards the ramp
+        foreach (Coordinate p in Ride(10, At(190, 0), At(290, 0)))
+            Fix(p, speedMs: 10, headingDeg: 90);
+
+        Assert.False(_sink.OffRoute);
+        Assert.False(RerouteRequested());
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private Task StartAsync(Leg leg) => StartAsync([leg], []);
@@ -572,6 +589,10 @@ public class NavigationServiceTests
     private IEnumerable<RouteRequest> RouteRequests() => _valhalla.ReceivedCalls()
         .Where(c => c.GetMethodInfo().Name == nameof(IValhallaClient.GetRouteAsync))
         .Select(c => (RouteRequest)c.GetArguments()[0]!);
+
+    /// <summary>Meters east / north of A.</summary>
+    private static Coordinate At(double eastM, double northM) =>
+        new(A.Latitude + northM / 111_195.0, A.Longitude + eastM * LonPerMeter, null);
 
     private static Coordinate Lerp(Coordinate a, Coordinate b, double t) =>
         new(a.Latitude + t * (b.Latitude - a.Latitude), a.Longitude + t * (b.Longitude - a.Longitude), null);
