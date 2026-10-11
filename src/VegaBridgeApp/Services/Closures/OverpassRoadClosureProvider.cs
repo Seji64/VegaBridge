@@ -157,7 +157,9 @@ public class OverpassRoadClosureProvider : IRoadClosureProvider
                 DateTimeOffset.UtcNow,
                 IsSuccess: true);
         }
-        catch (OperationCanceledException)
+        // Flurl wraps a cancelled call (aggregator timeout) in a
+        // FlurlHttpException, so the token decides, not the exception type.
+        catch (Exception ex) when (ex is OperationCanceledException || cancellationToken.IsCancellationRequested)
         {
             Log.Debug("Closure check cancelled");
             return RoadClosureCheckResult.Failure("Cancelled");

@@ -185,9 +185,11 @@ public static class MauiProgram
                 // server (timeout) – retrying the SAME query will just get
                 // another 504. Fail fast so the provider timeout in the
                 // aggregator can surface the other providers' results.
-                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                    .Handle<HttpRequestException>()
-                    .HandleResult(r => r.StatusCode != System.Net.HttpStatusCode.GatewayTimeout)
+                // Everything else as the default (network errors, 408, 429,
+                // 5xx) – a successful response must never be retried.
+                ShouldHandle = static args => ValueTask.FromResult(
+                    args.Outcome.Result?.StatusCode != System.Net.HttpStatusCode.GatewayTimeout
+                    && HttpClientResiliencePredicates.IsTransient(args.Outcome, args.Context.CancellationToken))
             });
         });
 
