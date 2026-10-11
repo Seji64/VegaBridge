@@ -30,8 +30,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
     private const double ClosureHighlightRadiusM = 80;
 
     private OpenStreetMap? _map;
-    private MudAutocomplete<GeoResult>? _startAuto;
-    private MudAutocomplete<GeoResult>? _destAuto;
 
     private GeoResult? _startLocation;
     private GeoResult? _destinationLocation;
@@ -773,18 +771,6 @@ public partial class Map : ComponentBase, IAsyncDisposable, INavigationSink
         }
 
         return await GeocodingService.SuggestAsync(query, limit: 15, lon: biasLon, lat: biasLat, ct: ct);
-    }
-
-    /// <summary>
-    /// Selects a pinned location via the autocomplete – sets the value and closes the menu.
-    /// </summary>
-    private async Task SelectPinAsync(MudAutocomplete<GeoResult>? auto, GeoResult pin)
-    {
-        // @ref fields (_startAuto/_destAuto) are null before the first render –
-        // the callback can fire from the pinned-locations template. Guard is
-        // required despite the nullable analysis being satisfied at call sites.
-        if (auto == null) return;
-        await auto.SelectOptionAsync(pin);
     }
 
     private static Location CreateLocation(GeoResult? location, string type = "break")

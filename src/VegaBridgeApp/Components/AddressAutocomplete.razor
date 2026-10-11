@@ -1,0 +1,55 @@
+@* Address search (Photon) shared by Start / Destination / Waypoints / Home.
+   Suggestions show street (or POI) and place on two lines with the typed
+   terms highlighted, plus a Google-Maps-like "fill in" arrow. *@
+<MudAutocomplete @ref="_auto" T="GeoResult"
+                 Label="@Label"
+                 InputId="@_inputId"
+                 Variant="Variant.Outlined"
+                 Margin="@Margin"
+                 Adornment="Adornment.Start"
+                 AdornmentIcon="@AdornmentIcon"
+                 AdornmentColor="@AdornmentColor"
+                 OnAdornmentClick="@OnAdornmentClick"
+                 Class="@Class"
+                 Value="@Value"
+                 ValueChanged="@ValueChanged"
+                 SearchFunc="@SearchAsync"
+                 DebounceInterval="300"
+                 MinCharacters="@MinCharacters"
+                 ShowProgressIndicator="true"
+                 ProgressIndicatorColor="@Color.Info"
+                 Clearable="true"
+                 BeforeItemsTemplate="@(Pins.Any() ? PinsBeforeItems : null)"
+                 NoItemsTemplate="@(Pins.Any() ? PinsOnly : null)">
+    <ItemTemplate>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Size="Size.Small" Icon="@Icons.Material.Outlined.Place" Class="mud-text-secondary"/>
+            <div class="flex-grow-1" style="min-width: 0;">
+                <MudText Typo="Typo.body2">
+                    <MudHighlighter Text="@context.PrimaryText" HighlightedTexts="@_queryTerms" Style="@MatchStyle"/>
+                </MudText>
+                @if (context.SecondaryText != null)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.SecondaryText</MudText>
+                }
+            </div>
+            @* stopPropagation: the row's click would select the suggestion.
+               mousedown preventDefault: keep the focus (and the keyboard) in the input. *@
+            <span @onclick:stopPropagation="true" @onmousedown:preventDefault="true">
+                <MudIconButton Icon="@Icons.Material.Filled.NorthWest"
+                               Size="Size.Small"
+                               aria-label="@L["FillInSuggestion"]"
+                               OnClick="@(() => FillInAsync(context))"/>
+            </span>
+        </MudStack>
+    </ItemTemplate>
+</MudAutocomplete>
+
+@code {
+    private RenderFragment PinsBeforeItems => @<text>
+        <PinnedLocations Pins="Pins" OnPinnedSelected="SelectPinAsync"/>
+        <MudDivider/>
+    </text>;
+
+    private RenderFragment PinsOnly => @<PinnedLocations Pins="Pins" OnPinnedSelected="SelectPinAsync"/>;
+}

@@ -15,6 +15,7 @@
   <data name="Destination" xml:space="preserve"><value>Destination</value></data>
   <data name="Waypoint" xml:space="preserve"><value>Waypoint</value></data>
   <data name="AddWaypoint" xml:space="preserve"><value>Add Waypoint</value></data>
+  <data name="FillInSuggestion" xml:space="preserve"><value>Continue search with this suggestion</value></data>
   <data name="WaypointAdded" xml:space="preserve"><value>Waypoint added</value></data>
   <data name="MoveWaypoint" xml:space="preserve"><value>Move Waypoint</value></data>
   <data name="DeleteWaypoint" xml:space="preserve"><value>Delete Waypoint</value></data>
