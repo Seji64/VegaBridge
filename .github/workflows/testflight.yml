@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       build_number:
-        description: 'Build number (CFBundleVersion); empty = run number + offset'
+        description: 'Build number (CFBundleVersion); empty = run number'
         required: false
 
 # Never cancel a run mid-upload; queue them instead.
@@ -22,9 +22,6 @@ permissions:
 
 env:
   PROJECT: src/VegaBridgeApp/VegaBridgeApp.csproj
-  # CFBundleVersion = run number + offset, so it grows with every upload. Run #1 -> 18
-  # continues the builds uploaded by hand from the dev machine (<= 17).
-  BUILD_NUMBER_OFFSET: 17
 
 jobs:
   testflight:
@@ -53,7 +50,8 @@ jobs:
         env:
           BUILD_NUMBER_INPUT: ${{ inputs.build_number }}
         run: |
-          build="${BUILD_NUMBER_INPUT:-$(( GITHUB_RUN_NUMBER + BUILD_NUMBER_OFFSET ))}"
+          # CFBundleVersion = run number, so it grows with every upload (run #1 -> build 1).
+          build="${BUILD_NUMBER_INPUT:-$GITHUB_RUN_NUMBER}"
           if [[ ! "$build" =~ ^[0-9]+$ ]]; then
             echo "::error::Build number $build is not a positive integer"
             exit 1
