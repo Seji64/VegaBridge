@@ -143,6 +143,15 @@ Fähren" (`RoadAvoidance` flags). The last choice is remembered
 | Server | Always available | Needs `service_limits.allow_hard_exclusions` (valhalla1.openstreetmap.de: yes; otherwise ignored with a warning) |
 | Risk | – | No path at all (island only reachable by ferry → error 442) |
 
+**Expressways (trunk)** such as the 4-lane B10/B27/B29 sections are covered by
+the highways chip, but only softly: `exclude_highways` is motorway-only, while
+motorcycle `use_highways` = 0 penalizes motorways fully and trunks at half
+weight (`kHighwayFactor` in `motorcyclecost.cc`). Measured: Stuttgart → Ulm /
+Aalen / Tübingen and Ulm → Lindau all drop from 13–67 km trunk to 0 km. Normal
+2-lane Bundesstraßen (primary) are not affected. Excluding one specific road
+(e.g. only the B10) is not possible by name/ref; Valhalla only offers
+`exclude_locations` (edges at given points) and `exclude_polygons` (areas).
+
 On error 442 with hard exclusions `ValhallaClient` retries with the soft
 preferences only. If the route still uses an avoided type (`has_highway` /
 `has_toll` / `has_ferry` in the trip summary), the map shows a snackbar.
