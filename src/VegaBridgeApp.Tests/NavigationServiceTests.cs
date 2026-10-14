@@ -436,6 +436,36 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task DrivingSide_UnknownWithoutValhallaEdges()
+    {
+        await StartAsync(Leg(Right, A, B, C, D, A));
+
+        Fix(At(0, 100), speedMs: 10, headingDeg: 0);
+
+        Assert.Null(_sink.LastStatus!.DriveOnRight);
+    }
+
+    [Fact]
+    public async Task DrivingSide_FollowsTheDisplayedManeuver()
+    {
+        // Right-hand traffic up to C, left-hand traffic from C on (ferry to the UK).
+        DrivingSides((0, 2, true), (2, 4, false));
+        await StartAsync(Leg(Right, A, B, C, D, A));
+        await _valhalla.Received(1).GetTraceAttributesAsync(
+            Arg.Is<TraceAttributesRequest>(r => r.Filters!.Attributes.Contains("edge.drive_on_right")),
+            Arg.Any<CancellationToken>());
+
+        Fix(At(0, 100), speedMs: 10, headingDeg: 0); // next turn at B
+        Assert.Equal(1, _sink.LastStatus!.DisplayManeuverIndex);
+        Assert.True(_sink.LastStatus.DriveOnRight);
+
+        foreach (Coordinate p in Ride(A, B, C, Lerp(C, D, 0.1)))
+            Fix(p, speedMs: 10);
+        Assert.Equal(3, _sink.LastStatus.DisplayManeuverIndex); // next turn at D
+        Assert.False(_sink.LastStatus.DriveOnRight);
+    }
+
+    [Fact]
     public async Task UTurnAtWaypoint_IsNotOffRoute()
     {
         // Out to a waypoint and back the same road (viewpoint at a dead end):
@@ -573,6 +603,14 @@ public class NavigationServiceTests
             .Returns(new TraceAttributesResponse
             {
                 Edges = [.. tunnels.Select(t => new TraceEdge { Tunnel = true, BeginShapeIndex = t.Begin, EndShapeIndex = t.End })]
+            });
+
+    /// <summary>Fake Valhalla trace_attributes: driving side of edges by shape index (every leg).</summary>
+    private void DrivingSides(params (int Begin, int End, bool DriveOnRight)[] edges) =>
+        _valhalla.GetTraceAttributesAsync(Arg.Any<TraceAttributesRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new TraceAttributesResponse
+            {
+                Edges = [.. edges.Select(e => new TraceEdge { DriveOnRight = e.DriveOnRight, BeginShapeIndex = e.Begin, EndShapeIndex = e.End })]
             });
 
     /// <summary>Fake Valhalla locate: which OSM way is at a position.</summary>

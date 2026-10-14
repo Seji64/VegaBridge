@@ -27,6 +27,13 @@ public sealed record NavigationUpdateInput
     public int? RoundaboutExitCount { get; init; }
 
     /// <summary>
+    /// Driving side at the maneuver: true right-hand traffic (roundabouts
+    /// counter-clockwise), false left-hand traffic (clockwise). Right-hand
+    /// while unknown.
+    /// </summary>
+    public bool DriveOnRight { get; init; } = true;
+
+    /// <summary>
     /// Instruction text for the display (e.g. "Turn right onto B31").
     /// </summary>
     public required string InstructionText { get; init; }

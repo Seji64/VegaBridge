@@ -4,6 +4,9 @@ namespace VegaBridgeApp.Models.Navigation;
 /// Single Source of Truth for mapping Valhalla maneuver types to semantic icon keys.
 /// This mapper is plugin-agnostic and serves as the bridge between the 
 /// navigation domain and both the UI and hardware plugins.
+/// The keys keep what Valhalla distinguishes (keep vs. slight, ramp vs.
+/// exit, waypoint vs. destination); each plugin folds them into the icons
+/// its display knows.
 /// </summary>
 public static class NavigationIconMapper
 {
@@ -17,11 +20,23 @@ public static class NavigationIconMapper
     public const string IconSharpRight = "turn-sharp-right";
     public const string IconUTurnLeft = "uturn-left";
     public const string IconUTurnRight = "uturn-right";
-    // Motorway/highway exits and ramps (e.g. "take the B10 exit") – shown as
+    // Keep left/right at a fork.
+    public const string IconKeepLeft = "keep-left";
+    public const string IconKeepRight = "keep-right";
+    // Ramps onto a motorway/highway.
+    public const string IconRampLeft = "ramp-left";
+    public const string IconRampRight = "ramp-right";
+    // Motorway/highway exits (e.g. "take the B10 exit") – shown as
     // an exit/ramp icon in the UI instead of a plain left/right turn.
     public const string IconExitLeft = "exit-left";
     public const string IconExitRight = "exit-right";
+    public const string IconMergeLeft = "merge-left";
+    public const string IconMergeRight = "merge-right";
     public const string IconRoundabout = "roundabout";
+    public const string IconFerry = "ferry";
+    // Arrival at an intermediate waypoint – only the very last arrival of
+    // the route is the destination (IconFinish).
+    public const string IconWaypoint = "waypoint";
     public const string IconFinish = "finish";
 
     private static readonly Dictionary<int, string> ValhallaToSemanticIcon = new()
@@ -31,8 +46,8 @@ public static class NavigationIconMapper
         { 2, IconTurnRight },       // kStartRight
         { 3, IconTurnLeft },        // kStartLeft
         { 4, IconFinish },           // kDestination
-        { 5, IconTurnRight },       // kDestinationRight
-        { 6, IconTurnLeft },        // kDestinationLeft
+        { 5, IconFinish },          // kDestinationRight
+        { 6, IconFinish },          // kDestinationLeft
         { 7, IconStraight },        // kBecomes
         { 8, IconStraight },        // kContinue
         { 9, IconSlightRight },      // kSlightRight
@@ -44,18 +59,18 @@ public static class NavigationIconMapper
         { 15, IconTurnLeft },       // kLeft
         { 16, IconSlightLeft },     // kSlightLeft
         { 17, IconStraight },        // kRampStraight
-        { 18, IconExitRight },      // kRampRight
-        { 19, IconExitLeft },        // kRampLeft
+        { 18, IconRampRight },      // kRampRight
+        { 19, IconRampLeft },        // kRampLeft
         { 20, IconExitRight },      // kExitRight
         { 21, IconExitLeft },        // kExitLeft
         { 22, IconStraight },        // kStayStraight
-        { 23, IconSlightRight },     // kStayRight
-        { 24, IconSlightLeft },     // kStayLeft
+        { 23, IconKeepRight },       // kStayRight
+        { 24, IconKeepLeft },       // kStayLeft
         { 25, IconStraight },        // kMerge
         { 26, IconRoundabout },      // kRoundaboutEnter
         { 27, IconRoundabout },      // kRoundaboutExit
-        { 28, IconStraight },        // kFerryEnter
-        { 29, IconStraight },        // kFerryExit
+        { 28, IconFerry },           // kFerryEnter
+        { 29, IconFerry },           // kFerryExit
         { 30, IconStraight },        // kTransit
         { 31, IconStraight },        // kTransitTransfer
         { 32, IconStraight },        // kTransitRemainOn
@@ -63,8 +78,8 @@ public static class NavigationIconMapper
         { 34, IconStraight },        // kTransitConnectionTransfer
         { 35, IconStraight },        // kTransitConnectionDestination
         { 36, IconStraight },        // kPostTransitConnectionDestination
-        { 37, IconSlightRight },     // kMergeRight
-        { 38, IconSlightLeft },      // kMergeLeft
+        { 37, IconMergeRight },      // kMergeRight
+        { 38, IconMergeLeft },       // kMergeLeft
         { 39, IconFinish },          // kElevatorEnter
         { 40, IconFinish },          // kStepsEnter
         { 41, IconFinish },          // kEscalatorEnter
@@ -75,10 +90,25 @@ public static class NavigationIconMapper
     /// <summary>
     /// Resolves a Valhalla maneuver type to a semantic icon key.
     /// </summary>
-    public static string GetSemanticIcon(int valhallaType)
+    /// <param name="valhallaType">Valhalla maneuver type.</param>
+    /// <param name="isFinalManeuver">false for every maneuver but the route's
+    /// last: Valhalla emits an arrival (kDestination*) at the end of EVERY
+    /// leg, and only the last one is the destination – the others are
+    /// waypoints.</param>
+    public static string GetSemanticIcon(int valhallaType, bool isFinalManeuver = true)
     {
+        if (!isFinalManeuver && valhallaType is 4 or 5 or 6)
+            return IconWaypoint;
+
         return ValhallaToSemanticIcon.TryGetValue(valhallaType, out var icon) 
             ? icon 
             : IconStraight;
     }
+
+    /// <summary>
+    /// Resolves a maneuver of the running route to a semantic icon key
+    /// (waypoint arrivals included).
+    /// </summary>
+    public static string GetSemanticIcon(NavigationManeuverInfo maneuver) =>
+        GetSemanticIcon(maneuver.ValhallaType, maneuver.Index >= maneuver.Total - 1);
 }

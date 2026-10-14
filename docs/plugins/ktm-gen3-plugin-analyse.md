@@ -48,11 +48,28 @@ Ziel dieses Dokuments:
 | W2 Link-Reset | anders gelöst: Liefert `InitializeSessionAsync` `false`, trennt der Manager den Link (`RecycleLink`), und der nächste Link-Up startet frisch. Das Plugin braucht dafür keine eigene Methode. |
 | W4 Zustände | `Initializing` existiert, die UI zeigt in dieser Phase „Verbinde…“. Ein eigener Hinweis „am Dashboard bestätigen“ braucht den Event-Kanal (W3). |
 
+**Schritt 2 (semantische Icons und Fahrseite) ist umgesetzt:**
+
+- Neue Keys `keep-left/right`, `ramp-left/right` (getrennt von `exit-*`), `merge-left/right`, `ferry` und `waypoint`.
+  Ob eine Ankunft Wegpunkt oder Ziel ist, entscheidet jetzt der Mapper
+  (`NavigationIconMapper.GetSemanticIcon(maneuver)`), der Hack im Coordinator ist weg.
+- Die Fahrseite kommt aus dem bestehenden `trace_attributes`-Aufruf (`edge.drive_on_right`, am öffentlichen
+  Valhalla-Server geprüft: UK `false`, DE `true`). Sie steht als `NavigationStatus.DriveOnRight` am angezeigten
+  Manöver zur Verfügung (`null`, solange unbekannt) und als `NavigationUpdateInput.DriveOnRight` im Plugin (Default
+  Rechtsverkehr).
+- MV: Kreisverkehr bei Linksverkehr → `roundabout-left-N`. Ankunft mit Seite (`kDestinationRight/Left`) ist am Ziel jetzt
+  `Finish` (vorher Abbiegepfeil), an Zwischenzielen `straight` (vorher Abbiegepfeil). Alles andere bleibt, wie es war.
+- HUD: eigene Icons für Spur halten (Gabel), Einfädeln, Fähre und Wegpunkt. Bei Linksverkehr zeigt der Kreisverkehr
+  den gespiegelten Pfeil.
+- `depart` und `keep-straight` aus der Skizze in Abschnitt 5 sind **entfallen**: `IsSkippableForDisplay` überspringt
+  diese Manöver (wie Merge ohne Richtung und `kDestination`-Zwischenziele), sie erreichen also nie ein Display.
+
 **Noch offen**, bewusst erst mit dem ersten Nutzer:
 
 - W3 Event-Rückkanal: kommt mit dem ersten Konsumenten, z. B. MV-`GUI1`-Modellerkennung oder KTM-Tasten.
 - W5 Marke pro Gerät, W6 Advertisement-Daten, W7 `SendMessageAsync`, Capabilities.
-- Die semantischen Icons aus Abschnitt 5, darunter der Wegpunkt-Hack.
+- `IsSkippableForDisplay` überspringt nur `kDestination`-Zwischenziele, nicht `kDestinationRight/Left`. Die offizielle
+  MV-App springt bei jedem Zwischenziel zum übernächsten Manöver, das wäre ein eigener Schritt (betrifft auch das HUD).
 
 Das MV-Plugin verhält sich unverändert: Es abonniert im Init die Read-Characteristic, macht keinen Handshake und
 schreibt weiter ohne Response. Shiny-Abos werden wie bisher erst beim nächsten Link-Up ersetzt, nicht schon beim
@@ -335,8 +352,8 @@ Shiny nimmt davon einiges ab, aber nicht alles.
 1. ✅ **Interface-Refactoring ohne neues Plugin**: Init-Hook mit Bereit-Zustand, Session-Ende-Hook,
    Multi-Characteristic-HAL mit `withResponse`. MV-Plugin umgezogen, Verhalten unverändert, Tests grün. Der
    Event-Rückkanal folgt mit dem ersten Konsumenten.
-2. **Semantische Icons erweitern** (`waypoint`, `keep-*`, `ramp-*`, `ferry`, `depart`) und `DrivingSide`. Den
-   Wegpunkt-Hack ins MV-Plugin verschieben.
+2. ✅ **Semantische Icons erweitern** (`waypoint`, `keep-*`, `ramp-*`, `merge-*`, `ferry`) und Fahrseite. Der
+   Wegpunkt-Hack ist ins Mapping und MV-Plugin gewandert.
 3. **Schnelle Gewinne aus Abschnitt 7**: Symbol-Test, GATT- und Modell-Log, Ellipse, Log-PII.
 4. **KTM-Plugin** erst, wenn sich ein Tester mit Gen-3-Dash findet. Bis dahin ist das Refactoring trotzdem nicht umsonst:
    Es verbessert MV (Handshake, `GUI1`-Telemetrie, Linksverkehr) und macht die Plugin-Aussage im README wieder ehrlich.

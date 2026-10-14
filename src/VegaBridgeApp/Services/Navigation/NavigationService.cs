@@ -182,6 +182,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
 
     // Tunnels as [start, end] meters along the route; empty while unknown.
     private List<(double StartM, double EndM)> _tunnels = [];
+
+    // Driving side as [start, end] meters along the route; a stretch not
+    // covered (trace_attributes failed for its leg, or not built yet) is unknown.
+    private List<(double StartM, double EndM, bool DriveOnRight)> _drivingSides = [];
     private const double OtherPassWindowM = 100.0; // U-turn ≤ ~50 m before it, or the rider turned back early (reroute)
 
     // ── Properties ───────────────────────────────────────────────────────
@@ -322,6 +326,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             _gpsBuffer.Clear();
             _lastRerouteAt = DateTimeOffset.MinValue;
             _tunnels = [];
+            _drivingSides = [];
         }
 
         if (wasNavigating)
@@ -368,7 +373,7 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             totalDistanceKm, totalTimeMin, maneuvers.Count, _routeCoords.Count);
         // Build way_id index for topology-aware off-route detection
         _ = BuildRouteWayIdIndex();
-        _ = BuildTunnelIndexAsync(mergedShape, waypointIndices);
+        _ = BuildEdgeIndexAsync(mergedShape, waypointIndices);
         ResetTelemetry();
         FireCurrentManeuver();
     }
@@ -559,11 +564,12 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             _currentHeadingDeg = -1;
             _lastSmoothedPosition = null;
             _tunnels = [];
+            _drivingSides = [];
         }
 
         FireCurrentManeuver();
         _ = BuildRouteWayIdIndex();
-        _ = BuildTunnelIndexAsync(mergedShape, waypointIndices);
+        _ = BuildEdgeIndexAsync(mergedShape, waypointIndices);
         Log.Information(
             "Route rerouted: {Distance:F1} km, {Time:F0} min, {Maneuvers} maneuvers",
             totalDistanceKm, totalTimeMin, maneuvers.Count);
@@ -748,16 +754,18 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
     }
 
     /// <summary>
-    /// Tunnels along the route from Valhalla (trace_attributes, one call per
-    /// leg – edge_walk fails on a U-turn at a waypoint). They let the dead
-    /// reckoning run through a whole tunnel.
+    /// Edge attributes along the route from Valhalla (trace_attributes, one
+    /// call per leg – edge_walk fails on a U-turn at a waypoint): tunnels let
+    /// the dead reckoning run through a whole tunnel, the driving side tells
+    /// the plugins which way roundabouts turn.
     /// </summary>
     /// <param name="mergedShape">Encoded route shape (not densified).</param>
     /// <param name="waypointIndices">Shape indices where a leg ends at a waypoint.</param>
-    private async Task BuildTunnelIndexAsync(string mergedShape, List<int> waypointIndices)
+    private async Task BuildEdgeIndexAsync(string mergedShape, List<int> waypointIndices)
     {
         List<Coordinate> coords = _routeCoords;
         List<(double StartM, double EndM)> tunnels = [];
+        List<(double StartM, double EndM, bool DriveOnRight)> sides = [];
         try
         {
             List<Coordinate> raw = PolylineEncoder.DecodePolyline6(mergedShape);
@@ -774,13 +782,21 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
                 TraceAttributesResponse? response = await valhallaClient.GetTraceAttributesAsync(new TraceAttributesRequest
                 {
                     EncodedPolyline = PolylineEncoder.EncodePolyline6(leg),
-                    Filters = new TraceAttributesFilter { Attributes = ["edge.tunnel", "edge.begin_shape_index", "edge.end_shape_index"] }
+                    Filters = new TraceAttributesFilter { Attributes = ["edge.tunnel", "edge.drive_on_right", "edge.begin_shape_index", "edge.end_shape_index"] }
                 });
                 foreach (TraceEdge edge in response?.Edges ?? [])
                 {
-                    if (!edge.Tunnel || edge.BeginShapeIndex < 0 || edge.EndShapeIndex >= leg.Count) continue;
+                    if (edge.BeginShapeIndex < 0 || edge.EndShapeIndex >= leg.Count) continue;
                     double startM = rawM[legStart + edge.BeginShapeIndex];
                     double endM = rawM[legStart + edge.EndShapeIndex];
+
+                    // Consecutive edges share their end/begin point.
+                    if (sides.Count > 0 && sides[^1].DriveOnRight == edge.DriveOnRight && startM <= sides[^1].EndM)
+                        sides[^1] = (sides[^1].StartM, Math.Max(sides[^1].EndM, endM), edge.DriveOnRight);
+                    else
+                        sides.Add((startM, endM, edge.DriveOnRight));
+
+                    if (!edge.Tunnel) continue;
                     if (tunnels.Count > 0 && startM - tunnels[^1].EndM <= TunnelMergeGapM)
                         tunnels[^1] = (tunnels[^1].StartM, Math.Max(tunnels[^1].EndM, endM));
                     else
@@ -789,18 +805,36 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
                 legStart = legEnd;
             }
             Log.Information("Route tunnels: {Count}, {Km:F1} km", tunnels.Count, tunnels.Sum(t => t.EndM - t.StartM) / 1000);
+            Log.Information("Route driving side: {Sides}",
+                string.Join(", ", sides.Select(s => $"{(s.DriveOnRight ? "right" : "left")} {s.StartM / 1000:F1}–{s.EndM / 1000:F1} km")));
         }
         catch (Exception ex)
         {
             // No tunnels: the dead reckoning stops DeadReckoningMaxM after the last fix.
-            Log.Warning(ex, "Failed to build tunnel index");
+            // Driving side unknown: plugins fall back to right-hand traffic.
+            Log.Warning(ex, "Failed to build edge index");
         }
 
         lock (_lock)
         {
             if (ReferenceEquals(coords, _routeCoords))
+            {
                 _tunnels = tunnels;
+                _drivingSides = sides;
+            }
         }
+    }
+
+    /// <summary>Driving side at a route shape index; null where unknown.</summary>
+    private bool? DriveOnRightAt(int shapeIndex)
+    {
+        if (shapeIndex < 0 || shapeIndex >= _cumulativeDistances.Length) return null;
+        double m = _cumulativeDistances[shapeIndex];
+        foreach ((double startM, double endM, bool driveOnRight) in _drivingSides)
+        {
+            if (m >= startM && m <= endM) return driveOnRight;
+        }
+        return null;
     }
 
     /// <summary>
@@ -1053,7 +1087,10 @@ public class NavigationService(GpsService gps, IValhallaClient valhallaClient, T
             Accuracy = reading.PositionAccuracy,
             RemainingWaypoints = CountWaypointsAhead(snappedIndex),
             IsStationary = reading.IsStationary,
-            IsEstimated = estimated
+            IsEstimated = estimated,
+            DriveOnRight = displayIndex >= 0 && displayIndex < _maneuvers.Count
+                ? DriveOnRightAt(_maneuvers[displayIndex].BeginShapeIndex)
+                : null
         };
         _ = NotifySinksAsync(s => s.OnStatusAsync(status));
     }

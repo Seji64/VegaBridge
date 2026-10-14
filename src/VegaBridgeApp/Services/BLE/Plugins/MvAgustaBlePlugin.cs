@@ -116,7 +116,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         // Flow control (buffer full → drop/force, watchdog) lives in the
         // write wrapper of BleManagerService.
         await SendAsync(device, Commands.NAVI,
-            ToBikeIcon(input.ManeuverIcon, input.RoundaboutExitCount),
+            ToBikeIcon(input.ManeuverIcon, input.RoundaboutExitCount, input.DriveOnRight),
             navigationGuide,
             intersectionName);
 
@@ -259,11 +259,15 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     /// Maps the plugin-agnostic semantic icon to one of the 35 keys the bike
     /// knows (TurnByTurnIndication enum of MV Ride v1.4.3). Unknown keys are
     /// not displayed by the bike. The mapping follows the official app
-    /// (HERE ManeuverAction → key): exits/ramps → slight turn (the bike has
-    /// no exit icon), sharp turns → U-turn, roundabouts → roundabout-right-N
-    /// (counter-clockwise, right-hand traffic), destination → "Finish".
+    /// (HERE ManeuverAction → key): keep/ramps/exits/merges → slight turn
+    /// (the bike has no fork, exit or merge icon), sharp turns → U-turn,
+    /// roundabouts → roundabout-right-N (counter-clockwise, right-hand
+    /// traffic) or roundabout-left-N (clockwise, left-hand traffic),
+    /// destination → "Finish". Everything else – waypoint arrivals, ferries
+    /// – is "straight": a waypoint shown as Finish or as a turn misleads
+    /// mid-route (observed on a real ride with Finish).
     /// </summary>
-    private string ToBikeIcon(string semanticIcon, int? roundaboutExitCount)
+    private string ToBikeIcon(string semanticIcon, int? roundaboutExitCount, bool driveOnRight)
     {
         if (semanticIcon != NavigationIconMapper.IconRoundabout)
             _lastRoundaboutIcon = null;
@@ -273,9 +277,15 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             case NavigationIconMapper.IconTurnLeft: return TurnTypes.TurnLeft;
             case NavigationIconMapper.IconTurnRight: return TurnTypes.TurnRight;
             case NavigationIconMapper.IconSlightLeft:
-            case NavigationIconMapper.IconExitLeft: return TurnTypes.TurnSlightLeft;
+            case NavigationIconMapper.IconKeepLeft:
+            case NavigationIconMapper.IconRampLeft:
+            case NavigationIconMapper.IconExitLeft:
+            case NavigationIconMapper.IconMergeLeft: return TurnTypes.TurnSlightLeft;
             case NavigationIconMapper.IconSlightRight:
-            case NavigationIconMapper.IconExitRight: return TurnTypes.TurnSlightRight;
+            case NavigationIconMapper.IconKeepRight:
+            case NavigationIconMapper.IconRampRight:
+            case NavigationIconMapper.IconExitRight:
+            case NavigationIconMapper.IconMergeRight: return TurnTypes.TurnSlightRight;
             case NavigationIconMapper.IconSharpLeft:
             case NavigationIconMapper.IconUTurnLeft: return TurnTypes.UturnLeft;
             case NavigationIconMapper.IconSharpRight:
@@ -283,7 +293,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
             case NavigationIconMapper.IconFinish: return TurnTypes.Finish;
             case NavigationIconMapper.IconRoundabout:
                 if (roundaboutExitCount is > 0)
-                    _lastRoundaboutIcon = $"roundabout-right-{Math.Min(roundaboutExitCount.Value, 12)}";
+                    _lastRoundaboutIcon = $"roundabout-{(driveOnRight ? "right" : "left")}-{Math.Min(roundaboutExitCount.Value, 12)}";
                 return _lastRoundaboutIcon ?? TurnTypes.Straight;
             default: return TurnTypes.Straight;
         }

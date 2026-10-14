@@ -330,15 +330,19 @@ Field 1 ist eine **Hex-Zeichenkette** = roher Dashboard-Payload: `HeaderByte` + 
 
 | Valhalla Type | Key |
 |---------------|-----|
-| `kLeft` / `kStartLeft` / `kDestinationLeft`-Annäherung | `turn-left` |
+| `kLeft` / `kStartLeft` | `turn-left` |
 | `kRight` / `kStartRight` | `turn-right` |
 | `kSlightLeft`, `kStayLeft`, `kRampLeft`, `kExitLeft`, `kMergeLeft` | `turn-slight-left` |
 | `kSlightRight`, `kStayRight`, `kRampRight`, `kExitRight`, `kMergeRight` | `turn-slight-right` |
 | `kSharpLeft`, `kUturnLeft` | `uturn-left` |
 | `kSharpRight`, `kUturnRight` | `uturn-right` |
 | `kRoundaboutEnter` (+ `roundabout_exit_count` n, Rechtsverkehr) | `roundabout-right-<n>` (n auf 1..12 begrenzen) |
-| `kDestination*` | `Finish` |
+| `kRoundaboutEnter` (+ n, Linksverkehr laut Valhalla `edge.drive_on_right = false`) | `roundabout-left-<n>` |
+| `kDestination*` (letztes Manöver der Route) | `Finish` |
+| `kDestination*` an einem Zwischenziel | `straight` (Finish mitten in der Route irritiert, im Feld beobachtet) |
 | sonst | `straight` |
+
+**Umsetzung (VegaBridge):** `NavigationIconMapper` liefert semantische Keys (`keep-*`, `ramp-*`, `exit-*`, `merge-*`, `ferry`, `waypoint`, …). `MvAgustaBlePlugin.ToBikeIcon` faltet sie wie in obiger Tabelle auf die 35 Bike-Keys.
 
 Hinweis: HERE liefert für Gabelungen `LEFT_FORK`/`RIGHT_FORK` → `turn-left/right`; Valhalla `kStayLeft/Right` entspricht eher `*_EXIT/RAMP` → `turn-slight-*`.
 
