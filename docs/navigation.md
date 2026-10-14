@@ -123,6 +123,19 @@ route response itself has no tunnel flag. `edge_walk` fails on a U-turn at a
 waypoint, so it is called per leg. Without tunnel data (error, offline) only
 the 500m limit applies.
 
+The same call returns `edge.drive_on_right`: `NavigationStatus.DriveOnRight`
+is the driving side at the displayed maneuver (null where a leg's call
+failed), so plugins draw roundabouts clockwise in left-hand traffic (UK, IE).
+
+### Maneuver Icons
+
+`NavigationIconMapper` maps Valhalla maneuver types to semantic keys for the
+UI and the plugins. The keys keep what Valhalla distinguishes – keep vs.
+slight turn, ramp vs. exit, merge, ferry, waypoint vs. destination (an
+arrival is a waypoint unless it is the route's last maneuver) – and each
+plugin folds them into the icons its display knows (MV Agusta: keep, ramp,
+exit and merge → slight turn; waypoint and ferry → straight).
+
 ### 3. BLE Transmission
 
 ```
@@ -352,6 +365,8 @@ Valhalla maneuvers describe the action at their BEGIN index (the turn happens AT
 | `DebugLogSink.cs` | In-memory Serilog sink for log export |
 | `VegaBridgeApp.Tests/NavigationServiceTests.cs` | Simulated rides: round trip, wrong turn, U-turn, parallel road, GPS drift, reroute waypoints and avoid options (`dotnet test src/VegaBridgeApp.Tests`) |
 | `VegaBridgeApp.Tests/ValhallaClientTests.cs` | Valhalla error reporting, hard → soft avoid fallback |
+| `VegaBridgeApp.Tests/NavigationIconMapperTests.cs` | Valhalla maneuver type → semantic icon key, waypoint vs. destination |
+| `VegaBridgeApp.Tests/MvAgustaBlePluginTests.cs` | MV Agusta plugin against the BLE session: GATT layout, write type, bike icon keys |
 
 ---
 

@@ -15,4 +15,9 @@ public class NavigationStatus
     public double Accuracy { get; init; }
     public bool IsStationary { get; init; }
     public bool IsEstimated { get; init; } // no GPS: position estimated along the route
+    /// <summary>
+    /// Driving side at the displayed maneuver (Valhalla edge.drive_on_right):
+    /// true right-hand, false left-hand traffic, null while unknown.
+    /// </summary>
+    public bool? DriveOnRight { get; init; }
 }

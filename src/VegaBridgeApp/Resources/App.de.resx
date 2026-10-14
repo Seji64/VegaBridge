@@ -118,6 +118,13 @@
   <data name="Roundabout" xml:space="preserve"><value>Kreisverkehr</value></data>
   <data name="ExitLeft" xml:space="preserve"><value>Ausfahrt links</value></data>
   <data name="ExitRight" xml:space="preserve"><value>Ausfahrt rechts</value></data>
+  <data name="KeepLeft" xml:space="preserve"><value>Links halten</value></data>
+  <data name="KeepRight" xml:space="preserve"><value>Rechts halten</value></data>
+  <data name="RampLeft" xml:space="preserve"><value>Auffahrt links</value></data>
+  <data name="RampRight" xml:space="preserve"><value>Auffahrt rechts</value></data>
+  <data name="MergeLeft" xml:space="preserve"><value>Links einfädeln</value></data>
+  <data name="MergeRight" xml:space="preserve"><value>Rechts einfädeln</value></data>
+  <data name="Ferry" xml:space="preserve"><value>Fähre</value></data>
 
   <!-- Reroute / Skip messages -->
   <data name="WaypointSkip" xml:space="preserve"><value>Wegpunkt überspringen – berechne neue Route…</value></data>

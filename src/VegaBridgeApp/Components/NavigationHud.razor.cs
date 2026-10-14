@@ -38,7 +38,11 @@ public partial class NavigationHud : ComponentBase
         ? $"{exit}/{Maneuver.RoundaboutExitCount}"
         : $"{Maneuver?.RoundaboutExitCount}";
 
-    private string TurnIcon => NavigationIconMapper.GetSemanticIcon(Maneuver?.ValhallaType ?? 0) switch
+    private string SemanticIcon => Maneuver is null
+        ? NavigationIconMapper.IconStraight
+        : NavigationIconMapper.GetSemanticIcon(Maneuver);
+
+    private string TurnIcon => SemanticIcon switch
     {
         NavigationIconMapper.IconTurnLeft => Icons.Material.Filled.TurnLeft,
         NavigationIconMapper.IconTurnRight => Icons.Material.Filled.TurnRight,
@@ -48,16 +52,24 @@ public partial class NavigationHud : ComponentBase
         NavigationIconMapper.IconSharpRight => Icons.Material.Filled.TurnSharpRight,
         NavigationIconMapper.IconUTurnLeft => Icons.Material.Filled.UTurnLeft,
         NavigationIconMapper.IconUTurnRight => Icons.Material.Filled.UTurnRight,
-        NavigationIconMapper.IconExitLeft => Icons.Material.Filled.RampLeft,
-        NavigationIconMapper.IconExitRight => Icons.Material.Filled.RampRight,
+        NavigationIconMapper.IconKeepLeft => Icons.Material.Filled.ForkLeft,
+        NavigationIconMapper.IconKeepRight => Icons.Material.Filled.ForkRight,
+        NavigationIconMapper.IconRampLeft or NavigationIconMapper.IconExitLeft => Icons.Material.Filled.RampLeft,
+        NavigationIconMapper.IconRampRight or NavigationIconMapper.IconExitRight => Icons.Material.Filled.RampRight,
+        NavigationIconMapper.IconMergeLeft or NavigationIconMapper.IconMergeRight => Icons.Material.Filled.Merge,
         NavigationIconMapper.IconStraight => Icons.Material.Filled.Straight,
+        NavigationIconMapper.IconFerry => Icons.Material.Filled.DirectionsBoat,
+        NavigationIconMapper.IconWaypoint => Icons.Material.Filled.Place,
         NavigationIconMapper.IconFinish => Icons.Material.Filled.Flag,
-        NavigationIconMapper.IconRoundabout => Icons.Material.Filled.RotateRight,
+        // Left-hand traffic circulates clockwise: the mirrored arrow.
+        NavigationIconMapper.IconRoundabout => Status?.DriveOnRight == false
+            ? Icons.Material.Filled.RotateLeft
+            : Icons.Material.Filled.RotateRight,
         _ => Icons.Material.Filled.Straight
     };
 
     /// <summary>Fallback text when the maneuver has no instruction.</summary>
-    private string TurnLabel => NavigationIconMapper.GetSemanticIcon(Maneuver?.ValhallaType ?? 0) switch
+    private string TurnLabel => SemanticIcon switch
     {
         NavigationIconMapper.IconTurnLeft => L["TurnLeft"],
         NavigationIconMapper.IconTurnRight => L["TurnRight"],
@@ -66,9 +78,17 @@ public partial class NavigationHud : ComponentBase
         NavigationIconMapper.IconSharpLeft => L["TurnSharpLeft"],
         NavigationIconMapper.IconSharpRight => L["TurnSharpRight"],
         NavigationIconMapper.IconUTurnLeft or NavigationIconMapper.IconUTurnRight => L["UTurn"],
+        NavigationIconMapper.IconKeepLeft => L["KeepLeft"],
+        NavigationIconMapper.IconKeepRight => L["KeepRight"],
+        NavigationIconMapper.IconRampLeft => L["RampLeft"],
+        NavigationIconMapper.IconRampRight => L["RampRight"],
         NavigationIconMapper.IconExitLeft => L["ExitLeft"],
         NavigationIconMapper.IconExitRight => L["ExitRight"],
+        NavigationIconMapper.IconMergeLeft => L["MergeLeft"],
+        NavigationIconMapper.IconMergeRight => L["MergeRight"],
         NavigationIconMapper.IconStraight => L["Straight"],
+        NavigationIconMapper.IconFerry => L["Ferry"],
+        NavigationIconMapper.IconWaypoint => L["Waypoint"],
         NavigationIconMapper.IconFinish => L["Arrival"],
         NavigationIconMapper.IconRoundabout => L["Roundabout"],
         _ => L["Straight"]

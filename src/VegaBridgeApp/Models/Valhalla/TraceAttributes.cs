@@ -46,6 +46,10 @@ public class TraceEdge
     [JsonPropertyName("tunnel")]
     public bool Tunnel { get; set; }
 
+    /// <summary>false in left-hand traffic countries (UK, IE, …).</summary>
+    [JsonPropertyName("drive_on_right")]
+    public bool DriveOnRight { get; set; } = true;
+
     [JsonPropertyName("begin_shape_index")]
     public int BeginShapeIndex { get; set; }
 

@@ -1,11 +1,13 @@
 using System.Text;
+using VegaBridgeApp.Models.BLE;
+using VegaBridgeApp.Models.Navigation;
 using VegaBridgeApp.Services.BLE;
 using VegaBridgeApp.Services.BLE.Plugins;
 using Xunit;
 
 namespace VegaBridgeApp.Tests;
 
-/// <summary>How the MV Agusta plugin uses the BLE session (HAL): GATT layout and write type.</summary>
+/// <summary>How the MV Agusta plugin uses the BLE session (HAL) and which icon keys the bike gets.</summary>
 public class MvAgustaBlePluginTests
 {
     private static readonly Guid Service = Guid.Parse("00003719-0000-1000-8000-00805f9b34fb");
@@ -52,6 +54,52 @@ public class MvAgustaBlePluginTests
 
         // The phone never answers the bike's stream during navigation.
         Assert.Empty(session.Writes);
+    }
+
+    [Theory]
+    [InlineData(NavigationIconMapper.IconKeepLeft, "turn-slight-left")]
+    [InlineData(NavigationIconMapper.IconRampRight, "turn-slight-right")]
+    [InlineData(NavigationIconMapper.IconMergeLeft, "turn-slight-left")]
+    [InlineData(NavigationIconMapper.IconExitRight, "turn-slight-right")]
+    [InlineData(NavigationIconMapper.IconSharpLeft, "uturn-left")]
+    [InlineData(NavigationIconMapper.IconWaypoint, "straight")]
+    [InlineData(NavigationIconMapper.IconFerry, "straight")]
+    [InlineData(NavigationIconMapper.IconFinish, "Finish")]
+    public async Task Navi_FoldsSemanticIconsIntoTheBikeKeys(string semanticIcon, string bikeKey)
+    {
+        Assert.Equal(bikeKey, await SendNaviIconAsync(semanticIcon));
+    }
+
+    [Theory]
+    [InlineData(true, "roundabout-right-2")]  // counter-clockwise
+    [InlineData(false, "roundabout-left-2")]  // clockwise (UK, IE, …)
+    public async Task Navi_RoundaboutFollowsTheDrivingSide(bool driveOnRight, string bikeKey)
+    {
+        Assert.Equal(bikeKey, await SendNaviIconAsync(NavigationIconMapper.IconRoundabout, roundaboutExitCount: 2, driveOnRight));
+    }
+
+    /// <summary>Sends one navigation update and returns the icon field of its NAVI frame.</summary>
+    private static async Task<string> SendNaviIconAsync(string semanticIcon, int? roundaboutExitCount = null, bool driveOnRight = true)
+    {
+        FakeSession session = new();
+        await new MvAgustaBlePlugin().SendNavigationUpdateAsync(session, new NavigationUpdateInput
+        {
+            ManeuverIcon = semanticIcon,
+            RoundaboutExitCount = roundaboutExitCount,
+            DriveOnRight = driveOnRight,
+            InstructionText = "",
+            StreetName = "",
+            DistanceToTurnM = 100,
+            SpeedKmh = 50,
+            RemainingDistanceKm = 10,
+            RemainingTimeMin = 12,
+            CurrentManeuverIndex = 1,
+            TotalManeuvers = 5
+        });
+
+        string[] navi = Encoding.UTF8.GetString(session.Writes[0].Data).Trim('\r').Split('\u001E');
+        Assert.Equal("NAVI", navi[0]);
+        return navi[1];
     }
 
     private sealed class FakeSession : IBleConnectedDevice
