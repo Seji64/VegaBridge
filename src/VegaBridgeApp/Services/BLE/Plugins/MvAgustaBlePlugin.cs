@@ -16,8 +16,9 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
 {
     public string DisplayName => "MV Agusta";
     public string BrandName => "MV AGUSTA";
-    public Guid ServiceUuid => Guid.Parse("00003719-0000-1000-8000-00805f9b34fb");
-    public string ReadCharacteristicUuid => "00001234-0000-1000-8000-00805f9b34fb";
+    public Guid ServiceUuid => Service;
+    private static readonly Guid Service = Guid.Parse("00003719-0000-1000-8000-00805f9b34fb");
+    private const string ReadCharacteristicUuid = "00001234-0000-1000-8000-00805f9b34fb";
     private const string WriteCharacteristicUuid = "00002345-0000-1000-8000-00805f9b34fb";
 
     // SM1 (arrival time) cadence of the official app: every 30 s.
@@ -35,6 +36,23 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
     public bool IsCompatible(BleDeviceInfo device) =>
         device.Name.Contains("MV", StringComparison.OrdinalIgnoreCase) ||
         device.Name.Contains("BRUTALE", StringComparison.OrdinalIgnoreCase);
+
+    // ─── Session Lifecycle ───────────────────────────────────────────────
+
+    // The bike indicates everything (GUI1 stream, NEED, …) on the read
+    // characteristic. No handshake: the official app additionally sends
+    // HELLO and GUI1 00 here (spec §5.1/§5.11) – not adopted until it is
+    // validated on the bike, the display accepts NAVI frames without it.
+    public Task<bool> InitializeSessionAsync(IBleConnectedDevice device, CancellationToken cancellationToken)
+    {
+        device.Subscribe(Service, ReadCharacteristicUuid, OnDataReceived);
+        return Task.FromResult(true);
+    }
+
+    // No per-link state: the navigation state (SM1 timer, roundabout icon)
+    // is reset by SendNavigationStartAsync, which the coordinator re-sends
+    // on every new session.
+    public void OnSessionEnded() { }
 
     // Test frame: a WhatsApp-style MSG (⏎MSG⏝<appId>⏝<message>⏝<title>⏎) so the
     // user sees a readable message on the bike. "whatsapp" as appId mirrors the
@@ -174,7 +192,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
 
     // ─── Incoming Data Handling ──────────────────────────────────────────
 
-    public void OnDataReceived(byte[] data)
+    private void OnDataReceived(byte[] data)
     {
         // While riding the bike streams ~7 GUI1 frames/s, mostly the battery
         // voltage flickering between two values (live log 09-30: 9386 frames
@@ -218,7 +236,7 @@ public class MvAgustaBlePlugin : IBleDevicePlugin
         const char rs = '\u001E';
         byte[] frame = Encoding.UTF8.GetBytes($"{cr}{command}{string.Concat(fields.Select(f => $"{rs}{f}"))}{cr}");
         Log.Information("BLE-LOGGER: {Line}", $"SEND {command} frame: {BitConverter.ToString(frame)}");
-        return device.WriteAsync(WriteCharacteristicUuid, frame);
+        return device.WriteAsync(Service, WriteCharacteristicUuid, frame, withResponse: false);
     }
 
     private static bool TryParseFrame(byte[] data, out string command, out string[] fields)

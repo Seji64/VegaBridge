@@ -24,24 +24,40 @@ public interface IBleDevicePlugin
     bool IsCompatible(BleDeviceInfo device);
 
     /// <summary>
-    /// GATT service UUID of the device's protocol.
+    /// Primary GATT service UUID of the device's protocol. Used to match a
+    /// device whose name is not known yet.
     /// </summary>
     Guid ServiceUuid { get; }
 
+    // ─── Session Lifecycle ───────────────────────────────────────────────
+
     /// <summary>
-    /// GATT characteristic UUID for reading / subscribing to notifications.
+    /// Sets up a fresh link session: subscribes to the device's notifications
+    /// and runs whatever handshake the device needs before it accepts frames.
+    /// Called after EVERY link-up – the first connect and each reconnect
+    /// (Shiny auto-reconnect, watchdog) – because a reconnect restores the
+    /// link, not the session. Navigation frames are only sent once this
+    /// returned true.
     /// </summary>
-    string ReadCharacteristicUuid { get; }
+    /// <param name="device">The new session.</param>
+    /// <param name="cancellationToken">Cancelled when the link is lost meanwhile.</param>
+    /// <returns>true when the device is ready. false makes the manager drop
+    /// the link, so auto-reconnect starts over with a fresh session – any
+    /// retry pacing (e.g. a handshake timeout) is the plugin's own.</returns>
+    Task<bool> InitializeSessionAsync(IBleConnectedDevice device, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The current session ended (link lost, user disconnect, or replaced by a
+    /// newer link-up): drop per-session state such as handshake progress or
+    /// session keys. Its subscriptions no longer deliver data. May be called
+    /// from any thread.
+    /// </summary>
+    void OnSessionEnded();
 
     /// <summary>
     /// Creates and sends a simple test frame to verify BLE connectivity.
     /// </summary>
     Task SendTestAsync(IBleConnectedDevice device);
-
-    /// <summary>
-    /// Handles incoming data buffers received from the device.
-    /// </summary>
-    void OnDataReceived(byte[] data);
 
     // ─── Semantic Navigation Methods ─────────────────────────────────────
 

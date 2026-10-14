@@ -33,6 +33,33 @@ Ziel dieses Dokuments:
 
 ---
 
+## Stand der Umsetzung
+
+**Schritt 1 (Interface-Umbau) ist umgesetzt.** Damit sind alle Blocker B1–B5 und W1 erledigt, W4 teilweise:
+
+| Punkt | Umsetzung |
+|---|---|
+| B1 Init-Hook + „bereit“ | `IBleDevicePlugin.InitializeSessionAsync(device, ct)` läuft nach **jedem** Link-Up. Der neue Zustand `BleConnectionState.Initializing` gilt, bis das Plugin `true` liefert, erst dann folgt `Connected`. Der Coordinator schickt den Session-Start erst bei `Connected`, Frame-Writes gehen nur an eine bereite Session. |
+| B2 Empfangspfad | Das Plugin abonniert selbst: `IBleConnectedDevice.Subscribe(service, characteristic, onData)` pro Characteristic. Aus dem Callback kann es über dieselbe Session schreiben. `OnDataReceived` und `ReadCharacteristicUuid` sind entfallen. |
+| B3 Multi-Service/-Characteristic | `WriteAsync(service, characteristic, data, withResponse)` und `Subscribe(...)` nehmen Service und Characteristic frei entgegen. |
+| B4 Write mit Response | `withResponse: true` läuft über Shiny und wartet auf die Bestätigung. Nur `withResponse: false` nutzt den iOS-W2R-Pfad. |
+| B5 Session-Ende | `IBleDevicePlugin.OnSessionEnded()` bei Linkverlust, User-Disconnect oder Ablösung durch einen neuen Link-Up. Eine beendete Session liefert keine Daten mehr, Writes werfen, der Init-Token ist abgebrochen. |
+| W1 Geräte-ID | `IBleConnectedDevice.DeviceId` |
+| W2 Link-Reset | anders gelöst: Liefert `InitializeSessionAsync` `false`, trennt der Manager den Link (`RecycleLink`), und der nächste Link-Up startet frisch. Das Plugin braucht dafür keine eigene Methode. |
+| W4 Zustände | `Initializing` existiert, die UI zeigt in dieser Phase „Verbinde…“. Ein eigener Hinweis „am Dashboard bestätigen“ braucht den Event-Kanal (W3). |
+
+**Noch offen**, bewusst erst mit dem ersten Nutzer:
+
+- W3 Event-Rückkanal: kommt mit dem ersten Konsumenten, z. B. MV-`GUI1`-Modellerkennung oder KTM-Tasten.
+- W5 Marke pro Gerät, W6 Advertisement-Daten, W7 `SendMessageAsync`, Capabilities.
+- Die semantischen Icons aus Abschnitt 5, darunter der Wegpunkt-Hack.
+
+Das MV-Plugin verhält sich unverändert: Es abonniert im Init die Read-Characteristic, macht keinen Handshake und
+schreibt weiter ohne Response. Shiny-Abos werden wie bisher erst beim nächsten Link-Up ersetzt, nicht schon beim
+Linkverlust. Contract-Tests liegen in `src/VegaBridgeApp.Tests/MvAgustaBlePluginTests.cs`.
+
+---
+
 ## 1. Steckbrief: Was das KTM-BCCU-Protokoll braucht
 
 | Thema | KTM Gen-3 (BCCU) | MV Agusta (heute in VegaBridge) |
@@ -164,7 +191,9 @@ Tunnel-Index, das Attribut ließe sich also mitnehmen.
 
 ## 6. Interface-Skizze v2
 
-Nur zur Diskussion, nichts davon ist implementiert. Ziel: MV läuft unverändert weiter, KTM wird möglich.
+Ursprüngliche Skizze. Wie und wie weit sie umgesetzt ist, steht unter „Stand der Umsetzung“. Abweichungen:
+`Subscribe` nimmt einen Callback statt ein `IObservable` zurückzugeben (die Session räumt die Abos selbst ab),
+`ReadAsync` und `ResetLinkAsync` sind entfallen, `Match`, `Capabilities`, `Events` und `SendMessageAsync` sind noch offen.
 
 ```csharp
 public interface IBleConnectedDevice
@@ -303,8 +332,9 @@ Shiny nimmt davon einiges ab, aber nicht alles.
 
 ## 9. Empfohlene Reihenfolge
 
-1. **Interface-Refactoring ohne neues Plugin**: Init-Hook mit `Ready`-Zustand, Disconnect-Hook, Multi-Characteristic-HAL
-   mit `withResponse`, Event-Rückkanal. MV-Plugin darauf umziehen, Verhalten unverändert, Tests grün.
+1. ✅ **Interface-Refactoring ohne neues Plugin**: Init-Hook mit Bereit-Zustand, Session-Ende-Hook,
+   Multi-Characteristic-HAL mit `withResponse`. MV-Plugin umgezogen, Verhalten unverändert, Tests grün. Der
+   Event-Rückkanal folgt mit dem ersten Konsumenten.
 2. **Semantische Icons erweitern** (`waypoint`, `keep-*`, `ramp-*`, `ferry`, `depart`) und `DrivingSide`. Den
    Wegpunkt-Hack ins MV-Plugin verschieben.
 3. **Schnelle Gewinne aus Abschnitt 7**: Symbol-Test, GATT- und Modell-Log, Ellipse, Log-PII.

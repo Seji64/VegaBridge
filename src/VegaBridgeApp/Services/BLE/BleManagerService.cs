@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using Serilog;
@@ -17,8 +18,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     private IBleDevicePlugin? _activePlugin;
     private IDisposable? _scanSubscription;
     private IDisposable? _connectionSubscription;
-    private IDisposable? _notificationSubscription;
     private CancellationTokenSource? _scanTimeoutCts;
+
+    // Plugin session of the current link (link-up → link loss). Swapped
+    // atomically: link loss is also reported off the main thread (adapter
+    // state delegate).
+    private BleSession? _session;
 
     // Maintain our own dictionary of discovered peripherals for reliable access
     private readonly ConcurrentDictionary<string, IPeripheral> _discoveredPeripherals = new();
@@ -241,7 +246,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 UpdateError("Device connected, but no compatible driver found.", isCritical: false);
             }
 
-            _state.OnNext(BleConnectionState.Connected);
+            // Link up – Connected follows once the plugin session is ready
+            // (StartSessionAsync, run by the WhenConnected hook below).
+            _state.OnNext(BleConnectionState.Initializing);
             Log.Information("Successfully connected to {Uuid} using plugin {Plugin}", deviceUuid, _activePlugin?.DisplayName ?? "None");
             
             // Remember the bike for auto-connect – only a device a plugin can
@@ -251,7 +258,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 Preferences.Set(LastDeviceUuidKey, peripheral.Uuid);
 
             // WhenConnected() replays the current status, so this runs
-            // OnLinkRestored (notifications etc.) right away for this link.
+            // OnLinkRestored (plugin session) right away for this link.
             SetupWhenConnected(peripheral);
 
             // No keepalive re-arm needed on (re)connect: the navigation
@@ -292,8 +299,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             _userInitiatedDisconnect = true;
             _connectionSubscription?.Dispose();
             _connectionSubscription = null;
-            _notificationSubscription?.Dispose();
-            _notificationSubscription = null;
+            DisposeSession();
 
             await _activePeripheral.DisconnectAsync();
         }
@@ -367,6 +373,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         if (state != AccessState.Available)
         {
+            // The link is gone with the adapter – and so is the session.
+            EndSession();
+
             // Bluetooth is off: Shiny runs the full disconnect teardown on
             // every connected peripheral (WhenStatusChanged emits Disconnected
             // in the foreground). If we still hold a live reference, mark the
@@ -395,17 +404,16 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     public async Task SendTestFrameAsync()
     {
-        if (_activePeripheral == null || _activePlugin == null)
+        if (_session is not { IsReady: true } session)
         {
-            UpdateError("No connected device or compatible plugin available.");
+            UpdateError("No connected device with a ready plugin session available.");
             return;
         }
 
         try
         {
-            BleConnectedDeviceWrapper wrapper = new(this, _activePeripheral, _activePlugin);
             Log.Information("BLE-LOGGER: {Line}", "SEND TEST FRAME (via SendTestAsync)");
-            await _activePlugin.SendTestAsync(wrapper);
+            await session.Plugin.SendTestAsync(session);
         }
         catch (Exception ex)
         {
@@ -527,15 +535,25 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     /// <summary>
     /// Watchdog: the W2R buffer stayed full although the link is up. A fresh
-    /// connection resets CoreBluetooth's per-link state. CancelConnection()
-    /// disarms Shiny's auto-reconnect and Connect() re-arms it (Shiny docs) –
-    /// a one-shot, not a competing WhenDisconnected→Connect loop.
+    /// connection resets CoreBluetooth's per-link state.
     /// </summary>
     private void ReconnectStalledLink(IPeripheral peripheral, TimeSpan blocked)
     {
         _w2rWatchdogReconnects++;
         Log.Warning("BLE-LOGGER: {Line}",
             $"W2R watchdog: buffer full for {blocked.TotalSeconds:F0} s (rx +{_rxFrames - _w2rRxAtBlock} meanwhile) – reconnecting");
+        RecycleLink(peripheral);
+    }
+#endif
+
+    /// <summary>
+    /// Drops the link and connects again (W2R watchdog, failed plugin
+    /// session). CancelConnection() disarms Shiny's auto-reconnect and
+    /// Connect() re-arms it (Shiny docs) – a one-shot, not a competing
+    /// WhenDisconnected→Connect loop. The link-up runs a fresh session.
+    /// </summary>
+    private void RecycleLink(IPeripheral peripheral)
+    {
         peripheral.WhenDisconnected().Take(1).Subscribe(_ =>
         {
             if (!_userInitiatedDisconnect && ReferenceEquals(_activePeripheral, peripheral))
@@ -543,12 +561,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         });
         peripheral.CancelConnection();
     }
-#endif
 
 
     /// <summary>
     /// Guard + link-health check + write wrapper shared by all frame writes:
-    /// no-op when no active device/plugin. The classic "stuck navigation"
+    /// no-op without a ready plugin session (no device/plugin, or the plugin
+    /// is still setting up the session). The classic "stuck navigation"
     /// failure mode: iOS drops the link while the phone is in the pocket
     /// (screen off, app suspended) but no disconnect event arrives – writing
     /// into a dead link blocks for the write timeout (~10 s+) and every
@@ -558,11 +576,11 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// auto-reconnect owns link recovery.
     /// Returns whether the frame was actually delivered.
     /// </summary>
-    private async Task<bool> WithLiveLinkAsync(string action, Func<IBleConnectedDevice, Task> send, bool critical = false)
+    private async Task<bool> WithLiveLinkAsync(string action, Func<IBleDevicePlugin, IBleConnectedDevice, Task> send, bool critical = false)
     {
-        if (_activePeripheral is not { } peripheral || _activePlugin is not { } plugin)
+        if (_session is not { IsReady: true } session)
         {
-            Log.Debug("{Action} skipped: no active device/plugin", action);
+            Log.Debug("{Action} skipped: no ready device session", action);
             return false;
         }
 
@@ -578,7 +596,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 return false;
             }
 
-            await send(new BleConnectedDeviceWrapper(this, peripheral, plugin));
+            await send(session.Plugin, session);
             return true;
         }
         catch (Exception ex)
@@ -601,7 +619,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// </summary>
     public async Task ExecuteNavigationStartAsync(NavigationStartInput input)
     {
-        await WithLiveLinkAsync("SendNavigationStartAsync", d => _activePlugin!.SendNavigationStartAsync(d, input), critical: true);
+        await WithLiveLinkAsync("SendNavigationStartAsync", (p, d) => p.SendNavigationStartAsync(d, input), critical: true);
     }
 
     /// <summary>
@@ -610,21 +628,21 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// the link is unhealthy, or the frame was dropped/failed.
     /// </summary>
     public Task<bool> ExecuteNavigationUpdateAsync(NavigationUpdateInput input)
-        => WithLiveLinkAsync("SendNavigationUpdateAsync", d => _activePlugin!.SendNavigationUpdateAsync(d, input));
+        => WithLiveLinkAsync("SendNavigationUpdateAsync", (p, d) => p.SendNavigationUpdateAsync(d, input));
 
     /// <summary>
     /// Sends an off-route alert (RENAVI) through the active plugin.
     /// </summary>
     public async Task ExecuteNavigationOffRouteAlertAsync()
     {
-        await WithLiveLinkAsync("SendOffRouteAlertAsync", d => _activePlugin!.SendOffRouteAlertAsync(d));
+        await WithLiveLinkAsync("SendOffRouteAlertAsync", (p, d) => p.SendOffRouteAlertAsync(d));
     }
 
     /// <summary>
     /// Handles destination reached via the active plugin.
     /// </summary>
     public Task<bool> ExecuteNavigationFinishAsync()
-        => WithLiveLinkAsync("SendNavigationFinishAsync", d => _activePlugin!.SendNavigationFinishAsync(d), critical: true);
+        => WithLiveLinkAsync("SendNavigationFinishAsync", (p, d) => p.SendNavigationFinishAsync(d), critical: true);
 
     /// <summary>
     /// Sends the manufacturer's keepalive frame (MV Agusta: PING) through
@@ -634,14 +652,14 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     /// </summary>
     public async Task ExecuteKeepAliveAsync()
     {
-        await WithLiveLinkAsync("SendKeepAliveAsync", d => _activePlugin!.SendKeepAliveAsync(d));
+        await WithLiveLinkAsync("SendKeepAliveAsync", (p, d) => p.SendKeepAliveAsync(d));
     }
 
     /// <summary>
     /// Handles user-cancelled navigation via the active plugin.
     /// </summary>
     public Task<bool> ExecuteNavigationStopAsync()
-        => WithLiveLinkAsync("SendNavigationStopAsync", d => _activePlugin!.SendNavigationStopAsync(d), critical: true);
+        => WithLiveLinkAsync("SendNavigationStopAsync", (p, d) => p.SendNavigationStopAsync(d), critical: true);
 
     private void RefreshConnectedPeripherals()
     {
@@ -689,10 +707,12 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
             {
                 if (!ReferenceEquals(_activePeripheral, peripheral)) return;
                 if (status != ConnectionState.Disconnected) return;
-                // Log-only (timeline marker) – Shiny's AutoConnect owns the
-                // actual reconnection, we never act on this event.
+                // Timeline marker + session teardown only – Shiny's
+                // AutoConnect owns the actual reconnection, we never
+                // reconnect on this event.
                 Log.Information("BLE-LOGGER: {Line}",
                     $"BLE peripheral {peripheral.Uuid} status -> Disconnected{(_userInitiatedDisconnect ? " (user-initiated)" : " – Shiny auto-reconnect in progress")}");
+                EndSession();
                 _state.OnNext(BleConnectionState.Idle);
                 if (!_userInitiatedDisconnect)
                 {
@@ -710,7 +730,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
                 Log.Warning(ex, "Connection failed for {Uuid}:", peripheral.Uuid);
             });
 
-        _connectionSubscription = new System.Reactive.Disposables.CompositeDisposable(connectedSub, statusSub, failSub);
+        _connectionSubscription = new CompositeDisposable(connectedSub, statusSub, failSub);
     }
 
     /// <summary>
@@ -728,18 +748,87 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
         Log.Information("BLE link (re)established for {Uuid} – re-running per-connection setup", peripheral.Uuid);
         _w2rBlockedSince = null; // fresh link, fresh CoreBluetooth W2R state
-        _state.OnNext(BleConnectionState.Connected);
         _errorMessage.OnNext(string.Empty);
 
         // Plugin may still be null after a background drop (or the name was
         // only readable now) – re-select like in ConnectAsync().
         _activePlugin ??= SelectActivePlugin(peripheral);
 
-        SetupNotifications(peripheral);
+        _ = StartSessionAsync(peripheral); // fire-and-forget: errors are logged inside
         // No keepalive re-arm needed: the navigation coordinator's 15 s PING
-        // tick resolves the current connection itself (ExecuteKeepAliveAsync).
+        // tick resolves the current session itself (ExecuteKeepAliveAsync).
         UpdateDeviceList();
     }
+
+    /// <summary>
+    /// Runs a fresh plugin session on the (re)established link: replaces the
+    /// previous one, lets the plugin subscribe and run its handshake, and only
+    /// then reports Connected – the state the navigation coordinator waits for
+    /// before it re-sends the session start. A session the plugin rejects
+    /// drops the link, so the next link-up starts over with a fresh handshake.
+    /// </summary>
+    private async Task StartSessionAsync(IPeripheral peripheral)
+    {
+        IBleDevicePlugin? plugin = _activePlugin;
+        if (plugin == null)
+        {
+            // Link without a driver: nothing to set up, frame writes stay no-ops.
+            DisposeSession();
+            _state.OnNext(BleConnectionState.Connected);
+            return;
+        }
+
+        BleSession session = new(this, peripheral, plugin);
+        DisposeSession(next: session);
+        _state.OnNext(BleConnectionState.Initializing);
+        Log.Information("Initializing {Plugin} session for {Uuid}", plugin.DisplayName, peripheral.Uuid);
+
+        bool ready;
+        try
+        {
+            ready = await plugin.InitializeSessionAsync(session, session.Lifetime);
+        }
+        catch (OperationCanceledException) when (session.Lifetime.IsCancellationRequested)
+        {
+            return; // link lost meanwhile – the next link-up starts over
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "{Plugin} session setup failed for {Uuid}", plugin.DisplayName, peripheral.Uuid);
+            ready = false;
+        }
+
+        // Ended meanwhile (link lost, user disconnect, newer link-up): stale result.
+        if (!ReferenceEquals(_session, session) || session.Lifetime.IsCancellationRequested)
+            return;
+
+        if (ready)
+        {
+            session.MarkReady();
+            Log.Information("{Plugin} session ready for {Uuid}", plugin.DisplayName, peripheral.Uuid);
+            _state.OnNext(BleConnectionState.Connected);
+            return;
+        }
+
+        Log.Warning("{Plugin} session for {Uuid} not ready – dropping the link for a fresh one", plugin.DisplayName, peripheral.Uuid);
+        UpdateError("The bike did not accept the connection – reconnecting.", isCritical: false);
+        RecycleLink(peripheral);
+    }
+
+    /// <summary>
+    /// Link lost: ends the current plugin session (setup cancelled, writes
+    /// fail, plugin notified). Its subscriptions stay until the next session
+    /// replaces it (<see cref="DisposeSession"/>). Safe from any thread.
+    /// </summary>
+    private void EndSession() => Volatile.Read(ref _session)?.End();
+
+    /// <summary>
+    /// Ends the current plugin session, if any, and disposes its
+    /// subscriptions. Idempotent and safe from any thread.
+    /// </summary>
+    /// <param name="next">Session that atomically takes its place, if any.</param>
+    private void DisposeSession(BleSession? next = null) =>
+        Interlocked.Exchange(ref _session, next)?.Dispose();
 
     /// <summary>
     /// Synchronous name-based plugin re-match for the WhenConnected hook.
@@ -755,32 +844,9 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
         if (match != null)
             return match;
 
-        Log.Warning("BLE: no name-based plugin match on link restore for {Uuid} ({Name}) – notifications stay unsubscribed until manual reconnect",
+        Log.Warning("BLE: no name-based plugin match on link restore for {Uuid} ({Name}) – no plugin session until manual reconnect",
             peripheral.Uuid, peripheral.Name ?? "Unknown");
         return null;
-    }
-
-    private void SetupNotifications(IPeripheral peripheral)
-    {
-        _notificationSubscription?.Dispose();
-
-        if (_activePlugin == null) return;
-
-        Log.Information("Setting up notifications for {Uuid} using plugin {Plugin}", peripheral.Uuid, _activePlugin.DisplayName);
-
-        // Re-run on every link-up (OnLinkRestored). Shiny re-hooks a live
-        // subscription on reconnect by itself, but one that ended with an
-        // error (e.g. link lost during discovery) would otherwise stay dead.
-        _notificationSubscription = peripheral.NotifyCharacteristic(
-                _activePlugin.ServiceUuid.ToString(),
-                _activePlugin.ReadCharacteristicUuid)
-            .Subscribe(
-                result =>
-                {
-                    Interlocked.Increment(ref _rxFrames); // link-alive evidence for the W2R stall logs
-                    if (result.Data != null) _activePlugin.OnDataReceived(result.Data);
-                },
-                ex => Log.Warning(ex, "BLE notifications for {Uuid} ended – re-subscribed on the next link-up", peripheral.Uuid));
     }
 
     private void UpdateDeviceFromScanResult(IPeripheral result)
@@ -837,7 +903,7 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
     {
         StopScanning();
         _connectionSubscription?.Dispose();
-        _notificationSubscription?.Dispose();
+        DisposeSession();
         _state.Dispose();
         _devices.Dispose();
         _errorMessage.Dispose();
@@ -915,18 +981,111 @@ public class BleManagerService(IBleManager bleManager, IEnumerable<IBleDevicePlu
 
     // ── HAL Implementation ────────────────────────────────────────────────
 
-    private class BleConnectedDeviceWrapper(BleManagerService owner, IPeripheral peripheral, IBleDevicePlugin plugin) : IBleConnectedDevice
+    /// <summary>
+    /// One plugin session on one link (link-up → link loss). Ending it cancels
+    /// a running setup, stops delivering data and makes further writes throw
+    /// – a plugin task still running against an old link can never write
+    /// into the next one. The Shiny subscriptions themselves are disposed
+    /// only when the next session replaces this one (or on a user
+    /// disconnect), the subscription lifetime that has proven itself on the
+    /// bike.
+    /// </summary>
+    private sealed class BleSession(BleManagerService owner, IPeripheral peripheral, IBleDevicePlugin plugin) : IBleConnectedDevice, IDisposable
     {
+        // Not disposed: it has no timer, and Lifetime must stay readable
+        // after the session ended.
+        private readonly CancellationTokenSource _lifetime = new();
+        private readonly CompositeDisposable _subscriptions = new();
+        private volatile bool _ready;
+        private int _ended;
+
+        public IBleDevicePlugin Plugin => plugin;
+
+        /// <summary>Cancelled when the session ends.</summary>
+        public CancellationToken Lifetime => _lifetime.Token;
+
+        /// <summary>The plugin finished its setup and the session has not ended.</summary>
+        public bool IsReady => _ready && !_lifetime.IsCancellationRequested;
+
+        public void MarkReady() => _ready = true;
+
+        public string DeviceId => peripheral.Uuid;
+
         // No exception wrapping: write exceptions propagate as-is; callers
         // catch and log.
-        public Task WriteAsync(string characteristicUuid, byte[] data)
+        public Task WriteAsync(Guid serviceUuid, string characteristicUuid, byte[] data, bool withResponse)
         {
-            string serviceUuid = plugin.ServiceUuid.ToString();
+            if (_lifetime.IsCancellationRequested)
+                throw new InvalidOperationException("BLE session ended – frame dropped");
+
+            string service = serviceUuid.ToString();
 #if IOS || MACCATALYST
-            if (peripheral is Peripheral apple)
-                return owner.WriteNativeAsync(apple, serviceUuid, characteristicUuid, data);
+            // Write commands take our own W2R flow control (WriteNativeAsync);
+            // acknowledged writes go through Shiny, which awaits the response.
+            if (!withResponse && peripheral is Peripheral apple)
+                return owner.WriteNativeAsync(apple, service, characteristicUuid, data);
 #endif
-            return peripheral.WriteCharacteristicAsync(serviceUuid, characteristicUuid, data, withResponse: false);
+            return peripheral.WriteCharacteristicAsync(service, characteristicUuid, data, withResponse);
+        }
+
+        public void Subscribe(Guid serviceUuid, string characteristicUuid, Action<byte[]> onData)
+        {
+            // Added to an already disposed composite (session replaced
+            // meanwhile), the subscription is disposed right away.
+            _subscriptions.Add(peripheral.NotifyCharacteristic(serviceUuid.ToString(), characteristicUuid)
+                .Subscribe(
+                    result =>
+                    {
+                        Interlocked.Increment(ref owner._rxFrames); // link-alive evidence for the W2R stall logs
+                        if (result.Data == null || _lifetime.IsCancellationRequested) return;
+                        try
+                        {
+                            onData(result.Data);
+                        }
+                        catch (Exception ex)
+                        {
+                            // A plugin bug must not end the subscription.
+                            Log.Warning(ex, "{Plugin} failed to handle data from {Characteristic}", plugin.DisplayName, characteristicUuid);
+                        }
+                    },
+                    ex => Log.Warning(ex, "BLE notifications on {Characteristic} of {Uuid} ended – re-subscribed on the next link-up",
+                        characteristicUuid, peripheral.Uuid)));
+        }
+
+        /// <summary>
+        /// Ends the session (link lost): cancels the setup, fails further
+        /// writes, stops data delivery and tells the plugin – once.
+        /// </summary>
+        public void End()
+        {
+            if (Interlocked.Exchange(ref _ended, 1) == 1)
+                return;
+
+            try
+            {
+                // Runs the plugin's token callbacks; the token is cancelled
+                // even when one of them throws.
+                _lifetime.Cancel();
+            }
+            catch (AggregateException ex)
+            {
+                Log.Warning(ex, "{Plugin}: session cancellation callback failed", plugin.DisplayName);
+            }
+
+            try
+            {
+                plugin.OnSessionEnded();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "{Plugin}: OnSessionEnded failed", plugin.DisplayName);
+            }
+        }
+
+        public void Dispose()
+        {
+            End();
+            _subscriptions.Dispose();
         }
     }
 }

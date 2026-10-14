@@ -294,12 +294,17 @@ All frames follow: `0x0D <command> 0x1E <field1> 0x1E <field2> ... 0x0D`
 ### Connection Lifecycle
 
 ```
-Scan → Connect → Notifications enabled → NAVI/SM/PING loop
-     ↓ (write failure)
-  InvalidateConnectionAndReconnect (15s cooldown)
-     ↓
-  Reconnect → Resume PING → Resend current state
+Scan / auto-connect → link up (state Initializing)
+  → plugin.InitializeSessionAsync (MV: subscribe 0x1234, no handshake)
+  → session ready (state Connected) → DEST + REM, then NAVI/SM per tick, PING fills pauses
+     ↓ (link lost)
+  Session ends: writes fail, plugin.OnSessionEnded → Shiny auto-reconnect
+     ↓ (link up again)
+  Fresh session → DEST + REM re-sent → full state with the next tick
 ```
+
+A session the plugin rejects (`InitializeSessionAsync` returns false) drops
+the link, so the next link-up starts over with a fresh handshake.
 
 ### Write Failures
 
@@ -308,7 +313,9 @@ iOS can silently drop BLE links while the app is in background. Signs:
 - `GATT is not connected` (link dead)
 - `Arg_TimeoutException` (write timeout)
 
-Recovery: `InvalidateConnectionAndReconnect` with 15s cooldown to prevent reconnect storms.
+Recovery: write commands use our own W2R flow control (drop, force a write
+every 3 s, reconnect after 10 s of full buffer); link loss is recovered by
+Shiny's auto-reconnect, never by a home-grown reconnect loop.
 
 ---
 

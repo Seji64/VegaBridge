@@ -7,10 +7,14 @@
         <IsPackable>false</IsPackable>
     </PropertyGroup>
 
-    <!-- The app project only builds for iOS/Android, so the navigation core is
-         compiled in directly (it has no MAUI dependencies). -->
+    <!-- The app project only builds for iOS/Android, so the navigation core and
+         the BLE plugin contract are compiled in directly (no MAUI/Shiny
+         dependencies). -->
     <ItemGroup>
         <Compile Include="../VegaBridgeApp/Services/Navigation/*.cs" Link="App/%(Filename)%(Extension)" />
+        <Compile Include="../VegaBridgeApp/Services/BLE/IBleDevicePlugin.cs" Link="App/%(Filename)%(Extension)" />
+        <Compile Include="../VegaBridgeApp/Services/BLE/IBleConnectedDevice.cs" Link="App/%(Filename)%(Extension)" />
+        <Compile Include="../VegaBridgeApp/Services/BLE/Plugins/*.cs" Link="App/%(Filename)%(Extension)" />
         <Compile Include="../VegaBridgeApp/Services/Location/GpsService.cs" Link="App/%(Filename)%(Extension)" />
         <Compile Include="../VegaBridgeApp/Services/Location/GpsDelegate.cs" Link="App/%(Filename)%(Extension)" />
         <Compile Include="../VegaBridgeApp/Services/Valhalla/*.cs" Link="App/%(Filename)%(Extension)" />

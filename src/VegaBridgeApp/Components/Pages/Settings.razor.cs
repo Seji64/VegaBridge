@@ -76,8 +76,14 @@ public partial class Settings : ComponentBase, IAsyncDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
+    // The link of a connected device can be up while the plugin still sets
+    // up its session (handshake) – shown as "connecting" until it is ready.
+    private bool IsInitializing(BleDeviceInfo device) =>
+        device.IsConnected && ConnectionState == BleConnectionState.Initializing;
+
     private string? GetDeviceStatusText(BleDeviceInfo device)
     {
+        if (IsInitializing(device)) return L["Connecting"];
         if (device.IsConnected) return L["Connected"];
         if (SelectedDevice?.Uuid == device.Uuid)
         {
@@ -93,6 +99,7 @@ public partial class Settings : ComponentBase, IAsyncDisposable
 
     private MudBlazor.Color GetDeviceStatusColor(BleDeviceInfo device)
     {
+        if (IsInitializing(device)) return MudBlazor.Color.Warning;
         if (device.IsConnected) return MudBlazor.Color.Success;
         if (SelectedDevice?.Uuid == device.Uuid)
         {
