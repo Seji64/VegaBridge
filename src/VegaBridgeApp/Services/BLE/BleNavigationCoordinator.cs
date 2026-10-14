@@ -123,7 +123,8 @@ public class BleNavigationCoordinator : INavigationSink, IDisposable
         _navigation.AddSink(this);
 
         // A fresh link (Shiny auto-reconnect, W2R watchdog, late connect)
-        // gets the session start re-sent before the next full-state tick.
+        // gets the session start re-sent before the next full-state tick –
+        // once the plugin session is ready (Connected follows Initializing).
         _linkUpSubscription = _bleManager.State
             .DistinctUntilChanged()
             .Where(s => s == BleConnectionState.Connected)

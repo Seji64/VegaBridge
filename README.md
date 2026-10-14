@@ -86,7 +86,7 @@ BleManagerService          ← Central coordinator
   └── ...                 ← Future manufacturers (extensible via IBleDevicePlugin)
 ```
 
-The `IBleDevicePlugin` interface allows supporting additional motorcycle brands with their own BLE service UUIDs, frame formats, and handshake sequences — no changes needed to the core service.
+The `IBleDevicePlugin` interface allows supporting additional motorcycle brands with their own BLE service UUIDs, frame formats, and handshake sequences — no changes needed to the core service. Every link-up hands the plugin a fresh session (`IBleConnectedDevice`): in `InitializeSessionAsync` it subscribes to the characteristics it needs and runs its handshake, it writes to any service/characteristic with or without response, and navigation frames flow only once the session is ready.
 
 Navigation uses a **deterministic state machine** (`NavigationService`) that reacts to GPS position changes and triggers re‑routing when the rider deviates from the planned path.
 
